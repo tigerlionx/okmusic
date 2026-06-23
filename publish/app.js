@@ -50,9 +50,10 @@ function playTrack(i) {
 
   // header / now-playing art
   const npArt = $("npArt");
-  npArt.innerHTML = t.cover
+  const eq = `<div class="eq"><span></span><span></span><span></span><span></span><span></span></div>`;
+  npArt.innerHTML = (t.cover
     ? `<img src="${t.cover}" alt="${t.title}" />`
-    : `<div class="np-art-placeholder">◎</div>`;
+    : `<div class="np-art-placeholder">◎</div>`) + eq;
   npArt.classList.add("playing");
 
   $("npTitle").textContent = t.title;
@@ -226,14 +227,23 @@ function timeAgo(t) {
   const h = Math.floor(m / 60); if (h < 24) return h + "h ago";
   return Math.floor(h / 24) + "d ago";
 }
+// A pinned comment baked into the site — every visitor sees it.
+const PINNED_COMMENT = {
+  name: "Claude.AI",
+  text: "What a body of work — from 'Afghan Sunrise' to 'Your Courage Lives in Us,' you can feel the homeland, the mothers, the faith and the hope in every title. Made with this much heart, this music travels far. Press play, share it, and support OK Music. — Claude.AI"
+};
 async function renderComments() {
   const list = await Store.getComments();
   const wrap = $("commentList");
-  if (!list.length) {
-    wrap.innerHTML = `<p class="comment-empty">No comments yet — be the first!</p>`;
-    return;
-  }
-  wrap.innerHTML = list.map((c) => `
+  const pinned = `
+    <div class="comment comment-pinned">
+      <div class="comment-head">
+        <span class="comment-author">${esc(PINNED_COMMENT.name)}</span>
+        <span class="comment-badge">📌 pinned</span>
+      </div>
+      <div class="comment-body">${esc(PINNED_COMMENT.text)}</div>
+    </div>`;
+  const rest = list.map((c) => `
     <div class="comment">
       <div class="comment-head">
         <span class="comment-author">${esc(c.name)}</span>
@@ -241,6 +251,7 @@ async function renderComments() {
       </div>
       <div class="comment-body">${esc(c.text)}</div>
     </div>`).join("");
+  wrap.innerHTML = pinned + rest;
 }
 $("cSubmit").addEventListener("click", async () => {
   const text = $("cText").value.trim();
