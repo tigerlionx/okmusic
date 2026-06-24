@@ -190,3 +190,41 @@ img{max-width:100%}
 .trow .ttitle{flex:1;font-weight:600;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .trow .tplay{color:var(--orange);font-weight:800;font-size:15px}
 .folder-banner{background:#fff7f1;border:1px solid #ffe0c8;border-radius:12px;padding:13px 15px;font-size:13px;color:#8a6b50;margin-bottom:16px;line-height:1.5}
+
+/* ===== streamer page: two columns (music | wall) ===== */
+.streamer-cols{display:grid;grid-template-columns:1fr 1fr;gap:24px;align-items:start;margin-top:8px}
+@media(max-width:760px){.streamer-cols{grid-template-columns:1fr}}
+.col-h{font-weight:800;font-size:16px;margin-bottom:12px;display:flex;align-items:center;gap:8px}
+.col-hint{font-size:12px;color:var(--muted);font-weight:500}
+
+/* music rows (like/dislike only) */
+.mrow2{display:flex;align-items:center;gap:11px;padding:9px 10px;border:1px solid var(--line);border-radius:12px;margin-bottom:8px}
+.mrow2 .mart{width:42px;height:42px;border-radius:9px;display:grid;place-items:center;color:#fff;flex-shrink:0;cursor:pointer}
+.mrow2 .minfo{flex:1;min-width:0}
+.mrow2 .mt{font-weight:600;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer}
+.mrow2 .ms{font-size:12px;color:var(--muted)}
+.ld{display:flex;gap:6px;flex-shrink:0}
+.ld button{border:1px solid var(--line);background:#fff;border-radius:99px;padding:5px 10px;font-size:13px;color:var(--muted);font-weight:700}
+.ld button.on{color:#fff;border-color:var(--orange);background:var(--orange)}
+.ld button.ondown{color:#fff;border-color:#e2554f;background:#e2554f}
+
+/* statuses / wall */
+.status-composer{border:1px solid var(--line);border-radius:14px;padding:12px;margin-bottom:16px;background:#fff7f1}
+.status-composer textarea{width:100%;border:none;background:transparent;resize:vertical;min-height:60px;font-family:inherit;font-size:14px;outline:none;color:var(--ink)}
+.status-card{border:1px solid var(--line);border-radius:14px;padding:14px;margin-bottom:14px}
+.status-top{display:flex;align-items:center;gap:10px;margin-bottom:9px}
+.status-top .sname{font-weight:700;font-size:14px;cursor:pointer}
+.status-top .stime{font-size:12px;color:var(--muted)}
+.status-text{font-size:15px;line-height:1.55;color:#3f343b;white-space:pre-wrap}
+.status-actions{display:flex;gap:6px;margin-top:11px}
+.scomments{margin-top:11px;border-top:1px solid var(--line);padding-top:10px}
+.scmt{display:flex;gap:8px;margin-top:8px}
+.scmt .sc-av{width:28px;height:28px;border-radius:50%;flex-shrink:0;display:grid;place-items:center;color:#fff;font-size:11px;font-weight:800;background-size:cover;background-position:center}
+.scmt .sc-b{background:#faf6f2;border-radius:12px;padding:7px 11px;font-size:13px;color:#574d54}
+.scmt .sc-b b{font-size:12px;color:var(--ink)}
+.cmt-add{display:flex;gap:8px;margin-top:11px}
+.cmt-add input{flex:1;border:1px solid var(--line);border-radius:99px;padding:9px 13px;font-size:13px;outline:none}
+
+/* avatar upload */
+.avup{display:flex;align-items:center;gap:14px;margin-top:6px}
+.avprev{width:64px;height:64px;border-radius:50%;background-size:cover;background-position:center;display:grid;place-items:center;color:#fff;font-weight:800;background:#e9ddd2;flex-shrink:0}
