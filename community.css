@@ -166,3 +166,27 @@ img{max-width:100%}
 .toast{position:fixed;bottom:90px;left:50%;transform:translateX(-50%);background:var(--ink);color:#fff;padding:11px 18px;border-radius:99px;z-index:80;font-size:14px;box-shadow:var(--shadow)}
 .toast[hidden]{display:none}
 .empty{text-align:center;color:var(--muted);padding:46px 20px}
+
+/* ===== Claude-style auth ===== */
+.authwrap{min-height:100vh;display:grid;place-items:center;background:linear-gradient(135deg,var(--orange-1),var(--orange-2));padding:24px}
+.authbox{width:100%;max-width:380px;text-align:center}
+.authbox .logo{font-size:42px;font-weight:900;color:var(--orange-deep);letter-spacing:-1px}
+.authbox h1{font-size:21px;margin:12px 0 22px;font-weight:800;color:#4a3526}
+.authcard{background:#fff;border-radius:18px;box-shadow:var(--shadow);padding:24px;text-align:left}
+.authcard .fb-field{margin-bottom:0;margin-top:4px}
+.authfoot{margin-top:18px;font-size:13px;color:var(--muted);text-align:center}
+
+/* ===== playlists (from folders) ===== */
+.playlist{margin-bottom:24px;border:1px solid var(--line);border-radius:16px;padding:14px 16px}
+.playlist-head{display:flex;align-items:center;gap:12px;margin-bottom:10px}
+.pl-ic{width:42px;height:42px;border-radius:11px;background:linear-gradient(135deg,var(--orange-2),var(--orange-3));display:grid;place-items:center;font-size:20px;flex-shrink:0}
+.pl-name{font-weight:800;font-size:17px}
+.pl-sub{font-size:12px;color:var(--muted)}
+.pl-actions{margin-left:auto;display:flex;gap:6px}
+.tracklist{display:flex;flex-direction:column;gap:4px}
+.trow{display:flex;align-items:center;gap:12px;padding:9px 10px;border-radius:10px;cursor:pointer}
+.trow:hover{background:#faf6f2}
+.trow .tn{width:36px;height:36px;border-radius:8px;display:grid;place-items:center;color:#fff;flex-shrink:0;background-size:cover;background-position:center;font-size:12px;background-color:#e9ddd2}
+.trow .ttitle{flex:1;font-weight:600;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.trow .tplay{color:var(--orange);font-weight:800;font-size:15px}
+.folder-banner{background:#fff7f1;border:1px solid #ffe0c8;border-radius:12px;padding:13px 15px;font-size:13px;color:#8a6b50;margin-bottom:16px;line-height:1.5}
