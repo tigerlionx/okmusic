@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>OK Music — Listen & Shop</title>
+  <link rel="stylesheet" href="styles.css?v=7" />
+</head>
+<body>
+  <!-- Animated background -->
+  <div class="bg-orbs">
+    <span class="orb orb-1"></span>
+    <span class="orb orb-2"></span>
+    <span class="orb orb-3"></span>
+  </div>
+
+  <header class="site-header">
+    <div class="brand">
+      <span class="brand-logo">◎</span>
+      <span class="brand-name">OK&nbsp;Music</span>
+    </div>
+    <p class="brand-tagline">Press play. Wear the vibe.</p>
+    <div class="visit-badge" title="Total visits">👀 <span id="visitCount">—</span> visits</div>
+  </header>
+
+  <main class="layout">
+    <!-- ===================== MUSIC SIDE ===================== -->
+    <section class="music-panel" aria-label="Music player">
+      <!-- Now playing / magnified art -->
+      <div class="now-playing" id="nowPlaying">
+        <div class="np-art" id="npArt">
+          <div class="np-art-placeholder">◎</div>
+        </div>
+        <div class="np-meta">
+          <h2 class="np-title" id="npTitle">Choose a track</h2>
+          <p class="np-artist" id="npArtist">OK Music</p>
+
+          <!-- progress -->
+          <div class="progress" id="progressBar">
+            <div class="progress-fill" id="progressFill"></div>
+          </div>
+          <div class="time-row">
+            <span id="curTime">0:00</span>
+            <span id="durTime">0:00</span>
+          </div>
+
+          <!-- controls -->
+          <div class="controls">
+            <button class="ctrl" id="prevBtn" title="Previous" aria-label="Previous">⏮</button>
+            <button class="ctrl ctrl-play" id="playBtn" title="Play / Pause" aria-label="Play or pause">▶</button>
+            <button class="ctrl" id="nextBtn" title="Next" aria-label="Next">⏭</button>
+            <button class="ctrl ctrl-share" id="shareBtn" title="Share this track" aria-label="Share">↗ Share</button>
+            <button class="ctrl ctrl-vote" id="likeBtn" title="Like this track" aria-label="Like">👍 <span id="likeCount">0</span></button>
+            <button class="ctrl ctrl-vote" id="dislikeBtn" title="Dislike this track" aria-label="Dislike">👎 <span id="dislikeCount">0</span></button>
+          </div>
+        </div>
+      </div>
+
+      <h3 class="section-label">Tracks</h3>
+      <!-- thumbnail grid -->
+      <div class="track-grid" id="trackGrid"></div>
+
+      <audio id="audio"></audio>
+    </section>
+
+    <!-- ===================== STORE SIDE ===================== -->
+    <aside class="store-panel" aria-label="Store">
+      <div class="store-head">
+        <h3 class="section-label">Shop the merch</h3>
+        <span class="store-hint">scroll ↓</span>
+      </div>
+      <div class="store-scroll" id="storeScroll"></div>
+    </aside>
+  </main>
+
+  <!-- ===================== DONATIONS ===================== -->
+  <section class="donate-panel" id="donatePanel" aria-label="Support"></section>
+
+  <!-- ===================== COMMENTS ===================== -->
+  <section class="comments-panel" aria-label="Comments">
+    <h3 class="section-label">Leave a comment</h3>
+    <div class="comment-form">
+      <input id="cName" class="comment-name" type="text" placeholder="Your name (optional)" maxlength="40" />
+      <textarea id="cText" class="comment-text" placeholder="Share your thoughts about the music…" maxlength="500"></textarea>
+      <button class="btn-primary comment-submit" id="cSubmit">Post comment</button>
+    </div>
+    <div class="comment-list" id="commentList"></div>
+  </section>
+
+  <!-- ===================== PRODUCT / CHECKOUT MODAL ===================== -->
+  <div class="modal-overlay" id="modalOverlay" hidden>
+    <div class="modal" role="dialog" aria-modal="true">
+      <button class="modal-close" id="modalClose" aria-label="Close">✕</button>
+      <div id="modalBody"></div>
+    </div>
+  </div>
+
+  <!-- share toast -->
+  <div class="toast" id="toast" hidden></div>
+
+  <script src="data.js?v=7"></script>
+  <script src="store.js?v=7"></script>
+  <script src="app.js?v=7"></script>
+</body>
+</html>

@@ -1,0 +1,5 @@
+# macOS
+.DS_Store
+
+# deploy artifact (regenerated when packaging for upload)
+okmusic.zip
