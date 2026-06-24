@@ -4,23 +4,11 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>OK Music — AI Music Community</title>
-  <link rel="stylesheet" href="community.css?v=1" />
+  <link rel="stylesheet" href="community.css?v=2" />
 </head>
 <body>
-  <header class="nav">
-    <div class="nav-brand" data-action="home">
-      <span class="nav-logo">◎</span>
-      <span class="nav-name">OK&nbsp;Music<small>AI music, shared by everyone</small></span>
-    </div>
-    <input class="nav-search" id="search" type="text" placeholder="Search artists & tracks…" />
-    <div class="nav-spacer"></div>
-    <button class="nav-btn primary" data-action="upload">＋ Share music</button>
-    <div id="navAuth"></div>
-  </header>
+  <div id="root"></div>
 
-  <main class="wrap" id="view"></main>
-
-  <!-- mini player -->
   <div class="miniplayer" id="miniplayer">
     <div class="mp-art" id="mpArt">◎</div>
     <div class="mp-info">
@@ -36,7 +24,7 @@
   <div class="toast" id="toast" hidden></div>
   <audio id="audio"></audio>
 
-  <script src="community-data.js?v=1"></script>
-  <script src="community.js?v=1"></script>
+  <script src="community-data.js?v=2"></script>
+  <script src="community.js?v=2"></script>
 </body>
 </html>
