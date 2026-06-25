@@ -20,4 +20,6 @@ const firebaseConfig = {
 firebase.initializeApp(firebaseConfig);
 const fbAuth = firebase.auth();
 const fbDB = firebase.firestore();
+// Offline cache + queued writes — keeps the app usable on flaky connections.
+fbDB.enablePersistence({ synchronizeTabs: true }).catch(()=>{});
 // const fbStorage = firebase.storage();   // enabled in Phase B (uploads)

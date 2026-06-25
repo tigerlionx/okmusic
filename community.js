@@ -45,28 +45,28 @@ const dirCache={};
 async function ensurePerm(h){ if(!h)return false; const o={mode:"read"}; if((await h.queryPermission(o))==="granted")return true; try{ return (await h.requestPermission(o))==="granted"; }catch{ return false; } }
 
 // ---------- helpers ----------
-function allUsers(){ return SEED_USERS.concat(Object.values(db().usersById)); }
+function allUsers(){ return SEED_USERS.concat(Object.values(CACHE.users)); }
 function userById(id){ if(ME&&ME.id===id) return ME; return allUsers().find(u=>u.id===id); }
 function seedAt(h){ return Date.now()-(h||0)*3600000; }
 function allTracks(){ const s=SEED_TRACKS.map(t=>({ ...t, createdAt:seedAt(t.ageHrs), visibility:"public", share:true })); return db().tracks.map(t=>({ ...t })).concat(s); }
 function tracksByUser(uid,owner){ return allTracks().filter(t=>t.userId===uid&&(owner||t.visibility!=="private")).sort((a,b)=>b.createdAt-a.createdAt); }
 function playlistsByUser(uid){ return db().playlists.filter(p=>p.userId===uid).sort((a,b)=>b.createdAt-a.createdAt); }
-function allStatuses(){ const s=SEED_STATUSES.map(x=>({ ...x, time:seedAt(x.ageHrs) })); return db().statuses.map(x=>({ ...x })).concat(s); }
+function allStatuses(){ const s=SEED_STATUSES.map(x=>({ ...x, time:seedAt(x.ageHrs) })); return CACHE.statuses.map(x=>({ ...x })).concat(s); }
 function statusesByUser(uid){ return allStatuses().filter(s=>s.userId===uid).sort((a,b)=>b.time-a.time); }
 function currentUser(){ return ME; }
-function followerCount(uid){ const d=db(); let n=SEED_FOLLOWERS[uid]||0; for(const f in d.follows) if(d.follows[f].includes(uid)) n++; return n; }
-function followingCount(uid){ return (db().follows[uid]||[]).length; }
-function isFollowing(uid){ const d=db(); return d.session&&(d.follows[d.session]||[]).includes(uid); }
-function likeCount(t){ return (SEED_STATS[t]?.likes||0)+(db().likes[t]||[]).length; }
-function dislikeCount(t){ return (db().dislikes[t]||[]).length; }
-function hasLiked(t){ const d=db(); return d.session&&(d.likes[t]||[]).includes(d.session); }
-function hasDisliked(t){ const d=db(); return d.session&&(d.dislikes[t]||[]).includes(d.session); }
+function followerCount(uid){ let n=SEED_FOLLOWERS[uid]||0; for(const f in CACHE.follows) if(CACHE.follows[f].includes(uid)) n++; return n; }
+function followingCount(uid){ return (CACHE.follows[uid]||[]).length; }
+function isFollowing(uid){ return ME&&(CACHE.follows[ME.id]||[]).includes(uid); }
+function likeCount(t){ return (SEED_STATS[t]?.likes||0)+((CACHE.reactions["t_"+t]?.likes||[]).length); }
+function dislikeCount(t){ return (CACHE.reactions["t_"+t]?.dislikes||[]).length; }
+function hasLiked(t){ return ME&&(CACHE.reactions["t_"+t]?.likes||[]).includes(ME.id); }
+function hasDisliked(t){ return ME&&(CACHE.reactions["t_"+t]?.dislikes||[]).includes(ME.id); }
 function playCount(t){ return (SEED_STATS[t]?.plays||0)+(db().plays[t]||0); }
-function stLikeCount(id){ return (SEED_ST_STATS[id]?.likes||0)+(db().stLikes[id]||[]).length; }
-function stDislikeCount(id){ return (SEED_ST_STATS[id]?.dislikes||0)+(db().stDislikes[id]||[]).length; }
-function stHasLiked(id){ const d=db(); return d.session&&(d.stLikes[id]||[]).includes(d.session); }
-function stHasDisliked(id){ const d=db(); return d.session&&(d.stDislikes[id]||[]).includes(d.session); }
-function stComments(id){ return db().stComments[id]||[]; }
+function stLikeCount(id){ return (SEED_ST_STATS[id]?.likes||0)+((CACHE.reactions["s_"+id]?.likes||[]).length); }
+function stDislikeCount(id){ return (SEED_ST_STATS[id]?.dislikes||0)+((CACHE.reactions["s_"+id]?.dislikes||[]).length); }
+function stHasLiked(id){ return ME&&(CACHE.reactions["s_"+id]?.likes||[]).includes(ME.id); }
+function stHasDisliked(id){ return ME&&(CACHE.reactions["s_"+id]?.dislikes||[]).includes(ME.id); }
+function stComments(id){ return CACHE.comments[id]||[]; }
 function esc(s){ return String(s).replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m])); }
 function nfmt(n){ return n>=1000?(n/1000).toFixed(n%1000>=100?1:0)+"k":""+n; }
 function timeAgo(t){ const s=Math.floor((Date.now()-t)/1000); if(s<60)return"just now"; const m=Math.floor(s/60); if(m<60)return m+"m"; const h=Math.floor(m/60); if(h<24)return h+"h"; return Math.floor(h/24)+"d"; }
@@ -77,6 +77,8 @@ let toastTimer; function toast(m){ const e=$("toast"); e.textContent=m; e.hidden
 
 // ---------- state ----------
 let ME=null;                                   // the signed-in user's profile (Firebase)
+// live shared data, kept in sync by Firestore listeners
+const CACHE={ users:{}, statuses:[], follows:{}, reactions:{}, comments:{} };
 let state={ view:"discover", profileId:null, query:"" };
 function go(v,x={}){ state={ ...state, view:v, ...x }; render(); window.scrollTo(0,0); }
 function render(){
@@ -274,20 +276,22 @@ function statusCard(s){
 }
 function postStatus(){
   const t=($("statusText").value||"").trim(); if(!t) return toast("Write something to share");
-  const d=db(); d.statuses.unshift({ id:"s_"+Date.now(), userId:d.session, text:t, time:Date.now() }); commit(d); toast("Posted to your wall 📣"); renderMain();
+  if(!ME) return openEmailAuth();
+  fbDB.collection("statuses").add({ userId:ME.id, text:t, time:Date.now() }).then(()=>toast("Posted to your wall 📣")).catch(e=>toast("Couldn't post: "+(e.code||e.message)));
 }
-function stLike(id){ const d=db(); if(!d.session) return openEmailAuth(); d.stLikes[id]=d.stLikes[id]||[]; d.stDislikes[id]=(d.stDislikes[id]||[]).filter(x=>x!==d.session);
-  const i=d.stLikes[id].indexOf(d.session); if(i>=0)d.stLikes[id].splice(i,1); else d.stLikes[id].push(d.session); commit(d); renderMain(); }
-function stDislike(id){ const d=db(); if(!d.session) return openEmailAuth(); d.stDislikes[id]=d.stDislikes[id]||[]; d.stLikes[id]=(d.stLikes[id]||[]).filter(x=>x!==d.session);
-  const i=d.stDislikes[id].indexOf(d.session); if(i>=0)d.stDislikes[id].splice(i,1); else d.stDislikes[id].push(d.session); commit(d); renderMain(); }
+function stLike(id){ if(!ME) return openEmailAuth(); const F=firebase.firestore.FieldValue; const has=(CACHE.reactions["s_"+id]?.likes||[]).includes(ME.id);
+  fbDB.collection("reactions").doc("s_"+id).set({ likes: has?F.arrayRemove(ME.id):F.arrayUnion(ME.id), dislikes:F.arrayRemove(ME.id) },{merge:true}).catch(e=>toast(e.code||e.message)); }
+function stDislike(id){ if(!ME) return openEmailAuth(); const F=firebase.firestore.FieldValue; const has=(CACHE.reactions["s_"+id]?.dislikes||[]).includes(ME.id);
+  fbDB.collection("reactions").doc("s_"+id).set({ dislikes: has?F.arrayRemove(ME.id):F.arrayUnion(ME.id), likes:F.arrayRemove(ME.id) },{merge:true}).catch(e=>toast(e.code||e.message)); }
 function stComment(id){ const el=$("sc_"+id); const t=(el?.value||"").trim(); if(!t) return toast("Write a comment first");
-  const u=currentUser(); if(!u) return continueWith("email"); const d=db(); d.stComments[id]=d.stComments[id]||[]; d.stComments[id].push({ uid:u.id, name:u.name, text:t, time:Date.now() }); commit(d); renderMain(); }
+  if(!ME) return openEmailAuth(); const F=firebase.firestore.FieldValue;
+  fbDB.collection("comments").doc(id).set({ items: F.arrayUnion({ uid:ME.id, name:ME.name, text:t, time:Date.now() }) },{merge:true}).catch(e=>toast(e.code||e.message)); }
 
 // ---------- track like/dislike (music = reactions only) ----------
-function toggleLike(id){ const d=db(); if(!d.session) return openEmailAuth(); d.likes[id]=d.likes[id]||[]; d.dislikes[id]=(d.dislikes[id]||[]).filter(x=>x!==d.session);
-  const i=d.likes[id].indexOf(d.session); if(i>=0)d.likes[id].splice(i,1); else d.likes[id].push(d.session); commit(d); renderMain(); }
-function toggleDislike(id){ const d=db(); if(!d.session) return openEmailAuth(); d.dislikes[id]=d.dislikes[id]||[]; d.likes[id]=(d.likes[id]||[]).filter(x=>x!==d.session);
-  const i=d.dislikes[id].indexOf(d.session); if(i>=0)d.dislikes[id].splice(i,1); else d.dislikes[id].push(d.session); commit(d); renderMain(); }
+function toggleLike(id){ if(!ME) return openEmailAuth(); const F=firebase.firestore.FieldValue; const has=(CACHE.reactions["t_"+id]?.likes||[]).includes(ME.id);
+  fbDB.collection("reactions").doc("t_"+id).set({ likes: has?F.arrayRemove(ME.id):F.arrayUnion(ME.id), dislikes:F.arrayRemove(ME.id) },{merge:true}).catch(e=>toast(e.code||e.message)); }
+function toggleDislike(id){ if(!ME) return openEmailAuth(); const F=firebase.firestore.FieldValue; const has=(CACHE.reactions["t_"+id]?.dislikes||[]).includes(ME.id);
+  fbDB.collection("reactions").doc("t_"+id).set({ dislikes: has?F.arrayRemove(ME.id):F.arrayUnion(ME.id), likes:F.arrayRemove(ME.id) },{merge:true}).catch(e=>toast(e.code||e.message)); }
 
 // ---------- playlists from folders ----------
 function playlistBlock(p,owner){
@@ -381,7 +385,8 @@ function openInvite(){ const u=currentUser(); const link=`${location.origin}${lo
 
 // ---------- social ----------
 function share(id){ const link=`${location.origin}${location.pathname}?track=${id}`; if(navigator.clipboard) navigator.clipboard.writeText(link).then(()=>toast("Share link copied ✓")).catch(()=>toast(link)); else toast(link); }
-function toggleFollow(uid){ const d=db(); if(!d.session) return openEmailAuth(); d.follows[d.session]=d.follows[d.session]||[]; const i=d.follows[d.session].indexOf(uid); if(i>=0){d.follows[d.session].splice(i,1);toast("Unfollowed");}else{d.follows[d.session].push(uid);toast("You're now a fan ✓");} commit(d); render(); }
+function toggleFollow(uid){ if(!ME) return openEmailAuth(); const F=firebase.firestore.FieldValue; const has=(CACHE.follows[ME.id]||[]).includes(uid);
+  fbDB.collection("follows").doc(ME.id).set({ following: has?F.arrayRemove(uid):F.arrayUnion(uid) },{merge:true}).then(()=>toast(has?"Unfollowed":"You're now a fan ✓")).catch(e=>toast(e.code||e.message)); }
 function logout(){ fbAuth.signOut(); }
 
 // ---------- overlay ----------
@@ -422,8 +427,20 @@ document.addEventListener("change",e=>{ if(e.target.id==="avFile"){ const f=e.ta
 $("overlay").addEventListener("click",e=>{ if(e.target.id==="overlay") closeOverlay(); });
 document.addEventListener("keydown",e=>{ if(e.key==="Escape") closeOverlay(); });
 
-// ---------- init: real Firebase auth state ----------
+// ---------- live Firestore listeners (shared data) ----------
+let _rt=null;
+function scheduleRender(){ clearTimeout(_rt); _rt=setTimeout(()=>{ const a=document.activeElement; if(a && /INPUT|TEXTAREA/.test(a.tagName)) return; render(); }, 80); }
+function startListeners(){
+  fbDB.collection("users").onSnapshot(s=>{ CACHE.users={}; s.forEach(d=>CACHE.users[d.id]={ id:d.id, ...d.data() }); scheduleRender(); }, e=>console.warn("users",e.code));
+  fbDB.collection("statuses").onSnapshot(s=>{ CACHE.statuses=s.docs.map(d=>({ id:d.id, ...d.data() })); scheduleRender(); }, e=>console.warn("statuses",e.code));
+  fbDB.collection("follows").onSnapshot(s=>{ CACHE.follows={}; s.forEach(d=>CACHE.follows[d.id]=(d.data().following||[])); scheduleRender(); }, e=>console.warn("follows",e.code));
+  fbDB.collection("reactions").onSnapshot(s=>{ CACHE.reactions={}; s.forEach(d=>CACHE.reactions[d.id]=d.data()); scheduleRender(); }, e=>console.warn("reactions",e.code));
+  fbDB.collection("comments").onSnapshot(s=>{ CACHE.comments={}; s.forEach(d=>CACHE.comments[d.id]=(d.data().items||[])); scheduleRender(); }, e=>console.warn("comments",e.code));
+}
+
+// ---------- init: real Firebase auth + live data ----------
 renderLanding();
+startListeners();
 fbAuth.onAuthStateChanged(async (user)=>{
   if(user){
     const prof=await loadProfile(user.uid);
