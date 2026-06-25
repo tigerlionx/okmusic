@@ -38,7 +38,7 @@ async function ensurePerm(h){ if(!h)return false; const o={mode:"read"}; if((awa
 function allUsers(){ return SEED_USERS.concat(Object.values(CACHE.users)); }
 function userById(id){ if(ME&&ME.id===id) return ME; return allUsers().find(u=>u.id===id); }
 function seedAt(h){ return Date.now()-(h||0)*3600000; }
-function allTracks(){ const s=SEED_TRACKS.map(t=>({ ...t, createdAt:seedAt(t.ageHrs), visibility:"public", share:true })); return db().tracks.map(t=>({ ...t })).concat(s); }
+function allTracks(){ const s=SEED_TRACKS.map(t=>({ ...t, createdAt:seedAt(t.ageHrs), visibility:"public", share:true })); return CACHE.tracks.map(t=>({ ...t })).concat(s); }
 function tracksByUser(uid,owner){ return allTracks().filter(t=>t.userId===uid&&(owner||t.visibility!=="private")).sort((a,b)=>b.createdAt-a.createdAt); }
 function playlistsByUser(uid){ return db().playlists.filter(p=>p.userId===uid).sort((a,b)=>b.createdAt-a.createdAt); }
 function allStatuses(){ const s=SEED_STATUSES.map(x=>({ ...x, time:seedAt(x.ageHrs) })); return CACHE.statuses.map(x=>({ ...x })).concat(s); }
@@ -68,7 +68,7 @@ let toastTimer; function toast(m){ const e=$("toast"); e.textContent=m; e.hidden
 // ---------- state ----------
 let ME=null;                                   // the signed-in user's profile (Firebase)
 // live shared data, kept in sync by Firestore listeners
-const CACHE={ users:{}, statuses:[], follows:{}, reactions:{}, comments:{} };
+const CACHE={ users:{}, tracks:[], statuses:[], follows:{}, reactions:{}, comments:{} };
 let state={ view:"discover", profileId:null, query:"" };
 function go(v,x={}){ state={ ...state, view:v, ...x }; render(); window.scrollTo(0,0); }
 function render(){
@@ -327,16 +327,18 @@ function openUpload(){
     <button class="btn primary block" data-action="dopublish">Add to my music</button>`);
   window._upColor=COLORS[0]; window._upVis="public";
 }
-function doPublish(){ const title=($("upTitle").value||"").trim(); if(!title) return toast("Give it a title");
-  const d=db(); d.tracks.unshift({ id:"t_"+Date.now(), userId:d.session, title, src:($("upSrc").value||"").trim(), accent:window._upColor||COLORS[0], visibility:window._upVis||"public", share:$("upShare").checked, createdAt:Date.now() });
-  commit(d); closeOverlay(); toast(window._upVis==="private"?"Saved private 🔒":"Published! 🎵"); go("mymusic"); }
+function doPublish(){ const title=($("upTitle").value||"").trim(); if(!title) return toast("Give it a title"); if(!ME) return openEmailAuth();
+  fbDB.collection("tracks").add({ userId:ME.id, title, src:($("upSrc").value||"").trim(), accent:window._upColor||COLORS[0], visibility:window._upVis||"public", share:!!($("upShare")&&$("upShare").checked), createdAt:Date.now() })
+    .then(()=>{ closeOverlay(); toast(window._upVis==="private"?"Saved private 🔒":"Published! 🎵"); go("mymusic"); })
+    .catch(e=>toast("Couldn't save: "+(e.code||e.message))); }
 
 // ---------- my music ----------
 function renderMyMusic(){
   const u=currentUser(); const tracks=tracksByUser(u.id,true); const pls=playlistsByUser(u.id);
   const rows=tracks.map(t=>`<div class="mrow"><div class="mart" style="background:${grad(t.accent)}">◎</div>
     <div class="minfo"><div class="mt">${esc(t.title)}</div><div class="ms">▶ ${nfmt(playCount(t.id))} · 👍 ${nfmt(likeCount(t.id))} · 👎 ${nfmt(dislikeCount(t.id))} <span class="pill ${t.visibility==='private'?'prv':'pub'}">${t.visibility==='private'?'Private':'Public'}</span></div></div>
-    ${t.visibility==='private'?`<button class="btn sm primary" data-action="publish" data-id="${t.id}">Publish</button>`:`<button class="btn sm" data-action="unpublish" data-id="${t.id}">Make private</button>`}</div>`).join("");
+    ${t.visibility==='private'?`<button class="btn sm primary" data-action="publish" data-id="${t.id}">Publish</button>`:`<button class="btn sm" data-action="unpublish" data-id="${t.id}">Hide</button>`}
+    <button class="btn sm" data-action="deltrack" data-id="${t.id}" style="color:#e2554f;border-color:#f0b3b3">Delete</button></div>`).join("");
   $("page").innerHTML=`<div class="h-title">My Music</div>
     <div class="folder-banner">📁 <b>Folders become playlists.</b> Pick a music folder — every song becomes a playable track instantly, no upload. Add a <b>thumbnails folder</b> (images named like each track) for covers. Chrome &amp; Edge.</div>
     <div style="display:flex;gap:8px;margin-bottom:18px;flex-wrap:wrap"><button class="btn primary" data-action="sharefolder">📁 Share a music folder</button><button class="btn" data-action="upload">＋ Add single track</button></div>
@@ -345,7 +347,8 @@ function renderMyMusic(){
     ${(!pls.length&&!tracks.length)?'<div class="empty">No music yet — share a folder to begin.</div>':""}`;
   pls.forEach(loadCovers);
 }
-function setVisibility(id,v){ const d=db(); const t=d.tracks.find(x=>x.id===id); if(t){ t.visibility=v; commit(d); toast(v==="public"?"Published 🎉":"Set to private"); renderMyMusic(); } }
+function setVisibility(id,v){ fbDB.collection("tracks").doc(id).update({ visibility:v }).then(()=>toast(v==="public"?"Published 🎉 (now public)":"Hidden — set to private 🔒")).catch(e=>toast(e.code||e.message)); }
+function deleteTrack(id){ if(!confirm("Delete this track permanently? This cannot be undone.")) return; fbDB.collection("tracks").doc(id).delete().then(()=>toast("Track deleted")).catch(e=>toast(e.code||e.message)); }
 
 // ---------- edit profile (photo + bg + bio) ----------
 function openCustomize(){
@@ -361,11 +364,11 @@ function openCustomize(){
   window._bgColor=u.bgColor||""; window._avatar=null;
 }
 function saveCustom(){
-  const d=db(); const u=d.usersById[d.session]; if(!u) return;
-  const url=($("avUrl").value||"").trim();
-  if(window._avatar) u.avatarImg=window._avatar; else if(url) u.avatarImg=url;
-  u.bio=($("bgBio").value||"").trim()||u.bio; u.bgColor=window._bgColor||""; u.bgImg=($("bgImg").value||"").trim();
-  commit(d); closeOverlay(); toast("Profile saved ✨"); go("profile",{profileId:d.session});
+  if(!ME) return; const url=($("avUrl").value||"").trim();
+  const upd={ bio:($("bgBio").value||"").trim()||ME.bio||"", bgColor:window._bgColor||"", bgImg:($("bgImg").value||"").trim() };
+  if(window._avatar){ if(window._avatar.length>700000) return toast("That photo is too big — paste a link instead, or use a smaller image."); upd.avatarImg=window._avatar; }
+  else if(url) upd.avatarImg=url;
+  fbDB.collection("users").doc(ME.id).set(upd,{merge:true}).then(()=>{ Object.assign(ME,upd); closeOverlay(); toast("Profile saved ✨"); go("profile",{profileId:ME.id}); }).catch(e=>toast("Couldn't save: "+(e.code||e.message)));
 }
 
 // ---------- invite ----------
@@ -406,7 +409,7 @@ document.addEventListener("click",e=>{
     play:()=>playTrack(el.dataset.id), like:()=>toggleLike(el.dataset.id), dislike:()=>toggleDislike(el.dataset.id),
     poststatus:postStatus, slike:()=>stLike(el.dataset.id), sdislike:()=>stDislike(el.dataset.id), scomment:()=>stComment(el.dataset.id),
     follow:()=>toggleFollow(el.dataset.uid), share:()=>share(el.dataset.id), logout:logout, close:closeOverlay,
-    publish:()=>setVisibility(el.dataset.id,"public"), unpublish:()=>setVisibility(el.dataset.id,"private"),
+    publish:()=>setVisibility(el.dataset.id,"public"), unpublish:()=>setVisibility(el.dataset.id,"private"), deltrack:()=>deleteTrack(el.dataset.id),
     swatch:()=>{window._upColor=el.dataset.c;document.querySelectorAll("#swatches .swatch").forEach(s=>s.classList.toggle("sel",s===el));},
     vis:()=>{window._upVis=el.dataset.v;document.querySelectorAll("#visRow .radio-card").forEach(c=>c.classList.toggle("sel",c===el));},
     bgcolor:()=>{window._bgColor=el.dataset.c;const bi=$("bgImg");if(bi)bi.value="";document.querySelectorAll("#bgSw .swatch").forEach(s=>s.classList.toggle("sel",s===el));}
@@ -422,6 +425,7 @@ let _rt=null;
 function scheduleRender(){ clearTimeout(_rt); _rt=setTimeout(()=>{ const a=document.activeElement; if(a && /INPUT|TEXTAREA/.test(a.tagName)) return; render(); }, 80); }
 function startListeners(){
   fbDB.collection("users").onSnapshot(s=>{ CACHE.users={}; s.forEach(d=>CACHE.users[d.id]={ id:d.id, ...d.data() }); scheduleRender(); }, e=>console.warn("users",e.code));
+  fbDB.collection("tracks").onSnapshot(s=>{ CACHE.tracks=s.docs.map(d=>({ id:d.id, ...d.data() })); scheduleRender(); }, e=>console.warn("tracks",e.code));
   fbDB.collection("statuses").onSnapshot(s=>{ CACHE.statuses=s.docs.map(d=>({ id:d.id, ...d.data() })); scheduleRender(); }, e=>console.warn("statuses",e.code));
   fbDB.collection("follows").onSnapshot(s=>{ CACHE.follows={}; s.forEach(d=>CACHE.follows[d.id]=(d.data().following||[])); scheduleRender(); }, e=>console.warn("follows",e.code));
   fbDB.collection("reactions").onSnapshot(s=>{ CACHE.reactions={}; s.forEach(d=>CACHE.reactions[d.id]=d.data()); scheduleRender(); }, e=>console.warn("reactions",e.code));
