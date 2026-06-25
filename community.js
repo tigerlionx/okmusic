@@ -10,18 +10,8 @@
 const $ = (id) => document.getElementById(id);
 const audio = $("audio");
 
-const SEED_STATS = {
-  t_afghan:{plays:412,likes:58}, t_persian:{plays:233,likes:31}, t_gray:{plays:188,likes:24}, t_spring:{plays:97,likes:12},
-  t_nova1:{plays:1203,likes:210}, t_nova2:{plays:540,likes:77}, t_lumen1:{plays:860,likes:140}, t_lumen2:{plays:320,likes:41},
-  t_kira1:{plays:1500,likes:260}, t_kira2:{plays:610,likes:95}
-};
-const SEED_FOLLOWERS = { u_okmusic:128, u_nova:4200, u_lumen:2100, u_kira:8800 };
-const SEED_STATUSES = [
-  { id:"s_ok1",   userId:"u_okmusic", text:"I am so happy today — I posted my new tracks 🌅 Please listen to them, comment, like, and share to your own page! 💜", ageHrs:4 },
-  { id:"s_nova1", userId:"u_nova",    text:"New synthwave just dropped tonight. Crank it up 🌃 Tell me your favorite track!", ageHrs:9 },
-  { id:"s_kira1", userId:"u_kira",    text:"Lo-fi beats for your study session ☕ Feedback welcome — what should I make next?", ageHrs:22 }
-];
-const SEED_ST_STATS = { s_ok1:{likes:42,dislikes:1}, s_nova1:{likes:120,dislikes:3}, s_kira1:{likes:88,dislikes:0} };
+// Seed data (incl. 100 demo creators) now lives in community-data.js:
+// SEED_USERS, SEED_TRACKS, SEED_STATUSES, SEED_STATS, SEED_FOLLOWERS, SEED_ST_STATS.
 const COLORS = ["#FB7A28","#7c5cff","#36d1c4","#ff5c7c","#ffb347","#5c8bff","#ff7ac6","#2bbf4e"];
 
 // ---------- DB ----------
