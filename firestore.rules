@@ -1,0 +1,46 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() { return request.auth != null; }
+
+    // Profiles: anyone can read; you can only write your own.
+    match /users/{uid} {
+      allow read: if true;
+      allow write: if signedIn() && request.auth.uid == uid;
+    }
+
+    // Follow lists: doc id = the follower's uid; only they can edit it.
+    match /follows/{uid} {
+      allow read: if true;
+      allow write: if signedIn() && request.auth.uid == uid;
+    }
+
+    // Tracks: public to read; only the owner can create/edit/delete.
+    match /tracks/{id} {
+      allow read: if true;
+      allow create: if signedIn() && request.resource.data.userId == request.auth.uid;
+      allow update, delete: if signedIn() && resource.data.userId == request.auth.uid;
+    }
+
+    // Statuses (wall posts): public to read; only the author can manage.
+    match /statuses/{id} {
+      allow read: if true;
+      allow create: if signedIn() && request.resource.data.userId == request.auth.uid;
+      allow update, delete: if signedIn() && resource.data.userId == request.auth.uid;
+    }
+
+    // Comments: public to read; only the comment's author can edit/delete it.
+    match /comments/{id} {
+      allow read: if true;
+      allow create: if signedIn() && request.resource.data.uid == request.auth.uid;
+      allow update, delete: if signedIn() && resource.data.uid == request.auth.uid;
+    }
+
+    // Likes/dislikes (arrays of user ids): any signed-in user may react.
+    match /reactions/{id} {
+      allow read: if true;
+      allow write: if signedIn();
+    }
+  }
+}
