@@ -46,14 +46,14 @@ async function ensurePerm(h){ if(!h)return false; const o={mode:"read"}; if((awa
 
 // ---------- helpers ----------
 function allUsers(){ return SEED_USERS.concat(Object.values(db().usersById)); }
-function userById(id){ return allUsers().find(u=>u.id===id); }
+function userById(id){ if(ME&&ME.id===id) return ME; return allUsers().find(u=>u.id===id); }
 function seedAt(h){ return Date.now()-(h||0)*3600000; }
 function allTracks(){ const s=SEED_TRACKS.map(t=>({ ...t, createdAt:seedAt(t.ageHrs), visibility:"public", share:true })); return db().tracks.map(t=>({ ...t })).concat(s); }
 function tracksByUser(uid,owner){ return allTracks().filter(t=>t.userId===uid&&(owner||t.visibility!=="private")).sort((a,b)=>b.createdAt-a.createdAt); }
 function playlistsByUser(uid){ return db().playlists.filter(p=>p.userId===uid).sort((a,b)=>b.createdAt-a.createdAt); }
 function allStatuses(){ const s=SEED_STATUSES.map(x=>({ ...x, time:seedAt(x.ageHrs) })); return db().statuses.map(x=>({ ...x })).concat(s); }
 function statusesByUser(uid){ return allStatuses().filter(s=>s.userId===uid).sort((a,b)=>b.time-a.time); }
-function currentUser(){ const d=db(); return d.session?userById(d.session):null; }
+function currentUser(){ return ME; }
 function followerCount(uid){ const d=db(); let n=SEED_FOLLOWERS[uid]||0; for(const f in d.follows) if(d.follows[f].includes(uid)) n++; return n; }
 function followingCount(uid){ return (db().follows[uid]||[]).length; }
 function isFollowing(uid){ const d=db(); return d.session&&(d.follows[d.session]||[]).includes(uid); }
@@ -76,9 +76,14 @@ function avatarStyle(u,size){ const s=`width:${size}px;height:${size}px;font-siz
 let toastTimer; function toast(m){ const e=$("toast"); e.textContent=m; e.hidden=false; clearTimeout(toastTimer); toastTimer=setTimeout(()=>e.hidden=true,3200); }
 
 // ---------- state ----------
+let ME=null;                                   // the signed-in user's profile (Firebase)
 let state={ view:"discover", profileId:null, query:"" };
 function go(v,x={}){ state={ ...state, view:v, ...x }; render(); window.scrollTo(0,0); }
-function render(){ currentUser()?renderApp():renderLanding(); }
+function render(){
+  if(!ME){ renderLanding(); return; }
+  if(!ME.handle){ renderLanding(); openOnboard(); return; }   // signed in but no profile yet
+  renderApp();
+}
 
 // ============ AUTH (Claude-style) ============
 function renderLanding(){
@@ -96,22 +101,47 @@ function renderLanding(){
     <div class="authfoot">No account needed to listen — sign in to share & follow.</div>
   </div></div>`;
 }
-function continueWith(key){ const d=db(); if(d.identities[key]){ d.session=d.identities[key]; commit(d); toast("Welcome back!"); return go("discover"); } openOnboard(key); }
-function openOnboard(key){
-  openOverlay(`<h2>Welcome to OK Music 👋</h2><p class="sub">Pick a name and handle to set up your creator profile.</p>
-    <div class="field"><label>Display name</label><input class="fb-field" id="obName" placeholder="e.g. Emmanuel Leveille" /></div>
-    <div class="field"><label>Handle (@username)</label><input class="fb-field" id="obHandle" placeholder="emmanuel" /></div>
-    <button class="btn primary block" data-action="finishonboard" data-k="${esc(key)}">Create my profile</button>
-    <p class="note">Prototype sign-in is stored only in this browser. Firebase makes Google/Apple/email real & shared.</p>`);
+function signInGoogle(){ fbAuth.signInWithPopup(new firebase.auth.GoogleAuthProvider()).catch(e=>toast("Google sign-in failed: "+(e.code||e.message))); }
+function openEmailAuth(email){
+  openOverlay(`<h2>Continue with email</h2><p class="sub">Log in, or create a new account.</p>
+    <div class="field"><label>Email</label><input class="fb-field" id="emEmail" type="email" value="${esc(email||'')}" /></div>
+    <div class="field"><label>Password</label><input class="fb-field" id="emPass" type="password" placeholder="at least 6 characters" /></div>
+    <button class="btn primary block" data-action="emailgo" data-mode="login">Log in</button>
+    <button class="btn block" data-action="emailgo" data-mode="signup" style="margin-top:8px">Create new account</button>`);
 }
-function finishOnboard(key){
+function emailGo(mode){
+  const email=($("emEmail").value||"").trim(), pass=$("emPass").value||"";
+  if(!email||!email.includes("@")) return toast("Enter a valid email");
+  if(pass.length<6) return toast("Password must be at least 6 characters");
+  closeOverlay();
+  const p = mode==="signup" ? fbAuth.createUserWithEmailAndPassword(email,pass) : fbAuth.signInWithEmailAndPassword(email,pass);
+  p.catch(e=>{
+    if(e.code==="auth/email-already-in-use") toast("That email already has an account — choose Log in.");
+    else if(e.code==="auth/user-not-found"||e.code==="auth/invalid-credential"||e.code==="auth/wrong-password") toast("No account or wrong password — try Create new account.");
+    else toast("Sign-in failed: "+(e.code||e.message));
+  });
+}
+async function loadProfile(uid){ try{ const s=await fbDB.collection("users").doc(uid).get(); return s.exists?{ id:uid, ...s.data() }:null; }catch(e){ console.warn(e); return null; } }
+function syncME(){ const d=db(); if(ME){ d.session=ME.id; d.usersById[ME.id]={ id:ME.id, name:ME.name, handle:ME.handle, bio:ME.bio, color:ME.color, avatarImg:ME.avatarImg, bgColor:ME.bgColor, bgImg:ME.bgImg }; } else d.session=null; commit(d); }
+function openOnboard(){
+  openOverlay(`<h2>Welcome to OK Music 👋</h2><p class="sub">Pick a name and handle to set up your creator profile.</p>
+    <div class="field"><label>Display name</label><input class="fb-field" id="obName" placeholder="e.g. Emmanuel Leveille" value="${esc((ME&&ME.name)||'')}" /></div>
+    <div class="field"><label>Handle (@username)</label><input class="fb-field" id="obHandle" placeholder="emmanuel" /></div>
+    <button class="btn primary block" data-action="finishonboard">Create my profile</button>`);
+}
+async function finishOnboard(){
   const name=($("obName").value||"").trim(), handle=($("obHandle").value||"").trim().replace(/^@/,"").toLowerCase();
   if(!name||!handle) return toast("Enter a name and handle");
   if(!/^[a-z0-9_]{2,}$/.test(handle)) return toast("Handle: letters, numbers, underscore");
-  if(SEED_USERS.some(u=>u.handle===handle)||db().accounts[handle]) return toast("That handle is taken");
-  const d=db(); const id="u_"+Date.now();
-  d.accounts[handle]={ id, name, handle }; d.usersById[id]={ id, name, handle, bio:"New AI music creator 🎶", color:COLORS[Math.floor(Math.random()*COLORS.length)] };
-  d.identities[key]=id; d.session=id; commit(d); closeOverlay(); toast("You're in! 🎉"); go("profile",{profileId:id});
+  if(SEED_USERS.some(u=>u.handle===handle)) return toast("That handle is taken");
+  try{
+    const dup=await fbDB.collection("users").where("handle","==",handle).limit(1).get();
+    if(!dup.empty) return toast("That handle is taken");
+    const uid=fbAuth.currentUser.uid;
+    const prof={ name, handle, bio:"New AI music creator 🎶", color:COLORS[Math.floor(Math.random()*COLORS.length)], avatarImg:(fbAuth.currentUser.photoURL||""), createdAt:Date.now() };
+    await fbDB.collection("users").doc(uid).set(prof);
+    ME={ id:uid, ...prof }; syncME(); closeOverlay(); toast("You're in! 🎉"); go("profile",{profileId:uid});
+  }catch(e){ toast("Couldn't save profile: "+(e.code||e.message)); }
 }
 
 // ============ APP SHELL ============
@@ -246,17 +276,17 @@ function postStatus(){
   const t=($("statusText").value||"").trim(); if(!t) return toast("Write something to share");
   const d=db(); d.statuses.unshift({ id:"s_"+Date.now(), userId:d.session, text:t, time:Date.now() }); commit(d); toast("Posted to your wall 📣"); renderMain();
 }
-function stLike(id){ const d=db(); if(!d.session) return continueWith("email"); d.stLikes[id]=d.stLikes[id]||[]; d.stDislikes[id]=(d.stDislikes[id]||[]).filter(x=>x!==d.session);
+function stLike(id){ const d=db(); if(!d.session) return openEmailAuth(); d.stLikes[id]=d.stLikes[id]||[]; d.stDislikes[id]=(d.stDislikes[id]||[]).filter(x=>x!==d.session);
   const i=d.stLikes[id].indexOf(d.session); if(i>=0)d.stLikes[id].splice(i,1); else d.stLikes[id].push(d.session); commit(d); renderMain(); }
-function stDislike(id){ const d=db(); if(!d.session) return continueWith("email"); d.stDislikes[id]=d.stDislikes[id]||[]; d.stLikes[id]=(d.stLikes[id]||[]).filter(x=>x!==d.session);
+function stDislike(id){ const d=db(); if(!d.session) return openEmailAuth(); d.stDislikes[id]=d.stDislikes[id]||[]; d.stLikes[id]=(d.stLikes[id]||[]).filter(x=>x!==d.session);
   const i=d.stDislikes[id].indexOf(d.session); if(i>=0)d.stDislikes[id].splice(i,1); else d.stDislikes[id].push(d.session); commit(d); renderMain(); }
 function stComment(id){ const el=$("sc_"+id); const t=(el?.value||"").trim(); if(!t) return toast("Write a comment first");
   const u=currentUser(); if(!u) return continueWith("email"); const d=db(); d.stComments[id]=d.stComments[id]||[]; d.stComments[id].push({ uid:u.id, name:u.name, text:t, time:Date.now() }); commit(d); renderMain(); }
 
 // ---------- track like/dislike (music = reactions only) ----------
-function toggleLike(id){ const d=db(); if(!d.session) return continueWith("email"); d.likes[id]=d.likes[id]||[]; d.dislikes[id]=(d.dislikes[id]||[]).filter(x=>x!==d.session);
+function toggleLike(id){ const d=db(); if(!d.session) return openEmailAuth(); d.likes[id]=d.likes[id]||[]; d.dislikes[id]=(d.dislikes[id]||[]).filter(x=>x!==d.session);
   const i=d.likes[id].indexOf(d.session); if(i>=0)d.likes[id].splice(i,1); else d.likes[id].push(d.session); commit(d); renderMain(); }
-function toggleDislike(id){ const d=db(); if(!d.session) return continueWith("email"); d.dislikes[id]=d.dislikes[id]||[]; d.likes[id]=(d.likes[id]||[]).filter(x=>x!==d.session);
+function toggleDislike(id){ const d=db(); if(!d.session) return openEmailAuth(); d.dislikes[id]=d.dislikes[id]||[]; d.likes[id]=(d.likes[id]||[]).filter(x=>x!==d.session);
   const i=d.dislikes[id].indexOf(d.session); if(i>=0)d.dislikes[id].splice(i,1); else d.dislikes[id].push(d.session); commit(d); renderMain(); }
 
 // ---------- playlists from folders ----------
@@ -293,7 +323,7 @@ async function playFolderTrack(plId,file){
 
 // ---------- single track upload ----------
 function openUpload(){
-  if(!currentUser()) return continueWith("email");
+  if(!currentUser()) return openEmailAuth();
   openOverlay(`<h2>Add a single track</h2><p class="sub">Publish now or keep private until ready.</p>
     <div class="field"><label>Track title</label><input id="upTitle" placeholder="e.g. Midnight Bloom" /></div>
     <div class="field"><label>Cover color</label><div class="swatches" id="swatches">${COLORS.map((c,i)=>`<div class="swatch ${i===0?'sel':''}" style="background:${c}" data-action="swatch" data-c="${c}"></div>`).join("")}</div></div>
@@ -351,8 +381,8 @@ function openInvite(){ const u=currentUser(); const link=`${location.origin}${lo
 
 // ---------- social ----------
 function share(id){ const link=`${location.origin}${location.pathname}?track=${id}`; if(navigator.clipboard) navigator.clipboard.writeText(link).then(()=>toast("Share link copied ✓")).catch(()=>toast(link)); else toast(link); }
-function toggleFollow(uid){ const d=db(); if(!d.session) return continueWith("email"); d.follows[d.session]=d.follows[d.session]||[]; const i=d.follows[d.session].indexOf(uid); if(i>=0){d.follows[d.session].splice(i,1);toast("Unfollowed");}else{d.follows[d.session].push(uid);toast("You're now a fan ✓");} commit(d); render(); }
-function logout(){ const d=db(); d.session=null; commit(d); go("discover"); }
+function toggleFollow(uid){ const d=db(); if(!d.session) return openEmailAuth(); d.follows[d.session]=d.follows[d.session]||[]; const i=d.follows[d.session].indexOf(uid); if(i>=0){d.follows[d.session].splice(i,1);toast("Unfollowed");}else{d.follows[d.session].push(uid);toast("You're now a fan ✓");} commit(d); render(); }
+function logout(){ fbAuth.signOut(); }
 
 // ---------- overlay ----------
 function openOverlay(h){ $("overlayBody").innerHTML=`<div class="modal"><button class="modal-x" data-action="close">✕</button>${h}</div>`; $("overlay").hidden=false; }
@@ -373,7 +403,8 @@ document.addEventListener("click",e=>{
   const el=e.target.closest("[data-action]"); if(!el) return; const a=el.dataset.action;
   const M={
     nav:()=>go(el.dataset.view), profile:()=>go("profile",{profileId:el.dataset.uid}),
-    auth:()=>continueWith(el.dataset.p), authemail:()=>{ const v=($("liEmail").value||"").trim().toLowerCase(); if(!v||!v.includes("@")) return toast("Enter a valid email"); continueWith(v); }, finishonboard:()=>finishOnboard(el.dataset.k),
+    auth:()=>{ if(el.dataset.p==="google") signInGoogle(); else toast("Apple sign-in needs a paid Apple Developer account — coming later. Use Google or email 🙂"); },
+    authemail:()=>openEmailAuth(($("liEmail").value||"").trim()), emailgo:()=>emailGo(el.dataset.mode), finishonboard:()=>finishOnboard(),
     sharefolder:shareMusicFolder, setthumbs:()=>setThumbsFolder(el.dataset.pl), relink:()=>relinkFolder(el.dataset.pl), playfile:()=>playFolderTrack(el.dataset.pl,el.dataset.file),
     upload:openUpload, dopublish:doPublish, customize:openCustomize, savecustom:saveCustom, invite:openInvite,
     copyinvite:()=>{ const i=$("invLink"); i.select(); if(navigator.clipboard)navigator.clipboard.writeText(i.value); toast("Invite link copied ✓"); },
@@ -391,4 +422,12 @@ document.addEventListener("change",e=>{ if(e.target.id==="avFile"){ const f=e.ta
 $("overlay").addEventListener("click",e=>{ if(e.target.id==="overlay") closeOverlay(); });
 document.addEventListener("keydown",e=>{ if(e.key==="Escape") closeOverlay(); });
 
-render();
+// ---------- init: real Firebase auth state ----------
+renderLanding();
+fbAuth.onAuthStateChanged(async (user)=>{
+  if(user){
+    const prof=await loadProfile(user.uid);
+    if(prof){ ME=prof; syncME(); render(); }
+    else { ME={ id:user.uid, name:user.displayName||"" }; render(); }   // no profile yet → onboarding
+  } else { ME=null; syncME(); render(); }
+});
