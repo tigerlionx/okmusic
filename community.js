@@ -68,7 +68,7 @@ let toastTimer; function toast(m){ const e=$("toast"); e.textContent=m; e.hidden
 // ---------- state ----------
 let ME=null;                                   // the signed-in user's profile (Firebase)
 // live shared data, kept in sync by Firestore listeners
-const CACHE={ users:{}, tracks:[], statuses:[], follows:{}, reactions:{}, comments:[] };
+const CACHE={ users:{}, tracks:[], statuses:[], follows:{}, reactions:{}, comments:[], notifications:[] };
 let state={ view:"discover", profileId:null, query:"" };
 function go(v,x={}){ state={ ...state, view:v, ...x }; render(); window.scrollTo(0,0); }
 function render(){
@@ -144,12 +144,15 @@ function renderApp(){
     <div class="topbar">
       <div class="brand" data-action="nav" data-view="discover"><span class="l">◎</span><b>OK&nbsp;Music</b></div>
       <input class="search" id="search" placeholder="Search artists & tracks…" value="${esc(state.query)}" />
+      <div class="bell" data-action="nav" data-view="notifs" title="Notifications">🔔${(()=>{const n=(CACHE.notifications||[]).filter(x=>!x.read).length;return n?`<span class="bell-badge">${n>9?'9+':n}</span>`:'';})()}</div>
       <div class="me" data-action="profile" data-uid="${u.id}"><div class="avatar" style="${avatarStyle(u,34)}">${u.avatarImg?'':initials(u.name)}</div></div>
     </div>
     <div class="shell">
       <nav class="sidebar">
         ${item("discover","🧭","Discover")}
+        ${item("buzzing","🔥","Buzzing")}
         ${item("home","🏠","My Feed")}
+        ${item("notifs","🔔","Notifications")}
         <div class="side-item" data-action="profile" data-uid="${u.id}"><span class="ic">😊</span>My Page</div>
         ${item("fans","🫂","My Fans")}
         ${item("mymusic","🎵","My Music")}
@@ -171,6 +174,8 @@ function renderMain(){
   if(state.view==="profile") return renderProfile(state.profileId);
   if(state.view==="mymusic") return renderMyMusic();
   if(state.view==="fans") return renderFans();
+  if(state.view==="buzzing") return renderBuzzing();
+  if(state.view==="notifs") return renderNotifs();
   if(state.view==="home") return renderHome();
   renderDiscover();
 }
@@ -273,12 +278,14 @@ function postStatus(){
   fbDB.collection("statuses").add({ userId:ME.id, text:t, time:Date.now() }).then(()=>toast("Posted to your wall 📣")).catch(e=>toast("Couldn't post: "+(e.code||e.message)));
 }
 function stLike(id){ if(!ME) return openEmailAuth(); const F=firebase.firestore.FieldValue; const has=(CACHE.reactions["s_"+id]?.likes||[]).includes(ME.id);
-  fbDB.collection("reactions").doc("s_"+id).set({ likes: has?F.arrayRemove(ME.id):F.arrayUnion(ME.id), dislikes:F.arrayRemove(ME.id) },{merge:true}).catch(e=>toast(e.code||e.message)); }
+  fbDB.collection("reactions").doc("s_"+id).set({ likes: has?F.arrayRemove(ME.id):F.arrayUnion(ME.id), dislikes:F.arrayRemove(ME.id) },{merge:true}).catch(e=>toast(e.code||e.message));
+  if(!has){ const s=allStatuses().find(x=>x.id===id); if(s) notify(s.userId,"like",`${ME.name} liked your post 👍`); } }
 function stDislike(id){ if(!ME) return openEmailAuth(); const F=firebase.firestore.FieldValue; const has=(CACHE.reactions["s_"+id]?.dislikes||[]).includes(ME.id);
   fbDB.collection("reactions").doc("s_"+id).set({ dislikes: has?F.arrayRemove(ME.id):F.arrayUnion(ME.id), likes:F.arrayRemove(ME.id) },{merge:true}).catch(e=>toast(e.code||e.message)); }
 function stComment(id){ const el=$("sc_"+id); const t=(el?.value||"").trim(); if(!t) return toast("Write a comment first");
   if(!ME) return openEmailAuth();
-  fbDB.collection("comments").add({ statusId:id, uid:ME.id, name:ME.name, text:t, time:Date.now() }).catch(e=>toast(e.code||e.message)); }
+  fbDB.collection("comments").add({ statusId:id, uid:ME.id, name:ME.name, text:t, time:Date.now() }).catch(e=>toast(e.code||e.message));
+  const s=allStatuses().find(x=>x.id===id); if(s) notify(s.userId,"comment",`${ME.name} commented: "${t.slice(0,50)}"`); }
 function editComment(cid){ const c=CACHE.comments.find(x=>x.id===cid); if(!c) return; if(!ME||c.uid!==ME.id) return;
   const t=prompt("Edit your comment:", c.text); if(t==null) return; const v=t.trim(); if(!v) return toast("Comment can't be empty");
   fbDB.collection("comments").doc(cid).update({ text:v, edited:true }).then(()=>toast("Comment updated")).catch(e=>toast(e.code||e.message)); }
@@ -287,7 +294,8 @@ function deleteComment(cid){ const c=CACHE.comments.find(x=>x.id===cid); if(!ME|
 
 // ---------- track like/dislike (music = reactions only) ----------
 function toggleLike(id){ if(!ME) return openEmailAuth(); const F=firebase.firestore.FieldValue; const has=(CACHE.reactions["t_"+id]?.likes||[]).includes(ME.id);
-  fbDB.collection("reactions").doc("t_"+id).set({ likes: has?F.arrayRemove(ME.id):F.arrayUnion(ME.id), dislikes:F.arrayRemove(ME.id) },{merge:true}).catch(e=>toast(e.code||e.message)); }
+  fbDB.collection("reactions").doc("t_"+id).set({ likes: has?F.arrayRemove(ME.id):F.arrayUnion(ME.id), dislikes:F.arrayRemove(ME.id) },{merge:true}).catch(e=>toast(e.code||e.message));
+  if(!has){ const t=allTracks().find(x=>x.id===id); if(t) notify(t.userId,"like",`${ME.name} liked your track "${t.title}" 👍`); } }
 function toggleDislike(id){ if(!ME) return openEmailAuth(); const F=firebase.firestore.FieldValue; const has=(CACHE.reactions["t_"+id]?.dislikes||[]).includes(ME.id);
   fbDB.collection("reactions").doc("t_"+id).set({ dislikes: has?F.arrayRemove(ME.id):F.arrayUnion(ME.id), likes:F.arrayRemove(ME.id) },{merge:true}).catch(e=>toast(e.code||e.message)); }
 
@@ -387,7 +395,8 @@ function openInvite(){ const u=currentUser(); const link=`${location.origin}${lo
 // ---------- social ----------
 function share(id){ const link=`${location.origin}${location.pathname}?track=${id}`; if(navigator.clipboard) navigator.clipboard.writeText(link).then(()=>toast("Share link copied ✓")).catch(()=>toast(link)); else toast(link); }
 function toggleFollow(uid){ if(!ME) return openEmailAuth(); const F=firebase.firestore.FieldValue; const has=(CACHE.follows[ME.id]||[]).includes(uid);
-  fbDB.collection("follows").doc(ME.id).set({ following: has?F.arrayRemove(uid):F.arrayUnion(uid) },{merge:true}).then(()=>toast(has?"Unfollowed":"You're now a fan ✓")).catch(e=>toast(e.code||e.message)); }
+  fbDB.collection("follows").doc(ME.id).set({ following: has?F.arrayRemove(uid):F.arrayUnion(uid) },{merge:true}).then(()=>toast(has?"Unfollowed":"You're now a fan ✓")).catch(e=>toast(e.code||e.message));
+  if(!has) notify(uid,"follow",`${ME.name} is now one of your fans 🎉`); }
 function logout(){ fbAuth.signOut(); }
 
 // ---------- overlay ----------
@@ -429,6 +438,48 @@ function renderFans(){
       <button class="tab ${tab==='following'?'active':''}" data-action="fantab" data-t="following">Following (${following.length})</button>
     </div>
     ${list.length?list.map(userCard).join(""):`<div class="empty">${tab==='fans'?"No fans yet — share your invite link, post tracks and statuses to attract them! 🎶":"You're not following anyone yet. Open Discover and follow creators you love."}</div>`}`;
+}
+
+// ---------- notifications ----------
+function notify(forUid,type,text){
+  if(!ME||!forUid||forUid===ME.id) return;
+  if(String(forUid).startsWith("u_")) return;          // skip seed/demo recipients
+  fbDB.collection("notifications").add({ forUid, type, fromUid:ME.id, fromName:ME.name, text, time:Date.now(), read:false }).catch(()=>{});
+}
+let notifUnsub=null;
+function startMyNotifications(){
+  if(notifUnsub){ notifUnsub(); notifUnsub=null; }
+  if(!ME||!ME.handle){ CACHE.notifications=[]; return; }
+  notifUnsub=fbDB.collection("notifications").where("forUid","==",ME.id)
+    .onSnapshot(s=>{ CACHE.notifications=s.docs.map(d=>({ id:d.id, ...d.data() })); scheduleRender(); }, e=>console.warn("notif",e.code));
+}
+function markAllRead(){
+  const un=(CACHE.notifications||[]).filter(n=>!n.read); if(!un.length) return;
+  const b=fbDB.batch(); un.forEach(n=>b.update(fbDB.collection("notifications").doc(n.id),{ read:true })); b.commit().catch(()=>{});
+}
+function renderNotifs(){
+  const list=(CACHE.notifications||[]).slice().sort((a,b)=>b.time-a.time);
+  $("page").innerHTML=`<div class="h-title">Notifications 🔔</div>${
+    list.length?list.map(n=>`<div class="mrow2" data-action="profile" data-uid="${n.fromUid}" style="cursor:pointer;${n.read?'':'background:#fff7f1'}">
+      <div class="avatar" style="${avatarStyle(userById(n.fromUid)||{color:'#FB7A28'},42)}">${(userById(n.fromUid)?.avatarImg)?'':initials(n.fromName||'?')}</div>
+      <div class="minfo"><div class="mt">${esc(n.text)}</div><div class="ms">${timeAgo(n.time)}</div></div></div>`).join("")
+    :'<div class="empty">No notifications yet. When fans follow you or react to your music & posts, they\'ll show up here. 🔔</div>'}`;
+  setTimeout(markAllRead,400);
+}
+
+// ---------- buzzing (trending chart) ----------
+function renderBuzzing(){
+  let list=allTracks().filter(t=>t.visibility==="public").map(t=>({ t, score:playCount(t.id)+likeCount(t.id)*5 }));
+  list.sort((a,b)=>b.score-a.score); list=list.slice(0,25);
+  $("page").innerHTML=`<div class="h-title">🔥 Buzzing right now</div>
+    <p class="note" style="margin-bottom:14px">The community's hottest tracks, ranked by plays + likes.</p>
+    ${list.map((x,i)=>{ const t=x.t, u=userById(t.userId); const medal=i===0?'🥇':i===1?'🥈':i===2?'🥉':('#'+(i+1));
+      return `<div class="mrow2">
+        <div style="width:34px;text-align:center;font-weight:900;color:var(--orange-deep)">${medal}</div>
+        <div class="mart" style="background:${grad(t.accent)};cursor:pointer" data-action="play" data-id="${t.id}">◎</div>
+        <div class="minfo"><div class="mt" data-action="play" data-id="${t.id}">${esc(t.title)}</div>
+          <div class="ms" data-action="profile" data-uid="${u.id}">${esc(u.name)} · ▶ ${nfmt(playCount(t.id))} · 👍 ${nfmt(likeCount(t.id))}</div></div>
+        <button class="btn sm primary" data-action="play" data-id="${t.id}">▶</button></div>`; }).join("")}`;
 }
 
 // ---------- suggestion box (collect ideas to improve the network) ----------
@@ -488,7 +539,7 @@ startListeners();
 fbAuth.onAuthStateChanged(async (user)=>{
   if(user){
     const prof=await loadProfile(user.uid);
-    if(prof){ ME=prof; syncME(); render(); }
+    if(prof){ ME=prof; syncME(); startMyNotifications(); render(); }
     else { ME={ id:user.uid, name:user.displayName||"" }; render(); }   // no profile yet → onboarding
-  } else { ME=null; syncME(); render(); }
+  } else { ME=null; syncME(); startMyNotifications(); render(); }
 });
