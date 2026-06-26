@@ -151,12 +151,14 @@ function renderApp(){
         ${item("discover","🧭","Discover")}
         ${item("home","🏠","My Feed")}
         <div class="side-item" data-action="profile" data-uid="${u.id}"><span class="ic">😊</span>My Page</div>
+        ${item("fans","🫂","My Fans")}
         ${item("mymusic","🎵","My Music")}
         <div class="side-sep"></div>
         <div class="side-item" data-action="sharefolder"><span class="ic">📁</span>Share a folder</div>
         <div class="side-item" data-action="upload"><span class="ic">⬆️</span>Add single track</div>
         <div class="side-item" data-action="customize"><span class="ic">🎨</span>Edit profile</div>
         <div class="side-item" data-action="invite"><span class="ic">✉️</span>Invite friends</div>
+        <div class="side-item" data-action="suggest"><span class="ic">💡</span>Suggest a feature</div>
         <div class="side-sep"></div>
         <div class="side-item" data-action="logout"><span class="ic">↩️</span>Log out</div>
       </nav>
@@ -168,6 +170,7 @@ function renderApp(){
 function renderMain(){
   if(state.view==="profile") return renderProfile(state.profileId);
   if(state.view==="mymusic") return renderMyMusic();
+  if(state.view==="fans") return renderFans();
   if(state.view==="home") return renderHome();
   renderDiscover();
 }
@@ -402,6 +405,46 @@ audio.addEventListener("timeupdate",()=>{ if(!audio.duration)return; $("mpFill")
 $("mpProg").addEventListener("click",e=>{ if(!audio.duration)return; const r=e.currentTarget.getBoundingClientRect(); audio.currentTime=(e.clientX-r.left)/r.width*audio.duration; });
 
 // ---------- delegation ----------
+// ---------- fans / following (fanbase list) ----------
+function followingOf(uid){ return CACHE.follows[uid]||[]; }
+function followersOf(uid){ const r=[]; for(const f in CACHE.follows){ if(CACHE.follows[f].includes(uid)) r.push(f); } return r; }
+function userCard(u){
+  if(!u) return "";
+  const me=currentUser(); const self=me&&me.id===u.id;
+  const btn=self?"":`<button class="btn sm ${isFollowing(u.id)?'':'primary'}" data-action="follow" data-uid="${u.id}">${isFollowing(u.id)?'Following ✓':'Follow back'}</button>`;
+  return `<div class="mrow2">
+    <div class="avatar" style="${avatarStyle(u,44)};cursor:pointer" data-action="profile" data-uid="${u.id}">${u.avatarImg?'':initials(u.name)}</div>
+    <div class="minfo"><div class="mt" data-action="profile" data-uid="${u.id}">${esc(u.name)}</div><div class="ms">@${esc(u.handle)} · ${nfmt(followerCount(u.id))} fans</div></div>
+    ${btn}</div>`;
+}
+function renderFans(){
+  const me=currentUser(); if(!me) return;
+  const tab=state.fanTab||"fans";
+  const fans=followersOf(me.id).map(userById).filter(Boolean);
+  const following=followingOf(me.id).map(userById).filter(Boolean);
+  const list=tab==="fans"?fans:following;
+  $("page").innerHTML=`<div class="h-title">My Fanbase</div>
+    <div class="tabs">
+      <button class="tab ${tab==='fans'?'active':''}" data-action="fantab" data-t="fans">Fans (${fans.length})</button>
+      <button class="tab ${tab==='following'?'active':''}" data-action="fantab" data-t="following">Following (${following.length})</button>
+    </div>
+    ${list.length?list.map(userCard).join(""):`<div class="empty">${tab==='fans'?"No fans yet — share your invite link, post tracks and statuses to attract them! 🎶":"You're not following anyone yet. Open Discover and follow creators you love."}</div>`}`;
+}
+
+// ---------- suggestion box (collect ideas to improve the network) ----------
+function openSuggest(){
+  openOverlay(`<h2>💡 Help shape OK Music</h2><p class="sub">Tell us what to add or improve — every idea is read.</p>
+    <div class="field"><textarea id="sgText" placeholder="e.g. Add direct messages between artists, a weekly Top-10 chart, dark mode…" style="min-height:110px"></textarea></div>
+    <button class="btn primary block" data-action="sendsuggest">Send suggestion</button>
+    <p class="note">Saved to the community suggestion box for the team to review. (A live Claude-powered assistant can be added later.)</p>`);
+}
+function sendSuggest(){
+  const t=($("sgText").value||"").trim(); if(!t) return toast("Type your idea first");
+  fbDB.collection("suggestions").add({ uid:(ME&&ME.id)||"guest", name:(ME&&ME.name)||"Guest", text:t, time:Date.now() })
+    .then(()=>{ closeOverlay(); toast("Thank you! Your idea was sent 💜"); })
+    .catch(e=>toast("Couldn't send: "+(e.code||e.message)));
+}
+
 document.addEventListener("click",e=>{
   const el=e.target.closest("[data-action]"); if(!el) return; const a=el.dataset.action;
   const M={
@@ -416,6 +459,7 @@ document.addEventListener("click",e=>{
     follow:()=>toggleFollow(el.dataset.uid), share:()=>share(el.dataset.id), logout:logout, close:closeOverlay,
     publish:()=>setVisibility(el.dataset.id,"public"), unpublish:()=>setVisibility(el.dataset.id,"private"), deltrack:()=>deleteTrack(el.dataset.id),
     editcmt:()=>editComment(el.dataset.id), delcmt:()=>deleteComment(el.dataset.id),
+    fantab:()=>{ state.fanTab=el.dataset.t; renderFans(); }, suggest:openSuggest, sendsuggest:sendSuggest,
     swatch:()=>{window._upColor=el.dataset.c;document.querySelectorAll("#swatches .swatch").forEach(s=>s.classList.toggle("sel",s===el));},
     vis:()=>{window._upVis=el.dataset.v;document.querySelectorAll("#visRow .radio-card").forEach(c=>c.classList.toggle("sel",c===el));},
     bgcolor:()=>{window._bgColor=el.dataset.c;const bi=$("bgImg");if(bi)bi.value="";document.querySelectorAll("#bgSw .swatch").forEach(s=>s.classList.toggle("sel",s===el));}
