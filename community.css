@@ -178,12 +178,15 @@ img{max-width:100%}
 
 /* ===== playlists (from folders) ===== */
 .playlist{margin-bottom:24px;border:1px solid var(--line);border-radius:16px;padding:14px 16px}
-.playlist-head{display:flex;align-items:center;gap:12px;margin-bottom:10px}
+.playlist-head{display:flex;align-items:center;gap:12px;cursor:pointer;user-select:none}
+.playlist-head:hover .pl-name{color:var(--orange-deep)}
+.pl-toggle{width:28px;height:28px;border-radius:50%;background:var(--orange-2);display:grid;place-items:center;font-size:18px;font-weight:900;color:var(--orange-deep);flex-shrink:0;transition:background .15s}
+.playlist-head:hover .pl-toggle{background:var(--orange-3)}
 .pl-ic{width:42px;height:42px;border-radius:11px;background:linear-gradient(135deg,var(--orange-2),var(--orange-3));display:grid;place-items:center;font-size:20px;flex-shrink:0}
 .pl-name{font-weight:800;font-size:17px}
 .pl-sub{font-size:12px;color:var(--muted)}
 .pl-actions{margin-left:auto;display:flex;gap:6px}
-.tracklist{display:flex;flex-direction:column;gap:4px}
+.tracklist{display:flex;flex-direction:column;gap:4px;margin-top:10px}
 .trow{display:flex;align-items:center;gap:12px;padding:9px 10px;border-radius:10px;cursor:pointer}
 .trow:hover{background:#faf6f2}
 .trow .tn{width:36px;height:36px;border-radius:8px;display:grid;place-items:center;color:#fff;flex-shrink:0;background-size:cover;background-position:center;font-size:12px;background-color:#e9ddd2}

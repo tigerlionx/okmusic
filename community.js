@@ -158,7 +158,7 @@ function renderApp(){
         ${item("fans","🫂","My Fans")}
         ${item("mymusic","🎵","My Music")}
         <div class="side-sep"></div>
-        <div class="side-item" data-action="sharefolder"><span class="ic">📁</span>Share a folder</div>
+        <div class="side-item" data-action="sharefolder"><span class="ic">📁</span>Add a folder</div>
         <div class="side-item" data-action="upload"><span class="ic">⬆️</span>Add single track</div>
         <div class="side-item" data-action="customize"><span class="ic">🎨</span>Edit profile</div>
         <div class="side-item" data-action="invite"><span class="ic">✉️</span>Invite friends</div>
@@ -310,9 +310,18 @@ function toggleDislike(id){ if(!ME) return openEmailAuth(); const F=firebase.fir
 
 // ---------- playlists from folders ----------
 function playlistBlock(p,owner){
+  if(!state.openPlaylists) state.openPlaylists=new Set();
+  const open=state.openPlaylists.has(p.id);
   const rows=p.files.map((f,i)=>`<div class="trow" data-action="playfile" data-pl="${p.id}" data-file="${esc(f)}"><div class="tn" id="tn_${p.id}_${i}">${i+1}</div><div class="ttitle">${esc(f.replace(/\.[^.]+$/,''))}</div><span class="tplay">▶</span></div>`).join("");
-  const acts=owner?`<div class="pl-actions">${p.thumbs?'<span class="pill pub">covers ✓</span>':`<button class="btn sm" data-action="setthumbs" data-pl="${p.id}">＋ covers</button>`}<button class="btn sm" data-action="relink" data-pl="${p.id}">re-link</button></div>`:"";
-  return `<div class="playlist"><div class="playlist-head"><div class="pl-ic">📁</div><div><div class="pl-name">${esc(p.name)}</div><div class="pl-sub">${p.files.length} tracks · folder</div></div>${acts}</div><div class="tracklist">${rows}</div></div>`;
+  const acts=owner?`<div class="pl-actions"><button class="btn sm" data-action="setthumbs" data-pl="${p.id}">${p.thumbs?'covers ✓':'＋ covers'}</button><button class="btn sm" data-action="relink" data-pl="${p.id}">re-link</button></div>`:"";
+  return `<div class="playlist">
+    <div class="playlist-head" data-action="togglepl" data-pl="${p.id}">
+      <div class="pl-ic">📁</div>
+      <div style="flex:1"><div class="pl-name">${esc(p.name)}</div><div class="pl-sub">${p.files.length} tracks · folder</div></div>
+      ${acts}<span class="pl-toggle">${open?'−':'+'}</span>
+    </div>
+    ${open?`<div class="tracklist">${rows}</div>`:''}
+  </div>`;
 }
 async function loadCovers(p){
   if(!p.thumbs) return; let c=dirCache[p.id]; if(!c||!c.thumbs){ const h=await fsGet(p.id+"_thumbs"); if(h&&await ensurePerm(h)){ c=dirCache[p.id]=dirCache[p.id]||{}; c.thumbs=h; } }
@@ -366,8 +375,8 @@ function renderMyMusic(){
     ${t.visibility==='private'?`<button class="btn sm primary" data-action="publish" data-id="${t.id}">Publish</button>`:`<button class="btn sm" data-action="unpublish" data-id="${t.id}">Hide</button>`}
     <button class="btn sm" data-action="deltrack" data-id="${t.id}" style="color:#e2554f;border-color:#f0b3b3">Delete</button></div>`).join("");
   $("page").innerHTML=`<div class="h-title">My Music</div>
-    <div class="folder-banner">📁 <b>Folders become playlists.</b> Pick a music folder — every song becomes a playable track instantly, no upload. Add a <b>thumbnails folder</b> (images named like each track) for covers. Chrome &amp; Edge.</div>
-    <div style="display:flex;gap:8px;margin-bottom:18px;flex-wrap:wrap"><button class="btn primary" data-action="sharefolder">📁 Share a music folder</button><button class="btn" data-action="upload">＋ Add single track</button></div>
+    <div class="folder-banner">📁 <b>Each folder becomes a playlist.</b> Add as many folders as you like — each one appears in the list. Click <b>+</b> to expand and play tracks. Add a <b>thumbnails folder</b> (images named like each track) for covers. Chrome &amp; Edge.</div>
+    <div style="display:flex;gap:8px;margin-bottom:18px;flex-wrap:wrap"><button class="btn primary" data-action="sharefolder">📁 Add a folder</button><button class="btn" data-action="upload">＋ Add single track</button></div>
     ${pls.length?`<div class="section-title">Playlists (folders)</div>${pls.map(p=>playlistBlock(p,true)).join("")}`:""}
     ${tracks.length?`<div class="section-title">Single tracks</div>${rows}`:""}
     ${(!pls.length&&!tracks.length)?'<div class="empty">No music yet — share a folder to begin.</div>':""}`;
@@ -521,6 +530,7 @@ document.addEventListener("click",e=>{
     publish:()=>setVisibility(el.dataset.id,"public"), unpublish:()=>setVisibility(el.dataset.id,"private"), deltrack:()=>deleteTrack(el.dataset.id),
     editcmt:()=>editComment(el.dataset.id), delcmt:()=>deleteComment(el.dataset.id),
     fantab:()=>{ state.fanTab=el.dataset.t; renderFans(); }, suggest:openSuggest, sendsuggest:sendSuggest,
+    togglepl:()=>{ if(!state.openPlaylists) state.openPlaylists=new Set(); const id=el.dataset.pl; state.openPlaylists.has(id)?state.openPlaylists.delete(id):state.openPlaylists.add(id); renderMain(); },
     genre:()=>{ state.genre=el.dataset.g; if(state.view!=="discover") state.view="discover"; renderDiscover(); },
     swatch:()=>{window._upColor=el.dataset.c;document.querySelectorAll("#swatches .swatch").forEach(s=>s.classList.toggle("sel",s===el));},
     vis:()=>{window._upVis=el.dataset.v;document.querySelectorAll("#visRow .radio-card").forEach(c=>c.classList.toggle("sel",c===el));},
