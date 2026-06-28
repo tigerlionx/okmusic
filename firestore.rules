@@ -42,5 +42,19 @@ service cloud.firestore {
       allow read: if true;
       allow write: if signedIn();
     }
+
+    // Notifications: a signed-in user can create one for someone else;
+    // the recipient can read and mark their own as read.
+    match /notifications/{id} {
+      allow read: if signedIn();
+      allow create: if signedIn() && request.resource.data.fromUid == request.auth.uid;
+      allow update, delete: if signedIn() && resource.data.forUid == request.auth.uid;
+    }
+
+    // Suggestion box: anyone signed in can submit; reads are console-only.
+    match /suggestions/{id} {
+      allow create: if signedIn();
+      allow read, update, delete: if false;
+    }
   }
 }

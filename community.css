@@ -233,3 +233,9 @@ img{max-width:100%}
 .bell{position:relative;cursor:pointer;font-size:20px;line-height:1;padding:6px;border-radius:50%}
 .bell:hover{background:rgba(255,255,255,.5)}
 .bell-badge{position:absolute;top:-1px;right:-2px;background:#e2554f;color:#fff;font-size:10px;font-weight:800;border-radius:99px;padding:1px 5px;line-height:1.4}
+
+/* ===== genre filter chips ===== */
+.genre-chips{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:20px}
+.chip{border:1px solid var(--line);background:#fff;color:var(--ink);border-radius:99px;padding:6px 14px;font-size:13px;font-weight:700;cursor:pointer}
+.chip:hover{background:#faf6f2}
+.chip.on{background:var(--orange);border-color:var(--orange);color:#fff}
