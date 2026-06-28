@@ -13,6 +13,7 @@ const audio = $("audio");
 // Seed data (incl. 100 demo creators) now lives in community-data.js:
 // SEED_USERS, SEED_TRACKS, SEED_STATUSES, SEED_STATS, SEED_FOLLOWERS, SEED_ST_STATS.
 const COLORS = ["#FB7A28","#7c5cff","#36d1c4","#ff5c7c","#ffb347","#5c8bff","#ff7ac6","#2bbf4e"];
+const GENRES = ["Synthwave","Lo-fi","Ambient","Trap","Deep House","Cinematic","Drill","Afrobeat","Jazz-hop","Chillstep","Orchestral","Phonk","Future Bass","Downtempo","Hyperpop","Pop","Rock","Electronic","World","Other"];
 
 // ---------- DB ----------
 const LS = "okcommunity4";
@@ -182,11 +183,19 @@ function renderMain(){
 
 // ---------- discover (browse music) ----------
 function renderDiscover(){
+  const q=state.query.trim().toLowerCase(); const g=state.genre||"";
   let list=allTracks().filter(t=>t.visibility==="public");
-  const q=state.query.trim().toLowerCase();
-  if(q) list=list.filter(t=>t.title.toLowerCase().includes(q)||userById(t.userId)?.name.toLowerCase().includes(q));
+  if(g) list=list.filter(t=>(t.genre||"Other")===g);
+  if(q) list=list.filter(t=>t.title.toLowerCase().includes(q)||(t.genre||"").toLowerCase().includes(q)||userById(t.userId)?.name.toLowerCase().includes(q));
   list.sort((a,b)=>b.createdAt-a.createdAt);
-  $("page").innerHTML=`<div class="h-title">Discover</div>${list.length?`<div class="grid">${list.map(card).join("")}</div>`:'<div class="empty">No tracks found.</div>'}`;
+  // artists matching the search (so any artist is findable, online or not)
+  let artists=[];
+  if(q) artists=allUsers().filter(u=>u&&(u.name.toLowerCase().includes(q)||(u.handle||"").toLowerCase().includes(q))).slice(0,12);
+  const chips=`<div class="genre-chips"><button class="chip ${g===''?'on':''}" data-action="genre" data-g="">All genres</button>${GENRES.map(x=>`<button class="chip ${g===x?'on':''}" data-action="genre" data-g="${x}">${x}</button>`).join("")}</div>`;
+  const artistSec=artists.length?`<div class="section-title">Artists</div><div style="margin-bottom:20px">${artists.map(userCard).join("")}</div>`:"";
+  $("page").innerHTML=`<div class="h-title">Discover</div>${chips}${artistSec}
+    ${q||artists.length?'<div class="section-title">Tracks</div>':''}
+    ${list.length?`<div class="grid">${list.map(card).join("")}</div>`:'<div class="empty">No tracks found'+(q?' for "'+esc(state.query)+'"':'')+'.</div>'}`;
 }
 function card(t){
   const u=userById(t.userId);
@@ -338,13 +347,14 @@ function openUpload(){
     <div class="field"><label>Track title</label><input id="upTitle" placeholder="e.g. Midnight Bloom" /></div>
     <div class="field"><label>Cover color</label><div class="swatches" id="swatches">${COLORS.map((c,i)=>`<div class="swatch ${i===0?'sel':''}" style="background:${c}" data-action="swatch" data-c="${c}"></div>`).join("")}</div></div>
     <div class="field"><label>Audio link (optional)</label><input id="upSrc" placeholder="https://…/song.mp3" /></div>
+    <div class="field"><label>Genre</label><select id="upGenre" class="fb-field">${GENRES.map(g=>`<option value="${g}">${g}</option>`).join("")}</select></div>
     <div class="field"><label>Visibility</label><div class="radio-row" id="visRow"><div class="radio-card sel" data-action="vis" data-v="public"><b>Public</b>Everyone can play it</div><div class="radio-card" data-action="vis" data-v="private"><b>Private</b>Only you, until you publish</div></div></div>
     <label class="check"><input type="checkbox" id="upShare" checked> Allow fans to share this track</label>
     <button class="btn primary block" data-action="dopublish">Add to my music</button>`);
   window._upColor=COLORS[0]; window._upVis="public";
 }
 function doPublish(){ const title=($("upTitle").value||"").trim(); if(!title) return toast("Give it a title"); if(!ME) return openEmailAuth();
-  fbDB.collection("tracks").add({ userId:ME.id, title, src:($("upSrc").value||"").trim(), accent:window._upColor||COLORS[0], visibility:window._upVis||"public", share:!!($("upShare")&&$("upShare").checked), createdAt:Date.now() })
+  fbDB.collection("tracks").add({ userId:ME.id, title, src:($("upSrc").value||"").trim(), genre:($("upGenre")&&$("upGenre").value)||"Other", accent:window._upColor||COLORS[0], visibility:window._upVis||"public", share:!!($("upShare")&&$("upShare").checked), createdAt:Date.now() })
     .then(()=>{ closeOverlay(); toast(window._upVis==="private"?"Saved private 🔒":"Published! 🎵"); go("mymusic"); })
     .catch(e=>toast("Couldn't save: "+(e.code||e.message))); }
 
@@ -511,6 +521,7 @@ document.addEventListener("click",e=>{
     publish:()=>setVisibility(el.dataset.id,"public"), unpublish:()=>setVisibility(el.dataset.id,"private"), deltrack:()=>deleteTrack(el.dataset.id),
     editcmt:()=>editComment(el.dataset.id), delcmt:()=>deleteComment(el.dataset.id),
     fantab:()=>{ state.fanTab=el.dataset.t; renderFans(); }, suggest:openSuggest, sendsuggest:sendSuggest,
+    genre:()=>{ state.genre=el.dataset.g; if(state.view!=="discover") state.view="discover"; renderDiscover(); },
     swatch:()=>{window._upColor=el.dataset.c;document.querySelectorAll("#swatches .swatch").forEach(s=>s.classList.toggle("sel",s===el));},
     vis:()=>{window._upVis=el.dataset.v;document.querySelectorAll("#visRow .radio-card").forEach(c=>c.classList.toggle("sel",c===el));},
     bgcolor:()=>{window._bgColor=el.dataset.c;const bi=$("bgImg");if(bi)bi.value="";document.querySelectorAll("#bgSw .swatch").forEach(s=>s.classList.toggle("sel",s===el));}
