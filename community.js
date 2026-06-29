@@ -100,6 +100,7 @@ function renderLanding(){
   $("root").innerHTML=`
   <div class="authwrap"><div class="authbox">
     <div class="logo">◎ OK Music</div><h1>Where AI music finds its fans.</h1>
+    <p class="landing-desc">OK Music helps you share your AI music creation to your family, friends and fans. Log in to become famous...</p>
     <div class="authcard">
       <button class="social-btn" data-action="auth" data-p="google"><span class="ic" style="color:#EA4335">G</span> Continue with Google</button>
       <button class="social-btn" data-action="auth" data-p="apple"><span class="ic"></span> Continue with Apple</button>
