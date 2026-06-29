@@ -193,6 +193,7 @@ img{max-width:100%}
 .trow .ttitle{flex:1;font-weight:600;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .trow .tplay{color:var(--orange);font-weight:800;font-size:15px}
 .folder-banner{background:#fff7f1;border:1px solid #ffe0c8;border-radius:12px;padding:13px 15px;font-size:13px;color:#8a6b50;margin-bottom:16px;line-height:1.5}
+.folder-note{margin-top:10px;padding:9px 12px;background:#fff3e0;border-left:3px solid var(--orange);border-radius:0 8px 8px 0;font-size:12px;color:#7a5c3a;line-height:1.6}
 
 /* ===== streamer page: two columns (music | wall) ===== */
 .streamer-cols{display:grid;grid-template-columns:1fr 1fr;gap:24px;align-items:start;margin-top:8px}
