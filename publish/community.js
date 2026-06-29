@@ -14,6 +14,18 @@ const audio = $("audio");
 // SEED_USERS, SEED_TRACKS, SEED_STATUSES, SEED_STATS, SEED_FOLLOWERS, SEED_ST_STATS.
 const COLORS = ["#FB7A28","#7c5cff","#36d1c4","#ff5c7c","#ffb347","#5c8bff","#ff7ac6","#2bbf4e"];
 const GENRES = ["Synthwave","Lo-fi","Ambient","Trap","Deep House","Cinematic","Drill","Afrobeat","Jazz-hop","Chillstep","Orchestral","Phonk","Future Bass","Downtempo","Hyperpop","Pop","Rock","Electronic","World","Other"];
+const THEMES = [
+  { id:"aurora",   label:"Aurora",    css:"linear-gradient(135deg,#7c5cff,#36d1c4)" },
+  { id:"sunset",   label:"Sunset",    css:"linear-gradient(135deg,#FB7A28,#ff5c7c)" },
+  { id:"ocean",    label:"Ocean",     css:"linear-gradient(135deg,#1a3a6b,#36d1c4)" },
+  { id:"midnight", label:"Midnight",  css:"linear-gradient(135deg,#0d0d2b,#7c5cff)" },
+  { id:"forest",   label:"Forest",    css:"linear-gradient(135deg,#1a4731,#2bbf4e)" },
+  { id:"rosegold", label:"Rose Gold", css:"linear-gradient(135deg,#ff7ac6,#ffb347)" },
+  { id:"ember",    label:"Ember",     css:"linear-gradient(135deg,#4a0000,#FB7A28)" },
+  { id:"arctic",   label:"Arctic",    css:"linear-gradient(135deg,#a8edea,#fed6e3)" },
+  { id:"galaxy",   label:"Galaxy",    css:"linear-gradient(135deg,#0f2027,#203a43,#2c5364)" },
+  { id:"neon",     label:"Neon",      css:"linear-gradient(135deg,#0f0c29,#302b63,#f953c6)" },
+];
 
 // ---------- DB ----------
 const LS = "okcommunity4";
@@ -203,8 +215,9 @@ function renderDiscover(){
 }
 function card(t){
   const u=userById(t.userId);
+  const artStyle=t.coverImg?`background-image:url('${t.coverImg}');background-size:cover;background-position:center`:`background:${grad(t.accent)}`;
   return `<div class="card">
-    <div class="card-art" style="background:${grad(t.accent)}" data-action="play" data-id="${t.id}">◎<button class="card-play" data-action="play" data-id="${t.id}">▶</button></div>
+    <div class="card-art" style="${artStyle}" data-action="play" data-id="${t.id}">${t.coverImg?'':'◎'}<button class="card-play" data-action="play" data-id="${t.id}">▶</button></div>
     <div class="card-body"><div class="card-title" data-action="play" data-id="${t.id}">${esc(t.title)}</div>
       <div class="card-artist" data-action="profile" data-uid="${u.id}">${esc(u.name)}</div>
       <div class="card-meta"><button class="${hasLiked(t.id)?'on':''}" data-action="like" data-id="${t.id}">👍 ${nfmt(likeCount(t.id))}</button>
@@ -226,7 +239,8 @@ function renderHome(){
 function renderProfile(uid){
   const u=userById(uid); if(!u){ $("page").innerHTML='<div class="empty">Artist not found.</div>'; return; }
   const me=currentUser(); const mine=me&&me.id===uid;
-  const cover=u.bgImg?`background-image:url('${u.bgImg}');background-size:cover;background-position:center`:u.bgColor?`background:${u.bgColor}`:"";
+  const themeCSS=u.bgTheme?(THEMES.find(t=>t.id===u.bgTheme)||{}).css:"";
+  const cover=u.bgImg?`background-image:url('${u.bgImg}');background-size:cover;background-position:center`:themeCSS?`background:${themeCSS}`:u.bgColor?`background:${u.bgColor}`:"";
   const tracks=tracksByUser(uid,mine); const pls=playlistsByUser(uid); const sts=statusesByUser(uid);
   const headActions=mine
     ? `<button class="btn primary" data-action="customize">🎨 Edit profile</button><button class="btn" data-action="invite">✉️ Invite</button>`
@@ -259,7 +273,8 @@ function renderProfile(uid){
 // ---------- music row (like/dislike only) ----------
 function musicRow(t){
   const priv=t.visibility==="private";
-  return `<div class="mrow2"><div class="mart" style="background:${grad(t.accent)}" data-action="play" data-id="${t.id}">◎</div>
+  const artStyle=t.coverImg?`background-image:url('${t.coverImg}');background-size:cover;background-position:center`:`background:${grad(t.accent)}`;
+  return `<div class="mrow2"><div class="mart" style="${artStyle}" data-action="play" data-id="${t.id}">${t.coverImg?'':'◎'}</div>
     <div class="minfo"><div class="mt" data-action="play" data-id="${t.id}">${esc(t.title)}${priv?' 🔒':''}</div><div class="ms">▶ ${nfmt(playCount(t.id))} plays</div></div>
     <div class="ld"><button class="${hasLiked(t.id)?'on':''}" data-action="like" data-id="${t.id}">👍 ${nfmt(likeCount(t.id))}</button>
       <button class="${hasDisliked(t.id)?'ondown':''}" data-action="dislike" data-id="${t.id}">👎 ${nfmt(dislikeCount(t.id))}</button></div></div>`;
@@ -370,17 +385,22 @@ function openUpload(){
   if(!currentUser()) return openEmailAuth();
   openOverlay(`<h2>Add a single track</h2><p class="sub">Publish now or keep private until ready.</p>
     <div class="field"><label>Track title</label><input id="upTitle" placeholder="e.g. Midnight Bloom" /></div>
+    <div class="field"><label>Cover photo (optional)</label>
+      <div class="covup"><div class="covprev" id="covPrev" style="background:${COLORS[0]}">◎</div>
+        <div><input type="file" id="covFile" accept="image/*" /><div class="note" style="margin-top:4px">JPG/PNG — or pick a color below.</div></div></div></div>
     <div class="field"><label>Cover color</label><div class="swatches" id="swatches">${COLORS.map((c,i)=>`<div class="swatch ${i===0?'sel':''}" style="background:${c}" data-action="swatch" data-c="${c}"></div>`).join("")}</div></div>
     <div class="field"><label>Audio link (optional)</label><input id="upSrc" placeholder="https://…/song.mp3" /></div>
     <div class="field"><label>Genre</label><select id="upGenre" class="fb-field">${GENRES.map(g=>`<option value="${g}">${g}</option>`).join("")}</select></div>
     <div class="field"><label>Visibility</label><div class="radio-row" id="visRow"><div class="radio-card sel" data-action="vis" data-v="public"><b>Public</b>Everyone can play it</div><div class="radio-card" data-action="vis" data-v="private"><b>Private</b>Only you, until you publish</div></div></div>
     <label class="check"><input type="checkbox" id="upShare" checked> Allow fans to share this track</label>
     <button class="btn primary block" data-action="dopublish">Add to my music</button>`);
-  window._upColor=COLORS[0]; window._upVis="public";
+  window._upColor=COLORS[0]; window._upVis="public"; window._trackCover=null;
 }
 function doPublish(){ const title=($("upTitle").value||"").trim(); if(!title) return toast("Give it a title"); if(!ME) return openEmailAuth();
-  fbDB.collection("tracks").add({ userId:ME.id, title, src:($("upSrc").value||"").trim(), genre:($("upGenre")&&$("upGenre").value)||"Other", accent:window._upColor||COLORS[0], visibility:window._upVis||"public", share:!!($("upShare")&&$("upShare").checked), createdAt:Date.now() })
-    .then(()=>{ closeOverlay(); toast(window._upVis==="private"?"Saved private 🔒":"Published! 🎵"); go("mymusic"); })
+  const coverImg=window._trackCover||"";
+  if(coverImg&&coverImg.length>900000) return toast("Cover photo is too large — use a smaller image (under ~600KB).");
+  fbDB.collection("tracks").add({ userId:ME.id, title, src:($("upSrc").value||"").trim(), genre:($("upGenre")&&$("upGenre").value)||"Other", accent:window._upColor||COLORS[0], coverImg, visibility:window._upVis||"public", share:!!($("upShare")&&$("upShare").checked), createdAt:Date.now() })
+    .then(()=>{ closeOverlay(); window._trackCover=null; toast(window._upVis==="private"?"Saved private 🔒":"Published! 🎵"); go("mymusic"); })
     .catch(e=>toast("Couldn't save: "+(e.code||e.message))); }
 
 // ---------- my music ----------
@@ -410,14 +430,16 @@ function openCustomize(){
       <div><input type="file" id="avFile" accept="image/*" /><div class="note" style="margin-top:4px">JPG/PNG from your computer — or paste a link below.</div></div></div></div>
     <div class="field"><label>Photo link (optional)</label><input id="avUrl" placeholder="https://…/photo.jpg" /></div>
     <div class="field"><label>Bio (shown on your profile)</label><textarea id="bgBio" placeholder="Tell fans about your music…">${esc(u.bio||"")}</textarea></div>
-    <div class="field"><label>Banner color</label><div class="swatches" id="bgSw">${["#FFCBA0","#7c5cff","#36d1c4","#ff5c7c","#2bbf4e","#5c8bff","#33272f"].map(c=>`<div class="swatch ${u.bgColor===c?'sel':''}" style="background:${c}" data-action="bgcolor" data-c="${c}"></div>`).join("")}</div></div>
+    <div class="field"><label>Profile theme</label>
+      <div class="theme-grid" id="themeGrid">${THEMES.map(t=>`<div class="theme-swatch ${(u.bgTheme||"")===t.id?'sel':''}" style="background:${t.css}" data-action="theme" data-t="${t.id}" title="${t.label}"><span class="theme-label">${t.label}</span></div>`).join("")}</div></div>
+    <div class="field"><label>Or a solid color</label><div class="swatches" id="bgSw">${["#FFCBA0","#7c5cff","#36d1c4","#ff5c7c","#2bbf4e","#5c8bff","#33272f"].map(c=>`<div class="swatch ${u.bgColor===c&&!u.bgTheme?'sel':''}" style="background:${c}" data-action="bgcolor" data-c="${c}"></div>`).join("")}</div></div>
     <div class="field"><label>Or a banner image link</label><input id="bgImg" placeholder="https://…/banner.jpg" value="${esc(u.bgImg||"")}" /></div>
     <button class="btn primary block" data-action="savecustom">Save profile</button>`);
-  window._bgColor=u.bgColor||""; window._avatar=null;
+  window._bgColor=u.bgColor||""; window._bgTheme=u.bgTheme||""; window._avatar=null;
 }
 function saveCustom(){
   if(!ME) return; const url=($("avUrl").value||"").trim();
-  const upd={ bio:($("bgBio").value||"").trim()||ME.bio||"", bgColor:window._bgColor||"", bgImg:($("bgImg").value||"").trim() };
+  const upd={ bio:($("bgBio").value||"").trim()||ME.bio||"", bgColor:window._bgTheme?"":(window._bgColor||""), bgTheme:window._bgTheme||"", bgImg:($("bgImg").value||"").trim() };
   if(window._avatar){ if(window._avatar.length>700000) return toast("That photo is too big — paste a link instead, or use a smaller image."); upd.avatarImg=window._avatar; }
   else if(url) upd.avatarImg=url;
   fbDB.collection("users").doc(ME.id).set(upd,{merge:true}).then(()=>{ Object.assign(ME,upd); closeOverlay(); toast("Profile saved ✨"); go("profile",{profileId:ME.id}); }).catch(e=>toast("Couldn't save: "+(e.code||e.message)));
@@ -551,11 +573,15 @@ document.addEventListener("click",e=>{
     genre:()=>{ state.genre=el.dataset.g; if(state.view!=="discover") state.view="discover"; renderDiscover(); },
     swatch:()=>{window._upColor=el.dataset.c;document.querySelectorAll("#swatches .swatch").forEach(s=>s.classList.toggle("sel",s===el));},
     vis:()=>{window._upVis=el.dataset.v;document.querySelectorAll("#visRow .radio-card").forEach(c=>c.classList.toggle("sel",c===el));},
-    bgcolor:()=>{window._bgColor=el.dataset.c;const bi=$("bgImg");if(bi)bi.value="";document.querySelectorAll("#bgSw .swatch").forEach(s=>s.classList.toggle("sel",s===el));}
+    bgcolor:()=>{window._bgColor=el.dataset.c;window._bgTheme="";document.querySelectorAll("#bgSw .swatch").forEach(s=>s.classList.toggle("sel",s===el));document.querySelectorAll("#themeGrid .theme-swatch").forEach(s=>s.classList.remove("sel"));const bi=$("bgImg");if(bi)bi.value="";},
+    theme:()=>{window._bgTheme=el.dataset.t;window._bgColor="";document.querySelectorAll("#themeGrid .theme-swatch").forEach(s=>s.classList.toggle("sel",s===el));document.querySelectorAll("#bgSw .swatch").forEach(s=>s.classList.remove("sel"));const bi=$("bgImg");if(bi)bi.value="";}
   };
   if(M[a]) M[a]();
 });
-document.addEventListener("change",e=>{ if(e.target.id==="avFile"){ const f=e.target.files[0]; if(!f) return; const r=new FileReader(); r.onload=()=>{ window._avatar=r.result; const p=$("avPrev"); if(p){ p.style.backgroundImage=`url('${r.result}')`; p.textContent=""; } }; r.readAsDataURL(f); } });
+document.addEventListener("change",e=>{
+  if(e.target.id==="avFile"){ const f=e.target.files[0]; if(!f) return; const r=new FileReader(); r.onload=()=>{ window._avatar=r.result; const p=$("avPrev"); if(p){ p.style.backgroundImage=`url('${r.result}')`; p.textContent=""; } }; r.readAsDataURL(f); }
+  if(e.target.id==="covFile"){ const f=e.target.files[0]; if(!f) return; const r=new FileReader(); r.onload=()=>{ window._trackCover=r.result; const p=$("covPrev"); if(p){ p.style.backgroundImage=`url('${r.result}')`; p.style.backgroundSize="cover"; p.style.backgroundPosition="center"; p.style.background=""; p.textContent=""; } }; r.readAsDataURL(f); }
+});
 $("overlay").addEventListener("click",e=>{ if(e.target.id==="overlay") closeOverlay(); });
 document.addEventListener("keydown",e=>{ if(e.key==="Escape") closeOverlay(); });
 
