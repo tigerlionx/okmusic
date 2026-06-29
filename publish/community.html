@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>OK Music — AI Music Community</title>
+  <link rel="stylesheet" href="community.css?v=10" />
+</head>
+<body>
+  <div id="root"></div>
+
+  <div class="miniplayer" id="miniplayer">
+    <div class="mp-art" id="mpArt">◎</div>
+    <div class="mp-info">
+      <div class="mp-title" id="mpTitle">—</div>
+      <div class="mp-artist" id="mpArtist"></div>
+    </div>
+    <button class="mp-btn" id="mpPlay">▶</button>
+    <div class="mp-prog" id="mpProg"><div class="mp-prog-fill" id="mpFill"></div></div>
+    <span class="mp-time" id="mpTime">0:00</span>
+  </div>
+
+  <div class="overlay" id="overlay" hidden><div id="overlayBody"></div></div>
+  <div class="toast" id="toast" hidden></div>
+  <audio id="audio"></audio>
+
+  <!-- Firebase (compat SDK) -->
+  <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore-compat.js"></script>
+  <script src="firebase-init.js?v=10"></script>
+
+  <script src="community-data.js?v=10"></script>
+  <script src="community.js?v=10"></script>
+</body>
+</html>
