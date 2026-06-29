@@ -176,6 +176,17 @@ img{max-width:100%}
 .authcard .fb-field{margin-bottom:0;margin-top:4px}
 .authfoot{margin-top:18px;font-size:13px;color:var(--muted);text-align:center}
 
+/* ===== profile themes ===== */
+.theme-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:8px;margin-top:4px}
+.theme-swatch{height:48px;border-radius:12px;cursor:pointer;border:2px solid transparent;transition:.15s;position:relative;overflow:hidden}
+.theme-swatch:hover,.theme-swatch.sel{border-color:var(--orange);transform:scale(1.06);box-shadow:0 4px 14px rgba(0,0,0,.18)}
+.theme-label{position:absolute;bottom:0;left:0;right:0;font-size:9px;font-weight:700;color:#fff;text-align:center;padding:2px 0;background:rgba(0,0,0,.35);opacity:0;transition:.15s}
+.theme-swatch:hover .theme-label,.theme-swatch.sel .theme-label{opacity:1}
+
+/* ===== track cover upload ===== */
+.covup{display:flex;align-items:center;gap:14px;margin-top:4px}
+.covprev{width:72px;height:72px;border-radius:12px;display:grid;place-items:center;font-size:24px;color:rgba(255,255,255,.7);flex-shrink:0;background-size:cover;background-position:center}
+
 /* ===== playlists (from folders) ===== */
 .playlist{margin-bottom:24px;border:1px solid var(--line);border-radius:16px;padding:14px 16px}
 .playlist-head{display:flex;align-items:center;gap:12px;cursor:pointer;user-select:none}
