@@ -257,7 +257,7 @@ function renderProfile(uid){
   wall += sts.length?sts.map(statusCard).join(""):`<div class="empty" style="padding:24px">No posts yet.${mine?' Share a status to talk to your fans 👆':''}</div>`;
   $("page").innerHTML=`
     <div class="profile-cover" style="${cover}"></div>
-    <div class="profile-head"><div class="profile-avatar" style="${avatarStyle(u,104)}">${u.avatarImg?'':initials(u.name)}</div>
+    <div class="profile-head"><div class="profile-avatar" style="${avatarStyle(u,104)};cursor:pointer" data-action="viewavatar" data-uid="${uid}">${u.avatarImg?'':initials(u.name)}</div>
       <div class="profile-info"><div class="profile-name">${esc(u.name)} ${u.founder?'<span class="badge-founder">FOUNDER</span>':''}</div><div class="profile-handle">@${esc(u.handle)}</div></div></div>
     <div class="profile-stats"><div><b>${tracks.length+pls.reduce((n,p)=>n+p.files.length,0)}</b> <span>tracks</span></div>
       <div><b>${nfmt(followerCount(uid))}</b> <span>fans</span></div><div><b>${nfmt(followingCount(uid))}</b> <span>following</span></div></div>
@@ -292,7 +292,7 @@ function statusCard(s){
   const cmts=cs.map(c=>{ const mine=ME&&c.uid===ME.id; return `<div class="scmt"><div class="sc-av" style="${avatarStyle(userById(c.uid)||{color:'#bbb'},28)}">${(userById(c.uid)?.avatarImg)?'':initials(c.name)}</div>
       <div class="sc-b"><b>${esc(c.name)}</b> · <span style="color:var(--muted);font-size:11px">${timeAgo(c.time)}${c.edited?' · edited':''}</span><div>${esc(c.text)}</div>${mine?`<div class="cmt-edit"><span data-action="editcmt" data-id="${c.id}">Edit</span> · <span data-action="delcmt" data-id="${c.id}">Delete</span></div>`:''}</div></div>`; }).join("");
   return `<div class="status-card">
-    <div class="status-top"><div class="avatar" style="${avatarStyle(u,38)}">${u.avatarImg?'':initials(u.name)}</div>
+    <div class="status-top"><div class="avatar" style="${avatarStyle(u,38)};cursor:pointer" data-action="viewavatar" data-uid="${u.id}">${u.avatarImg?'':initials(u.name)}</div>
       <div><div class="sname" data-action="profile" data-uid="${u.id}">${esc(u.name)}</div><div class="stime">${timeAgo(s.time)}</div></div></div>
     <div class="status-text">${esc(s.text)}</div>
     <div class="status-actions ld">
@@ -458,6 +458,15 @@ function toggleFollow(uid){ if(!ME) return openEmailAuth(); const F=firebase.fir
   if(!has) notify(uid,"follow",`${ME.name} is now one of your fans 🎉`); }
 function logout(){ fbAuth.signOut(); }
 
+// ---------- avatar lightbox ----------
+function viewAvatar(uid){
+  const u=userById(uid); if(!u) return;
+  const body=u.avatarImg
+    ? `<img src="${u.avatarImg}" class="avatar-full" />`
+    : `<div class="avatar-full-initials" style="background:${u.color||'#FB7A28'}">${initials(u.name)}</div>`;
+  openOverlay(`<div class="avatar-lightbox">${body}<div class="avlb-name">${esc(u.name)}</div><div class="avlb-handle">@${esc(u.handle||'')}</div></div>`);
+}
+
 // ---------- overlay ----------
 function openOverlay(h){ $("overlayBody").innerHTML=`<div class="modal"><button class="modal-x" data-action="close">✕</button>${h}</div>`; $("overlay").hidden=false; }
 function closeOverlay(){ $("overlay").hidden=true; $("overlayBody").innerHTML=""; }
@@ -481,7 +490,7 @@ function userCard(u){
   const me=currentUser(); const self=me&&me.id===u.id;
   const btn=self?"":`<button class="btn sm ${isFollowing(u.id)?'':'primary'}" data-action="follow" data-uid="${u.id}">${isFollowing(u.id)?'Following ✓':'Follow back'}</button>`;
   return `<div class="mrow2">
-    <div class="avatar" style="${avatarStyle(u,44)};cursor:pointer" data-action="profile" data-uid="${u.id}">${u.avatarImg?'':initials(u.name)}</div>
+    <div class="avatar" style="${avatarStyle(u,44)};cursor:pointer" data-action="viewavatar" data-uid="${u.id}">${u.avatarImg?'':initials(u.name)}</div>
     <div class="minfo"><div class="mt" data-action="profile" data-uid="${u.id}">${esc(u.name)}</div><div class="ms">@${esc(u.handle)} · ${nfmt(followerCount(u.id))} fans</div></div>
     ${btn}</div>`;
 }
@@ -558,7 +567,7 @@ function sendSuggest(){
 document.addEventListener("click",e=>{
   const el=e.target.closest("[data-action]"); if(!el) return; const a=el.dataset.action;
   const M={
-    nav:()=>go(el.dataset.view), profile:()=>go("profile",{profileId:el.dataset.uid}),
+    nav:()=>go(el.dataset.view), profile:()=>go("profile",{profileId:el.dataset.uid}), viewavatar:()=>viewAvatar(el.dataset.uid),
     auth:()=>{ if(el.dataset.p==="google") signInGoogle(); else toast("Apple sign-in needs a paid Apple Developer account — coming later. Use Google or email 🙂"); },
     authemail:()=>openEmailAuth(($("liEmail").value||"").trim()), emailgo:()=>emailGo(el.dataset.mode), finishonboard:()=>finishOnboard(),
     sharefolder:shareMusicFolder, setthumbs:()=>setThumbsFolder(el.dataset.pl), relink:()=>relinkFolder(el.dataset.pl), playfile:()=>playFolderTrack(el.dataset.pl,el.dataset.file),
