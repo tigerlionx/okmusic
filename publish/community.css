@@ -171,10 +171,18 @@ img{max-width:100%}
 .authwrap{min-height:100vh;display:grid;place-items:center;background:linear-gradient(135deg,var(--orange-1),var(--orange-2));padding:24px}
 .authbox{width:100%;max-width:380px;text-align:center}
 .authbox .logo{font-size:42px;font-weight:900;color:var(--orange-deep);letter-spacing:-1px}
-.authbox h1{font-size:21px;margin:12px 0 22px;font-weight:800;color:#4a3526}
+.authbox h1{font-size:21px;margin:12px 0 10px;font-weight:800;color:#4a3526}
+.landing-desc{font-size:14px;color:#7a5c3a;line-height:1.6;margin-bottom:20px;padding:0 4px}
 .authcard{background:#fff;border-radius:18px;box-shadow:var(--shadow);padding:24px;text-align:left}
 .authcard .fb-field{margin-bottom:0;margin-top:4px}
 .authfoot{margin-top:18px;font-size:13px;color:var(--muted);text-align:center}
+
+/* ===== avatar lightbox ===== */
+.avatar-lightbox{text-align:center;padding:8px 0 4px}
+.avatar-full{width:220px;height:220px;border-radius:50%;object-fit:cover;box-shadow:0 8px 32px rgba(0,0,0,.18);display:block;margin:0 auto}
+.avatar-full-initials{width:220px;height:220px;border-radius:50%;display:grid;place-items:center;font-size:72px;font-weight:900;color:#fff;margin:0 auto;box-shadow:0 8px 32px rgba(0,0,0,.14)}
+.avlb-name{font-size:20px;font-weight:800;margin-top:16px}
+.avlb-handle{font-size:14px;color:var(--muted);margin-top:4px}
 
 /* ===== profile themes ===== */
 .theme-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:8px;margin-top:4px}
