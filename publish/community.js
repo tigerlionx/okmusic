@@ -28,10 +28,14 @@ function db(){
 }
 function commit(d){ localStorage.setItem(LS,JSON.stringify(d)); }
 
-// ---------- IndexedDB (folder handles) ----------
-function fsdb(){ return new Promise((res,rej)=>{ const r=indexedDB.open("okfs",1); r.onupgradeneeded=()=>r.result.createObjectStore("dirs"); r.onsuccess=()=>res(r.result); r.onerror=()=>rej(r.error); }); }
+// ---------- IndexedDB (folder handles + offline audio cache) ----------
+function fsdb(){ return new Promise((res,rej)=>{ const r=indexedDB.open("okfs",2);
+  r.onupgradeneeded=e=>{ const db=r.result; if(!db.objectStoreNames.contains("dirs")) db.createObjectStore("dirs"); if(!db.objectStoreNames.contains("audio")) db.createObjectStore("audio"); };
+  r.onsuccess=()=>res(r.result); r.onerror=()=>rej(r.error); }); }
 async function fsPut(k,v){ const d=await fsdb(); return new Promise(res=>{ const t=d.transaction("dirs","readwrite"); t.objectStore("dirs").put(v,k); t.oncomplete=res; }); }
 async function fsGet(k){ const d=await fsdb(); return new Promise(res=>{ const t=d.transaction("dirs","readonly"); const q=t.objectStore("dirs").get(k); q.onsuccess=()=>res(q.result); q.onerror=()=>res(null); }); }
+async function audioPut(k,v){ const d=await fsdb(); return new Promise(res=>{ const t=d.transaction("audio","readwrite"); t.objectStore("audio").put(v,k); t.oncomplete=res; }); }
+async function audioGet(k){ const d=await fsdb(); return new Promise(res=>{ const t=d.transaction("audio","readonly"); const q=t.objectStore("audio").get(k); q.onsuccess=()=>res(q.result); q.onerror=()=>res(null); }); }
 const dirCache={};
 async function ensurePerm(h){ if(!h)return false; const o={mode:"read"}; if((await h.queryPermission(o))==="granted")return true; try{ return (await h.requestPermission(o))==="granted"; }catch{ return false; } }
 
@@ -158,7 +162,7 @@ function renderApp(){
         ${item("fans","🫂","My Fans")}
         ${item("mymusic","🎵","My Music")}
         <div class="side-sep"></div>
-        <div class="side-item" data-action="sharefolder"><span class="ic">📁</span>Share a folder</div>
+        <div class="side-item" data-action="sharefolder"><span class="ic">📁</span>Add a folder</div>
         <div class="side-item" data-action="upload"><span class="ic">⬆️</span>Add single track</div>
         <div class="side-item" data-action="customize"><span class="ic">🎨</span>Edit profile</div>
         <div class="side-item" data-action="invite"><span class="ic">✉️</span>Invite friends</div>
@@ -310,9 +314,18 @@ function toggleDislike(id){ if(!ME) return openEmailAuth(); const F=firebase.fir
 
 // ---------- playlists from folders ----------
 function playlistBlock(p,owner){
+  if(!state.openPlaylists) state.openPlaylists=new Set();
+  const open=state.openPlaylists.has(p.id);
   const rows=p.files.map((f,i)=>`<div class="trow" data-action="playfile" data-pl="${p.id}" data-file="${esc(f)}"><div class="tn" id="tn_${p.id}_${i}">${i+1}</div><div class="ttitle">${esc(f.replace(/\.[^.]+$/,''))}</div><span class="tplay">▶</span></div>`).join("");
-  const acts=owner?`<div class="pl-actions">${p.thumbs?'<span class="pill pub">covers ✓</span>':`<button class="btn sm" data-action="setthumbs" data-pl="${p.id}">＋ covers</button>`}<button class="btn sm" data-action="relink" data-pl="${p.id}">re-link</button></div>`:"";
-  return `<div class="playlist"><div class="playlist-head"><div class="pl-ic">📁</div><div><div class="pl-name">${esc(p.name)}</div><div class="pl-sub">${p.files.length} tracks · folder</div></div>${acts}</div><div class="tracklist">${rows}</div></div>`;
+  const acts=owner?`<div class="pl-actions"><button class="btn sm" data-action="setthumbs" data-pl="${p.id}">${p.thumbs?'covers ✓':'＋ covers'}</button><button class="btn sm" data-action="relink" data-pl="${p.id}">re-link</button></div>`:"";
+  return `<div class="playlist">
+    <div class="playlist-head" data-action="togglepl" data-pl="${p.id}">
+      <div class="pl-ic">📁</div>
+      <div style="flex:1"><div class="pl-name">${esc(p.name)}</div><div class="pl-sub">${p.files.length} tracks · folder</div></div>
+      ${acts}<span class="pl-toggle">${open?'−':'+'}</span>
+    </div>
+    ${open?`<div class="tracklist">${rows}</div>`:''}
+  </div>`;
 }
 async function loadCovers(p){
   if(!p.thumbs) return; let c=dirCache[p.id]; if(!c||!c.thumbs){ const h=await fsGet(p.id+"_thumbs"); if(h&&await ensurePerm(h)){ c=dirCache[p.id]=dirCache[p.id]||{}; c.thumbs=h; } }
@@ -334,10 +347,22 @@ async function relinkFolder(plId){ if(!window.showDirectoryPicker) return toast(
   const files=[]; for await(const e of dir.values()){ if(e.kind==="file"&&/\.(mp3|m4a|wav|ogg|flac|aac)$/i.test(e.name)) files.push(e.name); } files.sort();
   const d=db(); const p=d.playlists.find(x=>x.id===plId); if(p){ p.files=files; p.name=dir.name; commit(d); } dirCache[plId]=dirCache[plId]||{}; dirCache[plId].music=dir; await fsPut(plId+"_music",dir); toast("Re-linked ✓"); renderMain(); }
 async function playFolderTrack(plId,file){
+  const cacheKey=plId+"/"+file;
+  const title=file.replace(/\.[^.]+$/,"");
+  const artist=userById(db().playlists.find(x=>x.id===plId)?.userId)?.name||currentUser()?.name||"";
+  // 1 — serve from offline cache if available
+  const cached=await audioGet(cacheKey);
+  if(cached){ showPlayer(title,artist,"#FB7A28",URL.createObjectURL(cached)); return; }
+  // 2 — read from folder (cloud drive or local), then cache for offline
   let c=dirCache[plId]; if(!c||!c.music){ const h=await fsGet(plId+"_music"); if(h&&await ensurePerm(h)){ c=dirCache[plId]=dirCache[plId]||{}; c.music=h; } }
-  if(!c||!c.music){ const p=db().playlists.find(x=>x.id===plId); return toast(`Re-link "${p?p.name:'folder'}" to play (access resets on reload).`); }
-  try{ const fh=await c.music.getFileHandle(file); const f=await fh.getFile(); showPlayer(file.replace(/\.[^.]+$/,""), currentUser()?.name||"", "#FB7A28", URL.createObjectURL(f)); }
-  catch{ toast("Couldn't read that file — try re-linking."); }
+  if(!c||!c.music){ const p=db().playlists.find(x=>x.id===plId); return toast(`Re-link "${p?p.name:'folder'}" to play. (Tip: play tracks once while online to cache them for offline.)`); }
+  try{
+    const fh=await c.music.getFileHandle(file); const f=await fh.getFile();
+    const url=URL.createObjectURL(f);
+    showPlayer(title,artist,"#FB7A28",url);
+    // cache as blob so it's playable offline next time (fire-and-forget)
+    f.arrayBuffer().then(buf=>audioPut(cacheKey,new Blob([buf],{type:f.type||"audio/mpeg"}))).catch(()=>{});
+  } catch{ toast("Couldn't read that file — try re-linking."); }
 }
 
 // ---------- single track upload ----------
@@ -366,8 +391,9 @@ function renderMyMusic(){
     ${t.visibility==='private'?`<button class="btn sm primary" data-action="publish" data-id="${t.id}">Publish</button>`:`<button class="btn sm" data-action="unpublish" data-id="${t.id}">Hide</button>`}
     <button class="btn sm" data-action="deltrack" data-id="${t.id}" style="color:#e2554f;border-color:#f0b3b3">Delete</button></div>`).join("");
   $("page").innerHTML=`<div class="h-title">My Music</div>
-    <div class="folder-banner">📁 <b>Folders become playlists.</b> Pick a music folder — every song becomes a playable track instantly, no upload. Add a <b>thumbnails folder</b> (images named like each track) for covers. Chrome &amp; Edge.</div>
-    <div style="display:flex;gap:8px;margin-bottom:18px;flex-wrap:wrap"><button class="btn primary" data-action="sharefolder">📁 Share a music folder</button><button class="btn" data-action="upload">＋ Add single track</button></div>
+    <div class="folder-banner">📁 <b>Each folder becomes a playlist — including cloud drives.</b> Pick any folder from your computer, Google Drive, Dropbox, iCloud, or OneDrive. Tracks are cached automatically after the first play, so they stay available even when you're offline. Chrome &amp; Edge.
+      <div class="folder-note">⚠️ <b>Cloud drive tip:</b> Make sure your cloud drive is set to <b>sync files locally</b> (not "stream-only" or "online-only"). In Google Drive: Preferences → open files online only → off. In Dropbox: right-click folder → Make available offline. Play each track once while online — it will be cached and playable forever after, even without internet.</div>
+    <div style="display:flex;gap:8px;margin-bottom:18px;flex-wrap:wrap"><button class="btn primary" data-action="sharefolder">📁 Add a folder</button><button class="btn" data-action="upload">＋ Add single track</button></div>
     ${pls.length?`<div class="section-title">Playlists (folders)</div>${pls.map(p=>playlistBlock(p,true)).join("")}`:""}
     ${tracks.length?`<div class="section-title">Single tracks</div>${rows}`:""}
     ${(!pls.length&&!tracks.length)?'<div class="empty">No music yet — share a folder to begin.</div>':""}`;
@@ -521,6 +547,7 @@ document.addEventListener("click",e=>{
     publish:()=>setVisibility(el.dataset.id,"public"), unpublish:()=>setVisibility(el.dataset.id,"private"), deltrack:()=>deleteTrack(el.dataset.id),
     editcmt:()=>editComment(el.dataset.id), delcmt:()=>deleteComment(el.dataset.id),
     fantab:()=>{ state.fanTab=el.dataset.t; renderFans(); }, suggest:openSuggest, sendsuggest:sendSuggest,
+    togglepl:()=>{ if(!state.openPlaylists) state.openPlaylists=new Set(); const id=el.dataset.pl; state.openPlaylists.has(id)?state.openPlaylists.delete(id):state.openPlaylists.add(id); renderMain(); },
     genre:()=>{ state.genre=el.dataset.g; if(state.view!=="discover") state.view="discover"; renderDiscover(); },
     swatch:()=>{window._upColor=el.dataset.c;document.querySelectorAll("#swatches .swatch").forEach(s=>s.classList.toggle("sel",s===el));},
     vis:()=>{window._upVis=el.dataset.v;document.querySelectorAll("#visRow .radio-card").forEach(c=>c.classList.toggle("sel",c===el));},
