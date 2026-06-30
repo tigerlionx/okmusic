@@ -56,5 +56,25 @@ service cloud.firestore {
       allow create: if signedIn();
       allow read, update, delete: if false;
     }
+
+    // Marketplace sellers: owner writes, signed-in users read.
+    match /sellers/{uid} {
+      allow read: if signedIn();
+      allow write: if signedIn() && request.auth.uid == uid;
+    }
+
+    // Products: public to read; only the listing seller can write.
+    match /products/{id} {
+      allow read: if true;
+      allow create: if signedIn() && request.resource.data.sellerId == request.auth.uid;
+      allow update, delete: if signedIn() && resource.data.sellerId == request.auth.uid;
+    }
+
+    // Orders: buyer creates; buyer can read their own.
+    match /orders/{id} {
+      allow create: if signedIn() && request.resource.data.buyerId == request.auth.uid;
+      allow read: if signedIn() && resource.data.buyerId == request.auth.uid;
+      allow update, delete: if false;
+    }
   }
 }
