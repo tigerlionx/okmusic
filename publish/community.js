@@ -27,6 +27,10 @@ const THEMES = [
   { id:"neon",     label:"Neon",      css:"linear-gradient(135deg,#0f0c29,#302b63,#f953c6)" },
 ];
 
+const PLATFORM_EMAIL="trendai509@gmail.com";
+const PLATFORM_FEE=0.03;
+const MP_CATEGORIES=["Music Equipment","Clothing & Merch","Software & Plugins","Art & Design","Books & Courses","Other"];
+
 // ---------- DB ----------
 const LS = "okcommunity4";
 function load(){ try{ return JSON.parse(localStorage.getItem(LS))||{}; }catch{ return {}; } }
@@ -85,7 +89,7 @@ let toastTimer; function toast(m){ const e=$("toast"); e.textContent=m; e.hidden
 // ---------- state ----------
 let ME=null;                                   // the signed-in user's profile (Firebase)
 // live shared data, kept in sync by Firestore listeners
-const CACHE={ users:{}, tracks:[], statuses:[], follows:{}, reactions:{}, comments:[], notifications:[] };
+const CACHE={ users:{}, tracks:[], statuses:[], follows:{}, reactions:{}, comments:[], notifications:[], products:[], sellers:{} };
 let state={ view:"discover", profileId:null, query:"" };
 function go(v,x={}){ state={ ...state, view:v, ...x }; render(); window.scrollTo(0,0); }
 function render(){
@@ -100,6 +104,7 @@ function renderLanding(){
   $("root").innerHTML=`
   <div class="authwrap"><div class="authbox">
     <div class="logo">◎ OK Music</div><h1>Where AI music finds its fans.</h1>
+    <p class="landing-desc">OK Music helps you share your AI music creation to your family, friends and fans. Log in to become famous...</p>
     <div class="authcard">
       <button class="social-btn" data-action="auth" data-p="google"><span class="ic" style="color:#EA4335">G</span> Continue with Google</button>
       <button class="social-btn" data-action="auth" data-p="apple"><span class="ic"></span> Continue with Apple</button>
@@ -179,6 +184,7 @@ function renderApp(){
         <div class="side-item" data-action="customize"><span class="ic">🎨</span>Edit profile</div>
         <div class="side-item" data-action="invite"><span class="ic">✉️</span>Invite friends</div>
         <div class="side-item" data-action="suggest"><span class="ic">💡</span>Suggest a feature</div>
+        <div class="side-item ${state.view==='marketplace'||state.view==='mystore'||state.view==='cart'?'active':''}" data-action="openmarketplace"><span class="ic">🛍️</span>MARKETPLACE</div>
         <div class="side-sep"></div>
         <div class="side-item" data-action="logout"><span class="ic">↩️</span>Log out</div>
       </nav>
@@ -194,6 +200,9 @@ function renderMain(){
   if(state.view==="buzzing") return renderBuzzing();
   if(state.view==="notifs") return renderNotifs();
   if(state.view==="home") return renderHome();
+  if(state.view==="marketplace") return renderMarketplace();
+  if(state.view==="mystore") return renderSellerStore();
+  if(state.view==="cart") return renderCart();
   renderDiscover();
 }
 
@@ -256,7 +265,7 @@ function renderProfile(uid){
   wall += sts.length?sts.map(statusCard).join(""):`<div class="empty" style="padding:24px">No posts yet.${mine?' Share a status to talk to your fans 👆':''}</div>`;
   $("page").innerHTML=`
     <div class="profile-cover" style="${cover}"></div>
-    <div class="profile-head"><div class="profile-avatar" style="${avatarStyle(u,104)}">${u.avatarImg?'':initials(u.name)}</div>
+    <div class="profile-head"><div class="profile-avatar" style="${avatarStyle(u,104)};cursor:pointer" data-action="viewavatar" data-uid="${uid}">${u.avatarImg?'':initials(u.name)}</div>
       <div class="profile-info"><div class="profile-name">${esc(u.name)} ${u.founder?'<span class="badge-founder">FOUNDER</span>':''}</div><div class="profile-handle">@${esc(u.handle)}</div></div></div>
     <div class="profile-stats"><div><b>${tracks.length+pls.reduce((n,p)=>n+p.files.length,0)}</b> <span>tracks</span></div>
       <div><b>${nfmt(followerCount(uid))}</b> <span>fans</span></div><div><b>${nfmt(followingCount(uid))}</b> <span>following</span></div></div>
@@ -291,7 +300,7 @@ function statusCard(s){
   const cmts=cs.map(c=>{ const mine=ME&&c.uid===ME.id; return `<div class="scmt"><div class="sc-av" style="${avatarStyle(userById(c.uid)||{color:'#bbb'},28)}">${(userById(c.uid)?.avatarImg)?'':initials(c.name)}</div>
       <div class="sc-b"><b>${esc(c.name)}</b> · <span style="color:var(--muted);font-size:11px">${timeAgo(c.time)}${c.edited?' · edited':''}</span><div>${esc(c.text)}</div>${mine?`<div class="cmt-edit"><span data-action="editcmt" data-id="${c.id}">Edit</span> · <span data-action="delcmt" data-id="${c.id}">Delete</span></div>`:''}</div></div>`; }).join("");
   return `<div class="status-card">
-    <div class="status-top"><div class="avatar" style="${avatarStyle(u,38)}">${u.avatarImg?'':initials(u.name)}</div>
+    <div class="status-top"><div class="avatar" style="${avatarStyle(u,38)};cursor:pointer" data-action="viewavatar" data-uid="${u.id}">${u.avatarImg?'':initials(u.name)}</div>
       <div><div class="sname" data-action="profile" data-uid="${u.id}">${esc(u.name)}</div><div class="stime">${timeAgo(s.time)}</div></div></div>
     <div class="status-text">${esc(s.text)}</div>
     <div class="status-actions ld">
@@ -457,6 +466,15 @@ function toggleFollow(uid){ if(!ME) return openEmailAuth(); const F=firebase.fir
   if(!has) notify(uid,"follow",`${ME.name} is now one of your fans 🎉`); }
 function logout(){ fbAuth.signOut(); }
 
+// ---------- avatar lightbox ----------
+function viewAvatar(uid){
+  const u=userById(uid); if(!u) return;
+  const body=u.avatarImg
+    ? `<img src="${u.avatarImg}" class="avatar-full" />`
+    : `<div class="avatar-full-initials" style="background:${u.color||'#FB7A28'}">${initials(u.name)}</div>`;
+  openOverlay(`<div class="avatar-lightbox">${body}<div class="avlb-name">${esc(u.name)}</div><div class="avlb-handle">@${esc(u.handle||'')}</div></div>`);
+}
+
 // ---------- overlay ----------
 function openOverlay(h){ $("overlayBody").innerHTML=`<div class="modal"><button class="modal-x" data-action="close">✕</button>${h}</div>`; $("overlay").hidden=false; }
 function closeOverlay(){ $("overlay").hidden=true; $("overlayBody").innerHTML=""; }
@@ -471,6 +489,241 @@ $("mpPlay").addEventListener("click",()=>{ if(!hasSrc)return; if(!audio.paused){
 audio.addEventListener("timeupdate",()=>{ if(!audio.duration)return; $("mpFill").style.width=(audio.currentTime/audio.duration*100)+"%"; const s=Math.floor(audio.currentTime); $("mpTime").textContent=`${Math.floor(s/60)}:${String(s%60).padStart(2,"0")}`; });
 $("mpProg").addEventListener("click",e=>{ if(!audio.duration)return; const r=e.currentTarget.getBoundingClientRect(); audio.currentTime=(e.clientX-r.left)/r.width*audio.duration; });
 
+// ============ MARKETPLACE ============
+function openMarketplace(){
+  if(!ME) return openEmailAuth();
+  openOverlay(`<div style="text-align:center;padding:8px 0 16px">
+    <div style="font-size:40px;margin-bottom:8px">🛍️</div>
+    <h2 style="margin:0 0 6px">OK Music Marketplace</h2>
+    <p class="sub">Buy and sell with the OK Music community.</p>
+    <div style="display:flex;flex-direction:column;gap:12px;margin-top:22px">
+      <button class="btn primary block" data-action="gobuyer" style="font-size:16px;padding:14px">🛒 I want to buy</button>
+      <button class="btn block" data-action="goseller" style="font-size:16px;padding:14px">🏪 I want to sell</button>
+    </div>
+  </div>`);
+}
+function goBuyer(){ closeOverlay(); go("marketplace"); }
+function goSeller(){ closeOverlay(); CACHE.sellers[ME.id]?go("mystore"):openSellerSetup(); }
+
+function openSellerSetup(){
+  openOverlay(`<h2>🏪 Open your store</h2><p class="sub">Fill in your details to start selling on OK Music.</p>
+    <div class="field"><label>Store name</label><input class="fb-field" id="slName" placeholder="e.g. Emmanuel's Merch" value="${esc(ME.name)}" /></div>
+    <div class="field"><label>Location (city, country)</label><input class="fb-field" id="slLoc" placeholder="e.g. Montreal, Canada" /></div>
+    <div class="field"><label>Your Payoneer email</label><input class="fb-field" id="slPayoneer" type="email" placeholder="your@payoneer.com" /></div>
+    <p class="note" style="margin-top:4px">Buyers pay the platform first. You receive <b>97%</b> of each sale via Payoneer within 1–2 business days after payment clears.</p>
+    <button class="btn primary block" data-action="doregisterseller" style="margin-top:16px">Continue →</button>`);
+}
+async function doRegisterSeller(){
+  const name=($("slName").value||"").trim(), location=($("slLoc").value||"").trim(), payoneerEmail=($("slPayoneer").value||"").trim();
+  if(!name||!location) return toast("Fill in all fields");
+  if(!payoneerEmail||!payoneerEmail.includes("@")) return toast("Enter a valid Payoneer email");
+  try{ await fbDB.collection("sellers").doc(ME.id).set({ name, location, payoneerEmail, uid:ME.id, createdAt:Date.now() });
+    toast("Store created! 🎉"); closeOverlay(); go("mystore"); }
+  catch(e){ toast("Couldn't create store: "+(e.code||e.message)); }
+}
+
+// ---------- seller store management ----------
+function renderSellerStore(){
+  const seller=CACHE.sellers[ME.id];
+  if(!seller){ openSellerSetup(); return; }
+  const products=CACHE.products.filter(p=>p.sellerId===ME.id);
+  $("page").innerHTML=`<div class="h-title">🏪 My Store</div>
+    <div class="mp-store-header">
+      <div><b>${esc(seller.name)}</b> · 📍 ${esc(seller.location)}</div>
+      <button class="btn primary" data-action="addproduct">＋ Add product</button>
+    </div>
+    ${products.length
+      ?`<div class="mp-grid">${products.map(mpSellerCard).join("")}</div>`
+      :'<div class="empty" style="margin-top:24px">No products yet — click "Add product" to list your first item.</div>'}`;
+}
+function mpSellerCard(p){
+  const photo=p.photos&&p.photos[0];
+  return `<div class="mp-card">
+    <div class="mp-photo" style="${photo?`background-image:url('${photo}');background-size:cover;background-position:center`:'background:var(--orange-1)'}" data-action="viewproduct" data-id="${p.id}">${photo?'':'📦'}</div>
+    <div class="mp-card-body">
+      <div class="mp-title">${esc(p.title)}</div>
+      <div class="mp-price">$${parseFloat(p.price).toFixed(2)} <span class="mp-ship">+ $${parseFloat(p.shipping||0).toFixed(2)} ship</span></div>
+      <div style="display:flex;gap:6px;margin-top:8px">
+        <button class="btn sm" data-action="editproduct" data-id="${p.id}">Edit</button>
+        <button class="btn sm" data-action="delproduct" data-id="${p.id}" style="color:#e2554f;border-color:#f0b3b3">Delete</button>
+      </div>
+    </div>
+  </div>`;
+}
+
+function openProductForm(productId){
+  const p=productId?CACHE.products.find(x=>x.id===productId):null;
+  window._mpPhoto=p?.photos?.[0]||null;
+  const prevStyle=window._mpPhoto?`background-image:url('${window._mpPhoto}');background-size:cover;background-position:center`:'background:var(--orange-1)';
+  openOverlay(`<h2>${p?'Edit product':'Add a product'}</h2>
+    <div class="field"><label>Title</label><input class="fb-field" id="mpTitle" placeholder="e.g. OK Music hoodie" value="${esc(p?.title||'')}" /></div>
+    <div class="field"><label>Description</label><textarea class="fb-field" id="mpDesc" placeholder="Describe your product — material, size, condition…" style="min-height:90px">${esc(p?.description||'')}</textarea></div>
+    <div class="field"><label>Category</label><select class="fb-field" id="mpCat">${MP_CATEGORIES.map(c=>`<option value="${c}" ${(p?.category||'Other')===c?'selected':''}>${c}</option>`).join("")}</select></div>
+    <div class="field"><label>Price (USD)</label><input class="fb-field" id="mpPrice" type="number" min="0.01" step="0.01" placeholder="0.00" value="${p?.price||''}" /></div>
+    <div class="field"><label>Shipping cost (USD)</label><input class="fb-field" id="mpShip" type="number" min="0" step="0.01" placeholder="0.00" value="${p?.shipping||''}" /></div>
+    <div class="field"><label>Product photo</label>
+      <div class="covup"><div class="covprev" id="mpPhotoPrev" style="${prevStyle}">${window._mpPhoto?'':'📦'}</div>
+        <div><input type="file" id="mpPhotoFile" accept="image/*" /><div class="note" style="margin-top:4px">JPG/PNG — max ~600KB</div></div></div></div>
+    <button class="btn primary block" data-action="dosaveproduct" data-id="${productId||''}" style="margin-top:16px">${p?'Save changes':'List product'}</button>`);
+}
+async function doSaveProduct(productId){
+  const title=($("mpTitle").value||"").trim(), description=($("mpDesc").value||"").trim();
+  const price=parseFloat($("mpPrice").value), shipping=parseFloat($("mpShip").value||"0")||0;
+  const category=$("mpCat").value||"Other";
+  if(!title||!description) return toast("Fill in title and description");
+  if(!price||price<=0) return toast("Enter a valid price");
+  if(window._mpPhoto&&window._mpPhoto.length>900000) return toast("Photo too large — use an image under ~600KB");
+  const data={ sellerId:ME.id, title, description, category, price, shipping, photos:window._mpPhoto?[window._mpPhoto]:[], updatedAt:Date.now() };
+  try{
+    if(productId){ await fbDB.collection("products").doc(productId).update(data); toast("Product updated ✓"); }
+    else{ data.createdAt=Date.now(); await fbDB.collection("products").add(data); toast("Product listed! 🎉"); }
+    closeOverlay(); go("mystore");
+  } catch(e){ toast("Couldn't save: "+(e.code||e.message)); }
+}
+function deleteProduct(id){
+  if(!confirm("Delete this product? Cannot be undone.")) return;
+  fbDB.collection("products").doc(id).delete().then(()=>toast("Product deleted")).catch(e=>toast(e.code||e.message));
+}
+
+// ---------- buyer browse ----------
+function renderMarketplace(){
+  const q=(state.mpSearch||"").toLowerCase();
+  let list=CACHE.products.slice().sort((a,b)=>b.createdAt-a.createdAt);
+  if(q) list=list.filter(p=>p.title.toLowerCase().includes(q)||(p.description||"").toLowerCase().includes(q)||(CACHE.sellers[p.sellerId]?.name||"").toLowerCase().includes(q));
+  const cartCount=(state.cart||[]).length;
+  $("page").innerHTML=`<div class="h-title">🛍️ Marketplace</div>
+    <div style="display:flex;gap:10px;margin-bottom:16px;align-items:center;flex-wrap:wrap">
+      <input class="fb-field" id="mpSearch" placeholder="Search products or sellers…" value="${esc(state.mpSearch||'')}" style="flex:1;min-width:180px;margin:0" />
+      <button class="btn ${cartCount?'primary':''}" data-action="nav" data-view="cart">🛒 Cart${cartCount?` (${cartCount})`:''}</button>
+      <button class="btn" data-action="gosellerdirect">🏪 Sell</button>
+    </div>
+    ${list.length
+      ?`<div class="mp-grid">${list.map(mpBuyerCard).join("")}</div>`
+      :'<div class="empty">No products listed yet — be the first to sell!</div>'}`;
+  setTimeout(()=>{ const s=$("mpSearch"); if(s) s.oninput=e=>{ state.mpSearch=e.target.value; renderMarketplace(); }; },0);
+}
+function mpBuyerCard(p){
+  const photo=p.photos&&p.photos[0]; const seller=CACHE.sellers[p.sellerId]; const inCart=(state.cart||[]).includes(p.id);
+  return `<div class="mp-card">
+    <div class="mp-photo" style="${photo?`background-image:url('${photo}');background-size:cover;background-position:center`:'background:var(--orange-1)'}" data-action="viewproduct" data-id="${p.id}">${photo?'':'📦'}</div>
+    <div class="mp-card-body">
+      <div class="mp-title" data-action="viewproduct" data-id="${p.id}">${esc(p.title)}</div>
+      <div class="mp-seller-name">${esc(seller?.name||'Seller')} · ${esc(seller?.location||'')}</div>
+      <div class="mp-price">$${parseFloat(p.price).toFixed(2)} <span class="mp-ship">+ $${parseFloat(p.shipping||0).toFixed(2)} ship</span></div>
+      <button class="btn sm ${inCart?'':'primary'}" data-action="addtocart" data-id="${p.id}" style="margin-top:8px;width:100%">${inCart?'In cart ✓':'Add to cart'}</button>
+    </div>
+  </div>`;
+}
+function viewProduct(id){
+  const p=CACHE.products.find(x=>x.id===id); if(!p) return;
+  const seller=CACHE.sellers[p.sellerId]; const photo=p.photos&&p.photos[0]; const inCart=(state.cart||[]).includes(id);
+  openOverlay(`<div class="mp-detail">
+    ${photo?`<div style="text-align:center;margin-bottom:12px"><img src="${photo}" class="mp-detail-img" data-action="zoomphoto" data-src="${photo}" /></div>`:''}
+    <div class="mp-detail-title">${esc(p.title)}</div>
+    <div class="mp-detail-cat">${esc(p.category||'')}</div>
+    <div class="mp-detail-price">$${parseFloat(p.price).toFixed(2)} <span class="mp-ship" style="font-size:14px;font-weight:400">+ $${parseFloat(p.shipping||0).toFixed(2)} shipping</span></div>
+    <div class="mp-detail-desc">${esc(p.description)}</div>
+    <div class="mp-seller-card">👤 <b>${esc(seller?.name||'Unknown')}</b> · 📍 ${esc(seller?.location||'')}</div>
+    <button class="btn ${inCart?'':'primary'} block" data-action="addtocart" data-id="${id}" style="margin-top:14px">${inCart?'✓ In cart — remove':'🛒 Add to cart'}</button>
+    ${inCart?`<button class="btn primary block" data-action="nav" data-view="cart" style="margin-top:8px">Go to cart →</button>`:''}
+  </div>`);
+}
+function zoomPhoto(src){
+  openOverlay(`<div style="text-align:center"><img src="${src}" style="max-width:100%;max-height:75vh;border-radius:8px;object-fit:contain" /></div>`);
+}
+
+// ---------- cart ----------
+function addToCart(id){
+  if(!ME) return openEmailAuth();
+  if(!state.cart) state.cart=[];
+  const has=state.cart.includes(id);
+  state.cart=has?state.cart.filter(x=>x!==id):[...state.cart,id];
+  toast(has?"Removed from cart":"Added to cart 🛒");
+  closeOverlay(); renderMain();
+}
+function removeFromCart(id){ state.cart=(state.cart||[]).filter(x=>x!==id); renderCart(); }
+function renderCart(){
+  if(!state.cart) state.cart=[];
+  const items=state.cart.map(id=>CACHE.products.find(p=>p.id===id)).filter(Boolean);
+  const subtotal=items.reduce((s,p)=>s+parseFloat(p.price),0);
+  const shipping=items.reduce((s,p)=>s+parseFloat(p.shipping||0),0);
+  const fee=+(subtotal*PLATFORM_FEE).toFixed(2);
+  const total=+(subtotal+shipping+fee).toFixed(2);
+  $("page").innerHTML=`<div class="h-title">🛒 My Cart</div>
+    ${items.length?`
+      <div class="cart-items">${items.map(p=>{ const photo=p.photos&&p.photos[0]; return `<div class="cart-row">
+        <div class="cart-photo" style="${photo?`background-image:url('${photo}');background-size:cover;background-position:center`:'background:var(--orange-1)'}">${photo?'':'📦'}</div>
+        <div class="cart-info"><div class="cart-title">${esc(p.title)}</div>
+          <div class="cart-price">$${parseFloat(p.price).toFixed(2)} + $${parseFloat(p.shipping||0).toFixed(2)} ship</div>
+          <div class="mp-seller-name">${esc(CACHE.sellers[p.sellerId]?.name||'Seller')}</div></div>
+        <button class="btn sm" data-action="removecart" data-id="${p.id}" style="color:#e2554f;border-color:#f0b3b3;align-self:center">Remove</button>
+      </div>`; }).join("")}</div>
+      <div class="cart-summary">
+        <div class="cart-line"><span>Subtotal</span><span>$${subtotal.toFixed(2)}</span></div>
+        <div class="cart-line"><span>Shipping</span><span>$${shipping.toFixed(2)}</span></div>
+        <div class="cart-line"><span>Platform fee (3%)</span><span>$${fee.toFixed(2)}</span></div>
+        <div class="cart-line cart-total"><span>Total</span><span>$${total.toFixed(2)}</span></div>
+      </div>
+      <button class="btn primary block" data-action="checkout" style="margin-top:18px;font-size:16px;padding:14px">Proceed to checkout →</button>
+      <button class="btn block" data-action="nav" data-view="marketplace" style="margin-top:8px">← Continue shopping</button>`
+    :'<div class="empty">Your cart is empty. <span data-action="nav" data-view="marketplace" style="color:var(--orange);cursor:pointer">Browse the marketplace →</span></div>'}`;
+}
+
+// ---------- checkout ----------
+function openCheckout(){
+  if(!state.cart||!state.cart.length) return go("cart");
+  const items=state.cart.map(id=>CACHE.products.find(p=>p.id===id)).filter(Boolean);
+  const subtotal=items.reduce((s,p)=>s+parseFloat(p.price),0);
+  const shipping=items.reduce((s,p)=>s+parseFloat(p.shipping||0),0);
+  const fee=+(subtotal*PLATFORM_FEE).toFixed(2);
+  const total=+(subtotal+shipping+fee).toFixed(2);
+  openOverlay(`<h2>📦 Checkout</h2>
+    <p class="sub">${items.length} item${items.length>1?'s':''} · Total <b>$${total.toFixed(2)}</b></p>
+    <div class="field"><label>Full name</label><input class="fb-field" id="ckName" placeholder="Your full name" value="${esc(ME?.name||'')}" /></div>
+    <div class="field"><label>Email</label><input class="fb-field" id="ckEmail" type="email" placeholder="your@email.com" value="${esc(fbAuth.currentUser?.email||'')}" /></div>
+    <div class="field"><label>Shipping address</label><textarea class="fb-field" id="ckAddr" placeholder="Street, City, Province/State, Postal code, Country" style="min-height:80px"></textarea></div>
+    <div class="cart-summary" style="margin-top:12px">
+      <div class="cart-line"><span>Subtotal</span><span>$${subtotal.toFixed(2)}</span></div>
+      <div class="cart-line"><span>Shipping</span><span>$${shipping.toFixed(2)}</span></div>
+      <div class="cart-line"><span>Platform fee (3%)</span><span>$${fee.toFixed(2)}</span></div>
+      <div class="cart-line cart-total"><span>Total</span><span>$${total.toFixed(2)}</span></div>
+    </div>
+    <button class="btn primary block" data-action="doorder" style="margin-top:16px;font-size:16px;padding:14px">Place order & get payment details</button>`);
+}
+async function doPlaceOrder(){
+  const name=($("ckName").value||"").trim(), email=($("ckEmail").value||"").trim(), address=($("ckAddr").value||"").trim();
+  if(!name||!email||!address) return toast("Fill in all fields");
+  if(!email.includes("@")) return toast("Enter a valid email");
+  const items=state.cart.map(id=>CACHE.products.find(p=>p.id===id)).filter(Boolean);
+  if(!items.length) return toast("Cart is empty");
+  const subtotal=items.reduce((s,p)=>s+parseFloat(p.price),0);
+  const shippingTotal=items.reduce((s,p)=>s+parseFloat(p.shipping||0),0);
+  const fee=+(subtotal*PLATFORM_FEE).toFixed(2);
+  const total=+(subtotal+shippingTotal+fee).toFixed(2);
+  try{
+    const ref=await fbDB.collection("orders").add({
+      buyerId:ME.id, buyerName:name, buyerEmail:email, buyerAddress:address,
+      items:items.map(p=>({ productId:p.id, title:p.title, price:p.price, shipping:p.shipping||0, sellerId:p.sellerId })),
+      subtotal, shipping:shippingTotal, platformFee:fee, total, status:"pending_payment", createdAt:Date.now()
+    });
+    state.cart=[];
+    closeOverlay();
+    openOverlay(`<div style="text-align:center;padding:8px">
+      <div style="font-size:44px;margin-bottom:12px">✅</div>
+      <h2>Order placed!</h2>
+      <p class="sub">Order ID: <b>${ref.id.slice(0,8).toUpperCase()}</b></p>
+      <div class="mp-payment-box">
+        <div style="font-weight:800;font-size:15px;margin-bottom:10px">💳 Complete your payment via Payoneer</div>
+        <p style="font-size:14px;margin-bottom:8px">Send <b>$${total.toFixed(2)} USD</b> to:</p>
+        <div class="mp-payoneer-email">${PLATFORM_EMAIL}</div>
+        <p style="font-size:12px;color:var(--muted);margin-top:10px">Include order ID <b>${ref.id.slice(0,8).toUpperCase()}</b> in the payment note so we can match your order.</p>
+        <p style="font-size:12px;color:var(--muted);margin-top:6px">Your order will be confirmed and the seller notified within 1–2 business days after payment is received.</p>
+      </div>
+      <button class="btn primary block" data-action="close" style="margin-top:16px">Done</button>
+    </div>`);
+  } catch(e){ toast("Couldn't place order: "+(e.code||e.message)); }
+}
+
 // ---------- delegation ----------
 // ---------- fans / following (fanbase list) ----------
 function followingOf(uid){ return CACHE.follows[uid]||[]; }
@@ -480,7 +733,7 @@ function userCard(u){
   const me=currentUser(); const self=me&&me.id===u.id;
   const btn=self?"":`<button class="btn sm ${isFollowing(u.id)?'':'primary'}" data-action="follow" data-uid="${u.id}">${isFollowing(u.id)?'Following ✓':'Follow back'}</button>`;
   return `<div class="mrow2">
-    <div class="avatar" style="${avatarStyle(u,44)};cursor:pointer" data-action="profile" data-uid="${u.id}">${u.avatarImg?'':initials(u.name)}</div>
+    <div class="avatar" style="${avatarStyle(u,44)};cursor:pointer" data-action="viewavatar" data-uid="${u.id}">${u.avatarImg?'':initials(u.name)}</div>
     <div class="minfo"><div class="mt" data-action="profile" data-uid="${u.id}">${esc(u.name)}</div><div class="ms">@${esc(u.handle)} · ${nfmt(followerCount(u.id))} fans</div></div>
     ${btn}</div>`;
 }
@@ -557,7 +810,7 @@ function sendSuggest(){
 document.addEventListener("click",e=>{
   const el=e.target.closest("[data-action]"); if(!el) return; const a=el.dataset.action;
   const M={
-    nav:()=>go(el.dataset.view), profile:()=>go("profile",{profileId:el.dataset.uid}),
+    nav:()=>go(el.dataset.view), profile:()=>go("profile",{profileId:el.dataset.uid}), viewavatar:()=>viewAvatar(el.dataset.uid),
     auth:()=>{ if(el.dataset.p==="google") signInGoogle(); else toast("Apple sign-in needs a paid Apple Developer account — coming later. Use Google or email 🙂"); },
     authemail:()=>openEmailAuth(($("liEmail").value||"").trim()), emailgo:()=>emailGo(el.dataset.mode), finishonboard:()=>finishOnboard(),
     sharefolder:shareMusicFolder, setthumbs:()=>setThumbsFolder(el.dataset.pl), relink:()=>relinkFolder(el.dataset.pl), playfile:()=>playFolderTrack(el.dataset.pl,el.dataset.file),
@@ -569,6 +822,11 @@ document.addEventListener("click",e=>{
     publish:()=>setVisibility(el.dataset.id,"public"), unpublish:()=>setVisibility(el.dataset.id,"private"), deltrack:()=>deleteTrack(el.dataset.id),
     editcmt:()=>editComment(el.dataset.id), delcmt:()=>deleteComment(el.dataset.id),
     fantab:()=>{ state.fanTab=el.dataset.t; renderFans(); }, suggest:openSuggest, sendsuggest:sendSuggest,
+    openmarketplace:openMarketplace, gobuyer:goBuyer, goseller:goSeller, gosellerdirect:()=>{ if(!ME) return openEmailAuth(); CACHE.sellers[ME.id]?go("mystore"):openSellerSetup(); },
+    doregisterseller:doRegisterSeller, addproduct:()=>openProductForm(), editproduct:()=>openProductForm(el.dataset.id), delproduct:()=>deleteProduct(el.dataset.id),
+    dosaveproduct:()=>doSaveProduct(el.dataset.id||null), viewproduct:()=>viewProduct(el.dataset.id),
+    addtocart:()=>addToCart(el.dataset.id), removecart:()=>removeFromCart(el.dataset.id),
+    checkout:openCheckout, doorder:doPlaceOrder, zoomphoto:()=>zoomPhoto(el.dataset.src),
     togglepl:()=>{ if(!state.openPlaylists) state.openPlaylists=new Set(); const id=el.dataset.pl; state.openPlaylists.has(id)?state.openPlaylists.delete(id):state.openPlaylists.add(id); renderMain(); },
     genre:()=>{ state.genre=el.dataset.g; if(state.view!=="discover") state.view="discover"; renderDiscover(); },
     swatch:()=>{window._upColor=el.dataset.c;document.querySelectorAll("#swatches .swatch").forEach(s=>s.classList.toggle("sel",s===el));},
@@ -581,6 +839,7 @@ document.addEventListener("click",e=>{
 document.addEventListener("change",e=>{
   if(e.target.id==="avFile"){ const f=e.target.files[0]; if(!f) return; const r=new FileReader(); r.onload=()=>{ window._avatar=r.result; const p=$("avPrev"); if(p){ p.style.backgroundImage=`url('${r.result}')`; p.textContent=""; } }; r.readAsDataURL(f); }
   if(e.target.id==="covFile"){ const f=e.target.files[0]; if(!f) return; const r=new FileReader(); r.onload=()=>{ window._trackCover=r.result; const p=$("covPrev"); if(p){ p.style.backgroundImage=`url('${r.result}')`; p.style.backgroundSize="cover"; p.style.backgroundPosition="center"; p.style.background=""; p.textContent=""; } }; r.readAsDataURL(f); }
+  if(e.target.id==="mpPhotoFile"){ const f=e.target.files[0]; if(!f) return; const r=new FileReader(); r.onload=()=>{ window._mpPhoto=r.result; const p=$("mpPhotoPrev"); if(p){ p.style.backgroundImage=`url('${r.result}')`; p.style.backgroundSize="cover"; p.style.backgroundPosition="center"; p.textContent=""; } }; r.readAsDataURL(f); }
 });
 $("overlay").addEventListener("click",e=>{ if(e.target.id==="overlay") closeOverlay(); });
 document.addEventListener("keydown",e=>{ if(e.key==="Escape") closeOverlay(); });
@@ -595,6 +854,8 @@ function startListeners(){
   fbDB.collection("follows").onSnapshot(s=>{ CACHE.follows={}; s.forEach(d=>CACHE.follows[d.id]=(d.data().following||[])); scheduleRender(); }, e=>console.warn("follows",e.code));
   fbDB.collection("reactions").onSnapshot(s=>{ CACHE.reactions={}; s.forEach(d=>CACHE.reactions[d.id]=d.data()); scheduleRender(); }, e=>console.warn("reactions",e.code));
   fbDB.collection("comments").onSnapshot(s=>{ CACHE.comments=s.docs.map(d=>({ id:d.id, ...d.data() })); scheduleRender(); }, e=>console.warn("comments",e.code));
+  fbDB.collection("products").onSnapshot(s=>{ CACHE.products=s.docs.map(d=>({ id:d.id, ...d.data() })).sort((a,b)=>b.createdAt-a.createdAt); scheduleRender(); }, e=>console.warn("products",e.code));
+  fbDB.collection("sellers").onSnapshot(s=>{ CACHE.sellers={}; s.forEach(d=>CACHE.sellers[d.id]={ id:d.id, ...d.data() }); scheduleRender(); }, e=>console.warn("sellers",e.code));
 }
 
 // ---------- init: real Firebase auth + live data ----------
