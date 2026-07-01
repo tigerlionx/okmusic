@@ -420,18 +420,28 @@ function openUpload(){
       <div class="covup"><div class="covprev" id="covPrev" style="background:${COLORS[0]}">◎</div>
         <div><input type="file" id="covFile" accept="image/*" /><div class="note" style="margin-top:4px">JPG/PNG — or pick a color below.</div></div></div></div>
     <div class="field"><label>Cover color</label><div class="swatches" id="swatches">${COLORS.map((c,i)=>`<div class="swatch ${i===0?'sel':''}" style="background:${c}" data-action="swatch" data-c="${c}"></div>`).join("")}</div></div>
-    <div class="field"><label>Audio link (optional)</label><input id="upSrc" placeholder="https://…/song.mp3" /></div>
+    <div class="field"><label>Audio file <span style="font-weight:400;color:var(--muted)">(pick from your device)</span></label>
+      <input type="file" id="audioFile" accept="audio/*,.mp3,.m4a,.wav,.ogg,.flac,.aac" />
+      <div class="note" id="audioFilename" style="margin-top:4px"></div></div>
+    <div class="field"><label>Or audio link</label><input id="upSrc" placeholder="https://…/song.mp3" /></div>
     <div class="field"><label>Genre</label><select id="upGenre" class="fb-field">${GENRES.map(g=>`<option value="${g}">${g}</option>`).join("")}</select></div>
     <div class="field"><label>Visibility</label><div class="radio-row" id="visRow"><div class="radio-card sel" data-action="vis" data-v="public"><b>Public</b>Everyone can play it</div><div class="radio-card" data-action="vis" data-v="private"><b>Private</b>Only you, until you publish</div></div></div>
     <label class="check"><input type="checkbox" id="upShare" checked> Allow fans to share this track</label>
     <button class="btn primary block" data-action="dopublish">Add to my music</button>`);
-  window._upColor=COLORS[0]; window._upVis="public"; window._trackCover=null;
+  window._upColor=COLORS[0]; window._upVis="public"; window._trackCover=null; window._audioFile=null;
 }
-function doPublish(){ const title=($("upTitle").value||"").trim(); if(!title) return toast("Give it a title"); if(!ME) return openEmailAuth();
+async function doPublish(){
+  const title=($("upTitle").value||"").trim(); if(!title) return toast("Give it a title"); if(!ME) return openEmailAuth();
   const coverImg=window._trackCover||"";
   if(coverImg&&coverImg.length>900000) return toast("Cover photo is too large — use a smaller image (under ~600KB).");
-  fbDB.collection("tracks").add({ userId:ME.id, title, src:($("upSrc").value||"").trim(), genre:($("upGenre")&&$("upGenre").value)||"Other", accent:window._upColor||COLORS[0], coverImg, visibility:window._upVis||"public", share:!!($("upShare")&&$("upShare").checked), createdAt:Date.now() })
-    .then(()=>{ closeOverlay(); window._trackCover=null; toast(window._upVis==="private"?"Saved private 🔒":"Published! 🎵"); go("mymusic"); })
+  let src=($("upSrc").value||"").trim();
+  if(window._audioFile){
+    const localKey="local_track_"+Date.now();
+    try{ await audioPut(localKey, new Blob([await window._audioFile.arrayBuffer()],{type:window._audioFile.type||"audio/mpeg"})); src="local:"+localKey; }
+    catch(e){ return toast("Couldn't cache audio file: "+(e.message||e)); }
+  }
+  fbDB.collection("tracks").add({ userId:ME.id, title, src, genre:($("upGenre")&&$("upGenre").value)||"Other", accent:window._upColor||COLORS[0], coverImg, visibility:window._upVis||"public", share:!!($("upShare")&&$("upShare").checked), createdAt:Date.now() })
+    .then(()=>{ closeOverlay(); window._trackCover=null; window._audioFile=null; toast(window._upVis==="private"?"Saved private 🔒":"Published! 🎵"); go("mymusic"); })
     .catch(e=>toast("Couldn't save: "+(e.code||e.message))); }
 
 // ---------- my music ----------
@@ -505,7 +515,14 @@ function closeOverlay(){ $("overlay").hidden=true; $("overlayBody").innerHTML=""
 let hasSrc=false;
 function showPlayer(title,artist,accent,src){ $("miniplayer").classList.add("show"); $("mpArt").style.background=grad(accent); $("mpArt").textContent="◎"; $("mpTitle").textContent=title; $("mpArtist").textContent=artist;
   if(src){ hasSrc=true; audio.src=src; audio.play().then(()=>setPlaying(true)).catch(()=>setPlaying(false)); } else { hasSrc=false; setPlaying(true); } }
-function playTrack(id){ const t=allTracks().find(x=>x.id===id); if(!t) return; const u=userById(t.userId); const d=db(); d.plays[id]=(d.plays[id]||0)+1; commit(d); showPlayer(t.title,u.name,t.accent,t.src); if(!t.src) toast("Demo track — no audio linked yet. Reactions still work!"); }
+async function playTrack(id){ const t=allTracks().find(x=>x.id===id); if(!t) return; const u=userById(t.userId); const d=db(); d.plays[id]=(d.plays[id]||0)+1; commit(d);
+  if(t.src&&t.src.startsWith("local:")){
+    const blob=await audioGet(t.src.slice(6));
+    if(blob){ showPlayer(t.title,u.name,t.accent,URL.createObjectURL(blob)); }
+    else toast("This track's audio is only on the device it was uploaded from. Share a link instead.");
+    return;
+  }
+  showPlayer(t.title,u.name,t.accent,t.src); if(!t.src) toast("Demo track — no audio linked yet. Reactions still work!"); }
 function setPlaying(p){ $("mpPlay").textContent=p?"⏸":"▶"; }
 $("mpPlay").addEventListener("click",()=>{ if(!hasSrc)return; if(!audio.paused){audio.pause();setPlaying(false);}else{audio.play();setPlaying(true);} });
 audio.addEventListener("timeupdate",()=>{ if(!audio.duration)return; $("mpFill").style.width=(audio.currentTime/audio.duration*100)+"%"; const s=Math.floor(audio.currentTime); $("mpTime").textContent=`${Math.floor(s/60)}:${String(s%60).padStart(2,"0")}`; });
@@ -861,6 +878,7 @@ document.addEventListener("click",e=>{
 document.addEventListener("change",e=>{
   if(e.target.id==="avFile"){ const f=e.target.files[0]; if(!f) return; const r=new FileReader(); r.onload=()=>{ window._avatar=r.result; const p=$("avPrev"); if(p){ p.style.backgroundImage=`url('${r.result}')`; p.textContent=""; } }; r.readAsDataURL(f); }
   if(e.target.id==="covFile"){ const f=e.target.files[0]; if(!f) return; const r=new FileReader(); r.onload=()=>{ window._trackCover=r.result; const p=$("covPrev"); if(p){ p.style.backgroundImage=`url('${r.result}')`; p.style.backgroundSize="cover"; p.style.backgroundPosition="center"; p.style.background=""; p.textContent=""; } }; r.readAsDataURL(f); }
+  if(e.target.id==="audioFile"){ const f=e.target.files[0]; if(!f) return; window._audioFile=f; const fn=$("audioFilename"); if(fn) fn.textContent="✓ "+f.name+" ("+Math.round(f.size/1024)+" KB)"; }
   if(e.target.id==="mpPhotoFile"){ const f=e.target.files[0]; if(!f) return; const r=new FileReader(); r.onload=()=>{ window._mpPhoto=r.result; const p=$("mpPhotoPrev"); if(p){ p.style.backgroundImage=`url('${r.result}')`; p.style.backgroundSize="cover"; p.style.backgroundPosition="center"; p.textContent=""; } }; r.readAsDataURL(f); }
 });
 $("overlay").addEventListener("click",e=>{ if(e.target.id==="overlay") closeOverlay(); });
