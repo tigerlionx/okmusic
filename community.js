@@ -358,12 +358,34 @@ async function loadCovers(p){
     for(const ext of [".jpg",".jpeg",".png",".webp",".gif"]){ try{ const fh=await c.thumbs.getFileHandle(base+ext); const file=await fh.getFile(); el.style.cssText="background:url('"+URL.createObjectURL(file)+"') center/cover"; el.textContent=""; break; }catch{} } }
 }
 async function shareMusicFolder(){
-  if(!window.showDirectoryPicker) return toast("Folder sharing needs Chrome or Edge (desktop).");
+  if(!window.showDirectoryPicker){ mobilePickFiles(); return; }
   let dir; try{ dir=await window.showDirectoryPicker(); }catch{ return; }
   const files=[]; for await(const e of dir.values()){ if(e.kind==="file"&&/\.(mp3|m4a|wav|ogg|flac|aac)$/i.test(e.name)) files.push(e.name); }
   if(!files.length) return toast("No audio files in that folder."); files.sort();
   const d=db(); const id="pl_"+Date.now(); d.playlists.unshift({ id, userId:d.session, name:dir.name, files, thumbs:null, createdAt:Date.now() });
   commit(d); dirCache[id]={ music:dir }; await fsPut(id+"_music",dir); toast(`Playlist "${dir.name}" — ${files.length} tracks 🎵`); go("mymusic");
+}
+function mobilePickFiles(){
+  const inp=document.createElement("input");
+  inp.type="file"; inp.accept="audio/*,.mp3,.m4a,.wav,.ogg,.flac,.aac"; inp.multiple=true;
+  inp.onchange=async()=>{
+    const files=[...inp.files]; if(!files.length) return;
+    openOverlay(`<h2>📁 Name your playlist</h2><p class="sub">${files.length} track${files.length>1?'s':''} selected.</p>
+      <div class="field"><label>Playlist name</label><input class="fb-field" id="plName" placeholder="e.g. My AI Music" value="My Music" /></div>
+      <button class="btn primary block" data-action="savemobilepl">Save &amp; cache tracks</button>`);
+    window._mobileFiles=files;
+  };
+  inp.click();
+}
+async function saveMobilePlaylist(){
+  const files=window._mobileFiles; if(!files||!files.length) return;
+  const name=($("plName").value||"").trim()||"My Music";
+  closeOverlay();
+  const d=db(); const id="pl_"+Date.now();
+  d.playlists.unshift({ id, userId:d.session, name, files:files.map(f=>f.name), thumbs:null, createdAt:Date.now() });
+  commit(d); toast(`Caching ${files.length} track${files.length>1?'s':''}…`);
+  for(const f of files){ try{ await audioPut(id+"/"+f.name, new Blob([await f.arrayBuffer()],{type:f.type||"audio/mpeg"})); }catch{} }
+  window._mobileFiles=null; toast(`"${name}" ready — ${files.length} tracks 🎵`); go("mymusic");
 }
 async function setThumbsFolder(plId){ if(!window.showDirectoryPicker) return toast("Needs Chrome/Edge."); let dir; try{ dir=await window.showDirectoryPicker(); }catch{ return; }
   const d=db(); const p=d.playlists.find(x=>x.id===plId); if(p){ p.thumbs=dir.name; commit(d); } dirCache[plId]=dirCache[plId]||{}; dirCache[plId].thumbs=dir; await fsPut(plId+"_thumbs",dir); toast("Thumbnails linked ✓"); renderMain(); }
@@ -420,8 +442,8 @@ function renderMyMusic(){
     ${t.visibility==='private'?`<button class="btn sm primary" data-action="publish" data-id="${t.id}">Publish</button>`:`<button class="btn sm" data-action="unpublish" data-id="${t.id}">Hide</button>`}
     <button class="btn sm" data-action="deltrack" data-id="${t.id}" style="color:#e2554f;border-color:#f0b3b3">Delete</button></div>`).join("");
   $("page").innerHTML=`<div class="h-title">My Music</div>
-    <div class="folder-banner">📁 <b>Each folder becomes a playlist — including cloud drives.</b> Pick any folder from your computer, Google Drive, Dropbox, iCloud, or OneDrive. Tracks are cached automatically after the first play, so they stay available even when you're offline. Chrome &amp; Edge.
-      <div class="folder-note">⚠️ <b>Cloud drive tip:</b> Make sure your cloud drive is set to <b>sync files locally</b> (not "stream-only" or "online-only"). In Google Drive: Preferences → open files online only → off. In Dropbox: right-click folder → Make available offline. Play each track once while online — it will be cached and playable forever after, even without internet.</div>
+    <div class="folder-banner">📁 <b>Share your music — works on mobile and desktop.</b> On <b>mobile</b>: tap "Add a folder" to pick music files directly from your phone, iCloud, or Google Drive. On <b>desktop</b> (Chrome/Edge): pick an entire folder from your computer or cloud drive. All tracks are cached after selection so they play even when offline.
+      <div class="folder-note">☁️ <b>Cloud drive tip (desktop):</b> Make sure your cloud drive is set to <b>sync files locally</b> (not "stream-only"). In Google Drive: Preferences → open files online only → off. In Dropbox: right-click folder → Make available offline.</div>
     <div style="display:flex;gap:8px;margin-bottom:18px;flex-wrap:wrap"><button class="btn primary" data-action="sharefolder">📁 Add a folder</button><button class="btn" data-action="upload">＋ Add single track</button></div>
     ${pls.length?`<div class="section-title">Playlists (folders)</div>${pls.map(p=>playlistBlock(p,true)).join("")}`:""}
     ${tracks.length?`<div class="section-title">Single tracks</div>${rows}`:""}
@@ -813,7 +835,7 @@ document.addEventListener("click",e=>{
     nav:()=>go(el.dataset.view), profile:()=>go("profile",{profileId:el.dataset.uid}), viewavatar:()=>viewAvatar(el.dataset.uid),
     auth:()=>{ if(el.dataset.p==="google") signInGoogle(); else toast("Apple sign-in needs a paid Apple Developer account — coming later. Use Google or email 🙂"); },
     authemail:()=>openEmailAuth(($("liEmail").value||"").trim()), emailgo:()=>emailGo(el.dataset.mode), finishonboard:()=>finishOnboard(),
-    sharefolder:shareMusicFolder, setthumbs:()=>setThumbsFolder(el.dataset.pl), relink:()=>relinkFolder(el.dataset.pl), playfile:()=>playFolderTrack(el.dataset.pl,el.dataset.file),
+    sharefolder:shareMusicFolder, savemobilepl:saveMobilePlaylist, setthumbs:()=>setThumbsFolder(el.dataset.pl), relink:()=>relinkFolder(el.dataset.pl), playfile:()=>playFolderTrack(el.dataset.pl,el.dataset.file),
     upload:openUpload, dopublish:doPublish, customize:openCustomize, savecustom:saveCustom, invite:openInvite,
     copyinvite:()=>{ const i=$("invLink"); i.select(); if(navigator.clipboard)navigator.clipboard.writeText(i.value); toast("Invite link copied ✓"); },
     play:()=>playTrack(el.dataset.id), like:()=>toggleLike(el.dataset.id), dislike:()=>toggleDislike(el.dataset.id),
