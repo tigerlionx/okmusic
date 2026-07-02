@@ -70,10 +70,10 @@ service cloud.firestore {
       allow update, delete: if signedIn() && resource.data.sellerId == request.auth.uid;
     }
 
-    // Orders: buyer creates; buyer can read their own.
+    // Orders: buyer creates; buyer or platform admin can read.
     match /orders/{id} {
       allow create: if signedIn() && request.resource.data.buyerId == request.auth.uid;
-      allow read: if signedIn() && resource.data.buyerId == request.auth.uid;
+      allow read: if signedIn() && (resource.data.buyerId == request.auth.uid || request.auth.token.email == "trendai509@gmail.com");
       allow update, delete: if false;
     }
   }

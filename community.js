@@ -28,6 +28,7 @@ const THEMES = [
 ];
 
 const PLATFORM_EMAIL="trendai509@gmail.com";
+const ADMIN_EMAIL="trendai509@gmail.com";
 const PLATFORM_FEE=0.03;
 const MP_CATEGORIES=["Music Equipment","Clothing & Merch","Software & Plugins","Art & Design","Books & Courses","Other"];
 
@@ -65,6 +66,7 @@ function playlistsByUser(uid){ return db().playlists.filter(p=>p.userId===uid).s
 function allStatuses(){ const s=SEED_STATUSES.map(x=>({ ...x, time:seedAt(x.ageHrs) })); return CACHE.statuses.map(x=>({ ...x })).concat(s); }
 function statusesByUser(uid){ return allStatuses().filter(s=>s.userId===uid).sort((a,b)=>b.time-a.time); }
 function currentUser(){ return ME; }
+function isAdmin(){ return fbAuth.currentUser?.email===ADMIN_EMAIL; }
 function followerCount(uid){ let n=SEED_FOLLOWERS[uid]||0; for(const f in CACHE.follows) if(CACHE.follows[f].includes(uid)) n++; return n; }
 function followingCount(uid){ return (CACHE.follows[uid]||[]).length; }
 function isFollowing(uid){ return ME&&(CACHE.follows[ME.id]||[]).includes(uid); }
@@ -89,7 +91,7 @@ let toastTimer; function toast(m){ const e=$("toast"); e.textContent=m; e.hidden
 // ---------- state ----------
 let ME=null;                                   // the signed-in user's profile (Firebase)
 // live shared data, kept in sync by Firestore listeners
-const CACHE={ users:{}, tracks:[], statuses:[], follows:{}, reactions:{}, comments:[], notifications:[], products:[], sellers:{} };
+const CACHE={ users:{}, tracks:[], statuses:[], follows:{}, reactions:{}, comments:[], notifications:[], products:[], sellers:{}, orders:[] };
 let state={ view:"discover", profileId:null, query:"" };
 function go(v,x={}){ state={ ...state, view:v, ...x }; render(); window.scrollTo(0,0); }
 function render(){
@@ -185,6 +187,7 @@ function renderApp(){
         <div class="side-item" data-action="invite"><span class="ic">✉️</span>Invite friends</div>
         <div class="side-item" data-action="suggest"><span class="ic">💡</span>Suggest a feature</div>
         <div class="side-item ${state.view==='marketplace'||state.view==='mystore'||state.view==='cart'?'active':''}" data-action="openmarketplace"><span class="ic">🛍️</span>MARKETPLACE</div>
+        ${isAdmin()?`<div class="side-item ${state.view==='admin'?'active':''}" data-action="nav" data-view="admin"><span class="ic">📊</span>Admin Stats</div>`:''}
         <div class="side-sep"></div>
         <div class="side-item" data-action="logout"><span class="ic">↩️</span>Log out</div>
       </nav>
@@ -203,6 +206,7 @@ function renderMain(){
   if(state.view==="marketplace") return renderMarketplace();
   if(state.view==="mystore") return renderSellerStore();
   if(state.view==="cart") return renderCart();
+  if(state.view==="admin"&&isAdmin()) return renderAdmin();
   renderDiscover();
 }
 
@@ -527,6 +531,44 @@ function setPlaying(p){ $("mpPlay").textContent=p?"⏸":"▶"; }
 $("mpPlay").addEventListener("click",()=>{ if(!hasSrc)return; if(!audio.paused){audio.pause();setPlaying(false);}else{audio.play();setPlaying(true);} });
 audio.addEventListener("timeupdate",()=>{ if(!audio.duration)return; $("mpFill").style.width=(audio.currentTime/audio.duration*100)+"%"; const s=Math.floor(audio.currentTime); $("mpTime").textContent=`${Math.floor(s/60)}:${String(s%60).padStart(2,"0")}`; });
 $("mpProg").addEventListener("click",e=>{ if(!audio.duration)return; const r=e.currentTarget.getBoundingClientRect(); audio.currentTime=(e.clientX-r.left)/r.width*audio.duration; });
+
+// ============ ADMIN STATS ============
+function renderAdmin(){
+  const users=Object.values(CACHE.users);
+  const tracks=CACHE.tracks;
+  const statuses=CACHE.statuses;
+  const products=CACHE.products;
+  const orders=CACHE.orders||[];
+  const sellers=Object.values(CACHE.sellers);
+  const pendingOrders=orders.filter(o=>o.status==="pending_payment");
+  const totalRevenue=orders.reduce((s,o)=>s+(o.platformFee||0),0);
+
+  const stat=(icon,label,value,sub="")=>`<div class="admin-stat">
+    <div class="admin-stat-icon">${icon}</div>
+    <div class="admin-stat-val">${value}</div>
+    <div class="admin-stat-label">${label}</div>
+    ${sub?`<div class="admin-stat-sub">${sub}</div>`:''}
+  </div>`;
+
+  const recentUsers=users.slice().sort((a,b)=>(b.createdAt||0)-(a.createdAt||0)).slice(0,10);
+
+  $("page").innerHTML=`<div class="h-title">📊 Admin Stats</div>
+    <div class="admin-grid">
+      ${stat("👥","Registered users",users.length,"Real accounts in Firestore")}
+      ${stat("🎵","Tracks shared",tracks.length,"")}
+      ${stat("💬","Wall posts",statuses.length,"")}
+      ${stat("🏪","Active sellers",sellers.length,"")}
+      ${stat("📦","Products listed",products.length,"")}
+      ${stat("🛒","Orders placed",orders.length,`${pendingOrders.length} pending payment`)}
+      ${stat("💰","Platform fees earned","$"+totalRevenue.toFixed(2),"3% of completed sales")}
+    </div>
+    <div class="section-title" style="margin-top:28px">Latest sign-ups</div>
+    ${recentUsers.length?recentUsers.map(u=>`<div class="mrow2">
+      <div class="avatar" style="${avatarStyle(u,40)}">${u.avatarImg?'':initials(u.name)}</div>
+      <div class="minfo"><div class="mt">${esc(u.name)} <span style="font-size:12px;color:var(--muted)">@${esc(u.handle||'')}</span></div>
+        <div class="ms">${u.createdAt?timeAgo(u.createdAt):'unknown'}</div></div>
+      </div>`).join(''):'<div class="empty">No users yet.</div>'}`;
+}
 
 // ============ MARKETPLACE ============
 function openMarketplace(){
@@ -896,6 +938,9 @@ function startListeners(){
   fbDB.collection("comments").onSnapshot(s=>{ CACHE.comments=s.docs.map(d=>({ id:d.id, ...d.data() })); scheduleRender(); }, e=>console.warn("comments",e.code));
   fbDB.collection("products").onSnapshot(s=>{ CACHE.products=s.docs.map(d=>({ id:d.id, ...d.data() })).sort((a,b)=>b.createdAt-a.createdAt); scheduleRender(); }, e=>console.warn("products",e.code));
   fbDB.collection("sellers").onSnapshot(s=>{ CACHE.sellers={}; s.forEach(d=>CACHE.sellers[d.id]={ id:d.id, ...d.data() }); scheduleRender(); }, e=>console.warn("sellers",e.code));
+  if(fbAuth.currentUser?.email===ADMIN_EMAIL){
+    fbDB.collection("orders").onSnapshot(s=>{ CACHE.orders=s.docs.map(d=>({ id:d.id, ...d.data() })); scheduleRender(); }, e=>console.warn("orders",e.code));
+  }
 }
 
 // ---------- init: real Firebase auth + live data ----------
