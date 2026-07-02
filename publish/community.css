@@ -295,3 +295,11 @@ img{max-width:100%}
 /* payment box */
 .mp-payment-box{background:var(--orange-1);border-radius:12px;padding:16px;margin-top:16px;text-align:left}
 .mp-payoneer-email{background:#fff;border:2px solid var(--orange);border-radius:8px;padding:10px 14px;font-weight:800;font-size:15px;text-align:center;margin:8px 0;color:var(--ink);letter-spacing:.5px}
+
+/* ===== ADMIN STATS ===== */
+.admin-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:14px;margin-top:8px}
+.admin-stat{background:#fff;border-radius:16px;padding:18px 14px;text-align:center;box-shadow:0 2px 10px rgba(180,120,60,.10)}
+.admin-stat-icon{font-size:28px;margin-bottom:6px}
+.admin-stat-val{font-size:28px;font-weight:900;color:var(--orange)}
+.admin-stat-label{font-size:13px;font-weight:700;margin-top:2px}
+.admin-stat-sub{font-size:11px;color:var(--muted);margin-top:3px}
