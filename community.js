@@ -156,8 +156,65 @@ async function finishOnboard(){
     const uid=fbAuth.currentUser.uid;
     const prof={ name, handle, bio:"New AI music creator 🎶", color:COLORS[Math.floor(Math.random()*COLORS.length)], avatarImg:(fbAuth.currentUser.photoURL||""), createdAt:Date.now() };
     await fbDB.collection("users").doc(uid).set(prof);
-    ME={ id:uid, ...prof }; syncME(); closeOverlay(); toast("You're in! 🎉"); go("profile",{profileId:uid});
+    ME={ id:uid, ...prof }; syncME(); closeOverlay();
+    // Send welcome notification
+    fbDB.collection("notifications").add({ forUid:uid, type:"welcome", fromUid:"platform", fromName:"OK Music", text:"👋 Welcome to OK Music! Tap here to read your getting-started guide.", time:Date.now(), read:false }).catch(()=>{});
+    showWelcomeGuide(name);
   }catch(e){ toast("Couldn't save profile: "+(e.code||e.message)); }
+}
+
+function showWelcomeGuide(name){
+  openOverlay(`<div class="welcome-guide">
+    <div class="wg-header">
+      <div style="font-size:36px">🎵</div>
+      <h2>Welcome to OK Music, ${esc(name)}!</h2>
+      <p class="sub">Everything you need to know to get started.</p>
+    </div>
+
+    <div class="wg-section">
+      <div class="wg-icon">🎵</div>
+      <div><b>Share a single track</b><br>
+      Tap <b>"Add single track"</b> in the sidebar. Upload an audio file directly from your phone or computer, or paste a public link (SoundCloud, Google Drive, etc.). Add a cover photo, pick a genre, and choose Public or Private. Your track appears on your profile instantly.</div>
+    </div>
+
+    <div class="wg-section">
+      <div class="wg-icon">📁</div>
+      <div><b>Share folders (playlists &amp; albums)</b><br>
+      Tap <b>"Add a folder"</b> to share an entire music folder at once. On <b>mobile</b>: select multiple audio files — they become a playlist. On <b>desktop</b> (Chrome/Edge): pick a whole folder from your computer, Google Drive, Dropbox, or iCloud. Tracks are cached after the first play and work offline.</div>
+    </div>
+
+    <div class="wg-section">
+      <div class="wg-icon">👥</div>
+      <div><b>Build your fanbase</b><br>
+      Go to <b>Discover</b> to find and follow other artists. Post <b>statuses</b> on your Wall to talk to your fans. Share your <b>invite link</b> (Invite Friends) on social media to grow your audience. Fans can like, dislike, and comment on your music and posts.</div>
+    </div>
+
+    <div class="wg-section">
+      <div class="wg-icon">🎨</div>
+      <div><b>Personalise your profile</b><br>
+      Go to <b>"Edit profile"</b> to upload a profile photo, write your bio, and choose a background theme, colour, or banner image. Make your page unique so fans remember you.</div>
+    </div>
+
+    <div class="wg-section wg-market">
+      <div class="wg-icon">🛍️</div>
+      <div><b>Marketplace — buy &amp; sell</b><br>
+      Click <b>MARKETPLACE</b> in the sidebar. You have two options:<br><br>
+      <b>🏪 Sell:</b> Open your store by entering your store name, location, and Payoneer email. List products with photos, a description, and your price. You set your own <b>shipping &amp; handling costs</b> — delivery is entirely your responsibility. You receive <b>97% of each sale</b> (3% platform fee) paid to your Payoneer account within 1–2 business days after payment clears.<br><br>
+      <b>🛒 Buy:</b> Browse all products, search by name or seller, click any photo to zoom and read the full description, add items to your cart. At checkout you provide your shipping address. Payment is made via <b>Payoneer</b> to the platform, which forwards your order to the seller.</div>
+    </div>
+
+    <div class="wg-section">
+      <div class="wg-icon">💡</div>
+      <div><b>Good to know</b><br>
+      • Click any profile photo to view it full size<br>
+      • <b>Buzzing</b> shows the hottest tracks ranked by plays &amp; likes<br>
+      • <b>My Feed</b> shows posts from artists you follow<br>
+      • Use <b>Suggest a Feature</b> to send us your ideas — we read every one<br>
+      • Your music and playlists are yours — only you can delete them</div>
+    </div>
+
+    <button class="btn primary block" data-action="close" style="margin-top:20px;font-size:16px;padding:14px">Let's go! 🚀</button>
+  </div>`);
 }
 
 // ============ APP SHELL ============

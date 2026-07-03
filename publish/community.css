@@ -303,3 +303,15 @@ img{max-width:100%}
 .admin-stat-val{font-size:28px;font-weight:900;color:var(--orange)}
 .admin-stat-label{font-size:13px;font-weight:700;margin-top:2px}
 .admin-stat-sub{font-size:11px;color:var(--muted);margin-top:3px}
+
+
+/* ===== WELCOME GUIDE ===== */
+.welcome-guide{max-width:540px;margin:0 auto}
+.wg-header{text-align:center;padding:8px 0 20px}
+.wg-header h2{font-size:22px;font-weight:900;margin:8px 0 4px}
+.wg-header .sub{font-size:14px;color:var(--muted)}
+.wg-section{display:flex;gap:14px;align-items:flex-start;background:#fff;border-radius:14px;padding:14px 16px;margin-bottom:12px;box-shadow:0 2px 8px rgba(180,120,60,.08);font-size:14px;line-height:1.6;color:var(--ink)}
+.wg-icon{font-size:26px;flex-shrink:0;margin-top:2px}
+.wg-market{background:var(--orange-1);border:1px solid rgba(225,150,60,.2)}
+.wg-section b{font-weight:800}
+.block{display:block;width:100%;box-sizing:border-box}
