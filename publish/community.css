@@ -318,3 +318,35 @@ img{max-width:100%}
 .mp-mode{background:none;border:none;font-size:18px;cursor:pointer;padding:6px;border-radius:8px;opacity:.45;transition:opacity .2s,background .2s;flex-shrink:0}
 .mp-mode:hover{opacity:1;background:var(--orange-1)}
 .mp-mode.mode-on{opacity:1}
+
+/* ===== PRIVATE MESSENGER ===== */
+.conv-list{display:flex;flex-direction:column;gap:6px}
+.conv-row{display:flex;gap:12px;align-items:center;background:#fff;border-radius:14px;padding:12px 14px;cursor:pointer;box-shadow:0 1px 6px rgba(180,120,60,.07);transition:background .15s}
+.conv-row:hover{background:#fff7f1}
+.conv-time{font-size:11px;color:var(--muted);float:right;font-weight:400}
+.unread-badge{display:inline-block;background:#e2554f;color:#fff;font-size:10px;font-weight:800;border-radius:99px;padding:1px 6px;margin-left:6px;line-height:1.5}
+/* chat thread */
+.chat-header{display:flex;align-items:center;gap:10px;padding:12px 0 14px;border-bottom:1px solid var(--line);margin-bottom:8px;position:sticky;top:0;background:#faf6f2;z-index:5}
+.chat-name{font-weight:700;font-size:15px;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.chat-msgs{display:flex;flex-direction:column;gap:8px;min-height:200px;max-height:calc(100vh - 240px);overflow-y:auto;padding:4px 0 12px}
+.chat-input-row{display:flex;gap:8px;padding-top:10px;border-top:1px solid var(--line);position:sticky;bottom:0;background:#faf6f2}
+.chat-input{flex:1;border:1px solid var(--line);border-radius:99px;padding:10px 16px;font-size:14px;outline:none;font-family:inherit}
+.chat-input:focus{border-color:var(--orange)}
+/* message bubbles */
+.msg-bubble{max-width:72%;display:flex;flex-direction:column;gap:3px}
+.msg-bubble.mine{align-self:flex-end;align-items:flex-end}
+.msg-bubble.theirs{align-self:flex-start;align-items:flex-start}
+.msg-text{padding:10px 14px;border-radius:18px;font-size:14px;line-height:1.5;word-break:break-word;white-space:pre-wrap}
+.mine .msg-text{background:var(--orange);color:#fff;border-bottom-right-radius:4px}
+.theirs .msg-text{background:#fff;color:var(--ink);border-bottom-left-radius:4px;box-shadow:0 1px 4px rgba(180,120,60,.1)}
+.msg-time{font-size:10px;color:var(--muted);padding:0 4px}
+/* voice call UI */
+.call-ui{text-align:center;padding:12px 0 4px}
+.call-avatar{margin-bottom:14px}
+.call-name{font-size:20px;font-weight:900;margin-bottom:6px}
+.call-status{font-size:14px;color:var(--muted);margin-bottom:4px}
+.call-timer{font-size:22px;font-weight:700;color:var(--orange);margin:8px 0 18px;min-height:32px}
+.call-btns{display:flex;gap:12px;justify-content:center;flex-wrap:wrap;margin-top:8px}
+.call-btn-accept{background:#27ae60;color:#fff;border:none;border-radius:99px;padding:12px 24px;font-size:15px;font-weight:700;cursor:pointer}
+.call-btn-mute{background:var(--orange-2);color:var(--ink);border:none;border-radius:99px;padding:12px 24px;font-size:15px;font-weight:700;cursor:pointer}
+.call-btn-end{background:#e2554f;color:#fff;border:none;border-radius:99px;padding:12px 24px;font-size:15px;font-weight:700;cursor:pointer}
