@@ -93,6 +93,8 @@ let ME=null;                                   // the signed-in user's profile (
 // live shared data, kept in sync by Firestore listeners
 const CACHE={ users:{}, tracks:[], statuses:[], follows:{}, reactions:{}, comments:[], notifications:[], products:[], sellers:{}, orders:[] };
 let state={ view:"discover", profileId:null, query:"" };
+let playMode="continuous"; // "continuous" | "repeat" | "shuffle"
+let nowPlayingId=null;
 function go(v,x={}){ state={ ...state, view:v, ...x }; render(); window.scrollTo(0,0); }
 function render(){
   if(!ME){ renderLanding(); return; }
@@ -587,6 +589,7 @@ let hasSrc=false;
 function showPlayer(title,artist,accent,src){ $("miniplayer").classList.add("show"); $("mpArt").style.background=grad(accent); $("mpArt").textContent="◎"; $("mpTitle").textContent=title; $("mpArtist").textContent=artist;
   if(src){ hasSrc=true; audio.src=src; audio.play().then(()=>setPlaying(true)).catch(()=>setPlaying(false)); } else { hasSrc=false; setPlaying(true); } }
 async function playTrack(id){ const t=allTracks().find(x=>x.id===id); if(!t) return; const u=userById(t.userId); const d=db(); d.plays[id]=(d.plays[id]||0)+1; commit(d);
+  nowPlayingId=id;
   if(t.src&&t.src.startsWith("local:")){
     const blob=await audioGet(t.src.slice(6));
     if(blob){ showPlayer(t.title,u.name,t.accent,URL.createObjectURL(blob)); }
@@ -595,7 +598,22 @@ async function playTrack(id){ const t=allTracks().find(x=>x.id===id); if(!t) ret
   }
   showPlayer(t.title,u.name,t.accent,t.src); if(!t.src) toast("Demo track — no audio linked yet. Reactions still work!"); }
 function setPlaying(p){ $("mpPlay").textContent=p?"⏸":"▶"; }
+function playQueue(direction){
+  const queue=allTracks().filter(t=>t.src&&!t.src.startsWith("local:")&&t.visibility!=="private");
+  if(!queue.length) return;
+  if(playMode==="shuffle"){ playTrack(queue[Math.floor(Math.random()*queue.length)].id); return; }
+  const idx=queue.findIndex(t=>t.id===nowPlayingId);
+  const next=queue[(idx+direction+queue.length)%queue.length];
+  playTrack(next.id);
+}
+function cyclePlayMode(){ const m=["continuous","repeat","shuffle"]; playMode=m[(m.indexOf(playMode)+1)%3]; updateModeBtn(); toast(playMode==="continuous"?"Continuous 🔁":playMode==="repeat"?"Repeat one 🔂":"Shuffle 🔀"); }
+function updateModeBtn(){ const el=$("mpMode"); if(!el)return; const icons={continuous:"🔁",repeat:"🔂",shuffle:"🔀"}; el.textContent=icons[playMode]; el.classList.toggle("mode-on",playMode!=="continuous"); }
 $("mpPlay").addEventListener("click",()=>{ if(!hasSrc)return; if(!audio.paused){audio.pause();setPlaying(false);}else{audio.play();setPlaying(true);} });
+document.getElementById("mpMode").addEventListener("click",cyclePlayMode);
+audio.addEventListener("ended",()=>{
+  if(playMode==="repeat"){ audio.currentTime=0; audio.play().then(()=>setPlaying(true)).catch(()=>{}); return; }
+  playQueue(1);
+});
 audio.addEventListener("timeupdate",()=>{ if(!audio.duration)return; $("mpFill").style.width=(audio.currentTime/audio.duration*100)+"%"; const s=Math.floor(audio.currentTime); $("mpTime").textContent=`${Math.floor(s/60)}:${String(s%60).padStart(2,"0")}`; });
 $("mpProg").addEventListener("click",e=>{ if(!audio.duration)return; const r=e.currentTarget.getBoundingClientRect(); audio.currentTime=(e.clientX-r.left)/r.width*audio.duration; });
 
