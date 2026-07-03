@@ -206,6 +206,13 @@ function showWelcomeGuide(name){
       <b>🛒 Buy:</b> Browse all products, search by name or seller, click any photo to zoom and read the full description, add items to your cart. At checkout you provide your shipping address. Payment is made via <b>Payoneer</b> to the platform, which forwards your order to the seller.</div>
     </div>
 
+    <div class="wg-section wg-market">
+      <div class="wg-icon">💬</div>
+      <div><b>Private Messenger &amp; Voice Calls</b><br>
+      You can message any member of the community privately. Go to any artist's profile and tap <b>💬 Message</b> to open a direct chat. Your conversations appear in the <b>💬 Messages</b> tab in the sidebar — new messages show an unread badge so you never miss one.<br><br>
+      <b>📞 Voice calls:</b> Inside any chat, tap <b>📞 Call</b> to start a free voice call with that person in real time. If someone calls you, an incoming call overlay appears on screen — tap <b>✅ Accept</b> to connect or <b>❌ Decline</b> to ignore. You can mute yourself during a call and see how long you've been talking.</div>
+    </div>
+
     <div class="wg-section">
       <div class="wg-icon">💡</div>
       <div><b>Good to know</b><br>
@@ -668,7 +675,7 @@ async function broadcastWelcome(){
   if(!isAdmin()) return;
   const users=Object.values(CACHE.users).filter(u=>u.id&&!String(u.id).startsWith("u_"));
   if(!users.length) return toast("No users loaded yet — wait a moment and try again.");
-  const text="📖 OK Music Guide: learn how to share music, create playlists, buy & sell in the Marketplace, and more. Tap to open the guide.";
+  const text="📖 OK Music Guide updated! Share music, playlists, buy & sell in the Marketplace, and now send private messages & voice call any member. Tap to open the guide.";
   let sent=0;
   for(const u of users){
     try{
