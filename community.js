@@ -91,7 +91,7 @@ let toastTimer; function toast(m){ const e=$("toast"); e.textContent=m; e.hidden
 // ---------- state ----------
 let ME=null;                                   // the signed-in user's profile (Firebase)
 // live shared data, kept in sync by Firestore listeners
-const CACHE={ users:{}, tracks:[], statuses:[], follows:{}, reactions:{}, comments:[], notifications:[], products:[], sellers:{}, orders:[] };
+const CACHE={ users:{}, tracks:[], statuses:[], follows:{}, reactions:{}, comments:[], notifications:[], products:[], sellers:{}, orders:[], convos:{} };
 let state={ view:"discover", profileId:null, query:"" };
 let playMode="continuous"; // "continuous" | "repeat" | "shuffle"
 let nowPlayingId=null;
@@ -237,6 +237,7 @@ function renderApp(){
         ${item("buzzing","🔥","Buzzing")}
         ${item("home","🏠","My Feed")}
         ${item("notifs","🔔","Notifications")}
+        ${(()=>{const un=Object.values(CACHE.convos||{}).reduce((s,c)=>s+((c.unread||{})[ME?.id]||0),0);return`<div class="side-item ${state.view==='msgs'||state.view==='chat'?'active':''}" data-action="nav" data-view="msgs"><span class="ic">💬</span>Messages${un?`<span class="bell-badge" style="position:static;margin-left:6px">${un>9?'9+':un}</span>`:''}</div>`})()}
         <div class="side-item" data-action="profile" data-uid="${u.id}"><span class="ic">😊</span>My Page</div>
         ${item("fans","🫂","My Fans")}
         ${item("mymusic","🎵","My Music")}
@@ -262,6 +263,8 @@ function renderMain(){
   if(state.view==="fans") return renderFans();
   if(state.view==="buzzing") return renderBuzzing();
   if(state.view==="notifs") return renderNotifs();
+  if(state.view==="msgs") return renderMessages();
+  if(state.view==="chat") return openChat(state.chatUid);
   if(state.view==="home") return renderHome();
   if(state.view==="marketplace") return renderMarketplace();
   if(state.view==="mystore") return renderSellerStore();
@@ -317,7 +320,8 @@ function renderProfile(uid){
   const tracks=tracksByUser(uid,mine); const pls=playlistsByUser(uid); const sts=statusesByUser(uid);
   const headActions=mine
     ? `<button class="btn primary" data-action="customize">🎨 Edit profile</button><button class="btn" data-action="invite">✉️ Invite</button>`
-    : `<button class="btn ${isFollowing(uid)?'':'primary'}" data-action="follow" data-uid="${uid}">${isFollowing(uid)?'Following ✓':'Follow'}</button>`;
+    : `<button class="btn ${isFollowing(uid)?'':'primary'}" data-action="follow" data-uid="${uid}">${isFollowing(uid)?'Following ✓':'Follow'}</button>
+       <button class="btn" data-action="openchat" data-uid="${uid}">💬 Message</button>`;
   // MUSIC column
   let music="";
   if(mine) music+=`<div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap"><button class="btn sm primary" data-action="sharefolder">📁 Share folder</button><button class="btn sm" data-action="upload">＋ Single track</button></div>`;
@@ -959,7 +963,8 @@ function renderNotifs(){
   $("page").innerHTML=`<div class="h-title">Notifications 🔔</div>${
     list.length?list.map(n=>{
       const isPlatform=n.fromUid==="platform";
-      const action=isPlatform?`data-action="showguide"`:`data-action="profile" data-uid="${n.fromUid}"`;
+      const isMsg=n.type==="message";
+      const action=isPlatform?`data-action="showguide"`:isMsg?`data-action="openchat" data-uid="${n.fromUid}"`:`data-action="profile" data-uid="${n.fromUid}"`;
       const av=isPlatform
         ?`<div class="avatar" style="width:42px;height:42px;font-size:20px;background:var(--orange);flex-shrink:0;border-radius:50%;display:grid;place-items:center;color:#fff">◎</div>`
         :`<div class="avatar" style="${avatarStyle(userById(n.fromUid)||{color:'#FB7A28'},42)}">${(userById(n.fromUid)?.avatarImg)?'':initials(n.fromName||'?')}</div>`;
@@ -1026,7 +1031,13 @@ document.addEventListener("click",e=>{
     bgcolor:()=>{window._bgColor=el.dataset.c;window._bgTheme="";document.querySelectorAll("#bgSw .swatch").forEach(s=>s.classList.toggle("sel",s===el));document.querySelectorAll("#themeGrid .theme-swatch").forEach(s=>s.classList.remove("sel"));const bi=$("bgImg");if(bi)bi.value="";},
     theme:()=>{window._bgTheme=el.dataset.t;window._bgColor="";document.querySelectorAll("#themeGrid .theme-swatch").forEach(s=>s.classList.toggle("sel",s===el));document.querySelectorAll("#bgSw .swatch").forEach(s=>s.classList.remove("sel"));const bi=$("bgImg");if(bi)bi.value="";},
     broadcastwelcome:broadcastWelcome,
-    showguide:()=>showWelcomeGuide(ME?.name||"there")
+    showguide:()=>showWelcomeGuide(ME?.name||"there"),
+    openchat:()=>{ state.chatUid=el.dataset.uid; state.view="chat"; renderApp(); },
+    sendmsg:()=>sendMsg(el.dataset.uid),
+    startcall:()=>startCall(el.dataset.uid),
+    acceptcall:()=>acceptCall(el.dataset.uid),
+    mutecall:muteCall,
+    endcall:endCall
   };
   if(M[a]) M[a]();
 });
@@ -1042,6 +1053,197 @@ document.addEventListener("keydown",e=>{ if(e.key==="Escape") closeOverlay(); })
 // ---------- live Firestore listeners (shared data) ----------
 let _rt=null;
 function scheduleRender(){ clearTimeout(_rt); _rt=setTimeout(()=>{ const a=document.activeElement; if(a && /INPUT|TEXTAREA/.test(a.tagName)) return; render(); }, 80); }
+
+// ============ PRIVATE MESSENGER ============
+const ICE=[{urls:"stun:stun.l.google.com:19302"},{urls:"stun:stun1.l.google.com:19302"}];
+let activePc=null,activeStream=null,activeCallId=null,callUnsub=null,callInterval=null,muted=false;
+let msgUnsub=null,convUnsub=null;
+function convId(a,b){return[a,b].sort().join("_");}
+
+function msgUnreadTotal(){
+  return Object.values(CACHE.convos||{}).reduce((s,c)=>s+((c.unread||{})[ME?.id]||0),0);
+}
+
+// ---- conversation list ----
+function renderMessages(){
+  if(convUnsub){convUnsub();convUnsub=null;}
+  $("page").innerHTML=`<div class="h-title">💬 Messages</div><div id="convList" class="conv-list"><div class="empty">Loading…</div></div>`;
+  convUnsub=fbDB.collection("messages").where("participants","array-contains",ME.id)
+    .orderBy("lastTime","desc").onSnapshot(snap=>{
+      CACHE.convos={};
+      snap.docs.forEach(d=>{CACHE.convos[d.id]={id:d.id,...d.data()};});
+      const el=$("convList");if(!el)return;
+      const convs=snap.docs.map(d=>({id:d.id,...d.data()}));
+      if(!convs.length){el.innerHTML='<div class="empty">No messages yet — open any profile and tap 💬 Message to start a chat.</div>';return;}
+      el.innerHTML=convs.map(c=>{
+        const otherId=c.participants.find(p=>p!==ME.id);
+        const other=userById(otherId)||{name:"Unknown",color:"#ccc"};
+        const unread=(c.unread||{})[ME.id]||0;
+        return`<div class="conv-row" data-action="openchat" data-uid="${otherId}">
+          <div class="avatar" style="${avatarStyle(other,46)}">${other.avatarImg?'':initials(other.name)}</div>
+          <div class="minfo">
+            <div class="mt">${esc(other.name)}${unread?`<span class="unread-badge">${unread}</span>`:''}
+              <span class="conv-time">${c.lastTime?timeAgo(c.lastTime):''}</span></div>
+            <div class="ms">${esc((c.lastMsg||'').slice(0,70))}</div>
+          </div></div>`;
+      }).join('');
+    },e=>console.warn("convs",e));
+}
+
+// ---- open a chat thread ----
+function openChat(uid){
+  const other=userById(uid);if(!other)return toast("User not found");
+  const cid=convId(ME.id,uid);
+  if(msgUnsub){msgUnsub();msgUnsub=null;}
+  state.chatUid=uid;
+  $("page").innerHTML=`
+    <div class="chat-header">
+      <button class="btn sm" data-action="nav" data-view="msgs" style="flex-shrink:0">← Back</button>
+      <div class="avatar" style="${avatarStyle(other,36)};flex-shrink:0">${other.avatarImg?'':initials(other.name)}</div>
+      <span class="chat-name">${esc(other.name)}</span>
+      <button class="btn sm" data-action="startcall" data-uid="${uid}" title="Voice call" style="flex-shrink:0">📞 Call</button>
+    </div>
+    <div class="chat-msgs" id="chatMsgs"></div>
+    <div class="chat-input-row">
+      <input class="chat-input" id="chatInput" placeholder="Type a message…" maxlength="1000"/>
+      <button class="btn primary" data-action="sendmsg" data-uid="${uid}">Send</button>
+    </div>`;
+  fbDB.collection("messages").doc(cid).set({participants:[ME.id,uid],unread:{[ME.id]:0}},{merge:true}).catch(()=>{});
+  msgUnsub=fbDB.collection("messages").doc(cid).collection("msgs")
+    .orderBy("time","asc").limitToLast(80)
+    .onSnapshot(snap=>{
+      const el=$("chatMsgs");if(!el)return;
+      el.innerHTML=snap.docs.map(d=>{const m=d.data();const mine=m.senderId===ME.id;
+        return`<div class="msg-bubble ${mine?'mine':'theirs'}">
+          <div class="msg-text">${esc(m.text)}</div>
+          <div class="msg-time">${timeAgo(m.time)}</div></div>`;
+      }).join('');
+      el.scrollTop=el.scrollHeight;
+    },e=>console.warn("msgs",e));
+  setTimeout(()=>{
+    const inp=$("chatInput");
+    if(inp) inp.addEventListener("keydown",e=>{if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();sendMsg(uid);}});
+  },100);
+}
+
+async function sendMsg(uid){
+  const inp=$("chatInput");if(!inp)return;
+  const text=inp.value.trim();if(!text)return;
+  inp.value="";
+  const cid=convId(ME.id,uid);const time=Date.now();
+  await fbDB.collection("messages").doc(cid).collection("msgs").add({senderId:ME.id,text,time,read:false});
+  await fbDB.collection("messages").doc(cid).set({
+    participants:[ME.id,uid],lastMsg:text,lastTime:time,
+    unread:{[ME.id]:0,[uid]:firebase.firestore.FieldValue.increment(1)}
+  },{merge:true});
+  if(!String(uid).startsWith("u_")) fbDB.collection("notifications").add({forUid:uid,type:"message",fromUid:ME.id,fromName:ME.name,text:`💬 ${ME.name}: ${text.slice(0,60)}`,time,read:false}).catch(()=>{});
+}
+
+// ---- VOICE CALLS ----
+function startCall(uid){
+  if(!navigator.mediaDevices)return toast("Microphone not available on this device.");
+  if(activePc)return toast("Already in a call.");
+  openCallUI(uid,"outgoing");
+}
+
+function openCallUI(uid,mode){
+  const other=userById(uid)||{name:"Someone",color:"#888"};
+  openOverlay(`<div class="call-ui">
+    <div class="call-avatar"><div class="avatar" style="${avatarStyle(other,80)};margin:0 auto">${other.avatarImg?'':initials(other.name)}</div></div>
+    <div class="call-name">${esc(other.name)}</div>
+    <div class="call-status" id="callStatus">${mode==="outgoing"?"Calling…":"Incoming call…"}</div>
+    <div class="call-timer" id="callTimer">0:00</div>
+    <audio id="remoteAudio" autoplay playsinline></audio>
+    <div class="call-btns">
+      ${mode==="incoming"?`<button class="call-btn-accept" data-action="acceptcall" data-uid="${uid}">✅ Accept</button>`:''}
+      <button class="call-btn-mute" id="muteBtn" data-action="mutecall">🎙️ Mute</button>
+      <button class="call-btn-end" data-action="endcall" data-uid="${uid}">${mode==="incoming"?"❌ Decline":"📵 End"}</button>
+    </div></div>`);
+  if(mode==="outgoing") initiateCall(uid);
+}
+
+async function initiateCall(uid){
+  const cid=[ME.id,uid].sort().join("_")+"_c"+Date.now();activeCallId=cid;
+  try{
+    const stream=await navigator.mediaDevices.getUserMedia({audio:true});
+    activeStream=stream;
+    const pc=new RTCPeerConnection({iceServers:ICE});activePc=pc;
+    stream.getTracks().forEach(t=>pc.addTrack(t,stream));
+    pc.ontrack=e=>{const ra=$("remoteAudio");if(ra)ra.srcObject=e.streams[0];};
+    const offer=await pc.createOffer();await pc.setLocalDescription(offer);
+    await fbDB.collection("calls").doc(cid).set({callerId:ME.id,calleeId:uid,offer:{type:offer.type,sdp:offer.sdp},callerCandidates:[],calleeCandidates:[],status:"ringing",time:Date.now()});
+    pc.onicecandidate=async e=>{if(e.candidate) await fbDB.collection("calls").doc(cid).update({callerCandidates:firebase.firestore.FieldValue.arrayUnion(e.candidate.toJSON())}).catch(()=>{});};
+    fbDB.collection("notifications").add({forUid:uid,type:"call",fromUid:ME.id,fromName:ME.name,text:`📞 ${ME.name} is calling you — open the app to answer.`,time:Date.now(),read:false}).catch(()=>{});
+    callUnsub=fbDB.collection("calls").doc(cid).onSnapshot(async snap=>{
+      const d=snap.data();if(!d)return;
+      if(d.status==="ended"){endCall();return;}
+      if(d.answer&&!pc.currentRemoteDescription){
+        await pc.setRemoteDescription(new RTCSessionDescription(d.answer)).catch(()=>{});
+        const s=$("callStatus");if(s)s.textContent="Connected ✓";
+        startCallTimer();
+      }
+      if(d.calleeCandidates?.length){for(const c of d.calleeCandidates)await pc.addIceCandidate(new RTCIceCandidate(c)).catch(()=>{});}
+    });
+  }catch(e){toast("Mic error: "+(e.message||e));endCall();}
+}
+
+async function acceptCall(uid){
+  const s=$("callStatus");if(s)s.textContent="Connecting…";
+  const snap=await fbDB.collection("calls").where("callerId","==",uid).where("calleeId","==",ME.id).where("status","==","ringing").orderBy("time","desc").limit(1).get().catch(()=>null);
+  if(!snap||snap.empty){toast("Call expired.");closeOverlay();return;}
+  const doc=snap.docs[0];const d=doc.data();const cid=doc.id;activeCallId=cid;
+  try{
+    const stream=await navigator.mediaDevices.getUserMedia({audio:true});
+    activeStream=stream;
+    const pc=new RTCPeerConnection({iceServers:ICE});activePc=pc;
+    stream.getTracks().forEach(t=>pc.addTrack(t,stream));
+    pc.ontrack=e=>{const ra=$("remoteAudio");if(ra)ra.srcObject=e.streams[0];};
+    await pc.setRemoteDescription(new RTCSessionDescription(d.offer));
+    const answer=await pc.createAnswer();await pc.setLocalDescription(answer);
+    await fbDB.collection("calls").doc(cid).update({answer:{type:answer.type,sdp:answer.sdp},status:"active"});
+    pc.onicecandidate=async e=>{if(e.candidate) await fbDB.collection("calls").doc(cid).update({calleeCandidates:firebase.firestore.FieldValue.arrayUnion(e.candidate.toJSON())}).catch(()=>{});};
+    if(d.callerCandidates?.length){for(const c of d.callerCandidates)await pc.addIceCandidate(new RTCIceCandidate(c)).catch(()=>{});}
+    callUnsub=fbDB.collection("calls").doc(cid).onSnapshot(async snap2=>{
+      const d2=snap2.data();if(!d2)return;
+      if(d2.status==="ended"){endCall();return;}
+      if(d2.callerCandidates?.length){for(const c of d2.callerCandidates)await pc.addIceCandidate(new RTCIceCandidate(c)).catch(()=>{});}
+    });
+    if(s)s.textContent="Connected ✓";
+    startCallTimer();
+  }catch(e){toast("Mic error: "+(e.message||e));endCall();}
+}
+
+function startCallTimer(){
+  const el=$("callTimer");if(!el)return;el.style.display="";
+  clearInterval(callInterval);let sec=0;
+  callInterval=setInterval(()=>{sec++;const e=$("callTimer");if(e)e.textContent=`${Math.floor(sec/60)}:${String(sec%60).padStart(2,"0")}`; },1000);
+}
+function muteCall(){
+  if(!activeStream)return;muted=!muted;
+  activeStream.getAudioTracks().forEach(t=>t.enabled=!muted);
+  const b=$("muteBtn");if(b)b.textContent=muted?"🔇 Unmute":"🎙️ Mute";
+}
+async function endCall(){
+  clearInterval(callInterval);callInterval=null;
+  if(callUnsub){callUnsub();callUnsub=null;}
+  if(activePc){activePc.close();activePc=null;}
+  if(activeStream){activeStream.getTracks().forEach(t=>t.stop());activeStream=null;}
+  if(activeCallId){await fbDB.collection("calls").doc(activeCallId).update({status:"ended"}).catch(()=>{});activeCallId=null;}
+  muted=false;closeOverlay();
+}
+
+function listenForIncomingCalls(){
+  if(!ME||!ME.handle)return;
+  fbDB.collection("calls").where("calleeId","==",ME.id).where("status","==","ringing")
+    .onSnapshot(snap=>{
+      snap.docChanges().forEach(ch=>{
+        if(ch.type==="added"&&!activePc){
+          const d=ch.doc.data();
+          openCallUI(d.callerId,"incoming");
+        }
+      });
+    },()=>{});
+}
 function startListeners(){
   fbDB.collection("users").onSnapshot(s=>{ CACHE.users={}; s.forEach(d=>CACHE.users[d.id]={ id:d.id, ...d.data() }); scheduleRender(); }, e=>console.warn("users",e.code));
   fbDB.collection("tracks").onSnapshot(s=>{ CACHE.tracks=s.docs.map(d=>({ id:d.id, ...d.data() })); scheduleRender(); }, e=>console.warn("tracks",e.code));
@@ -1062,7 +1264,7 @@ startListeners();
 fbAuth.onAuthStateChanged(async (user)=>{
   if(user){
     const prof=await loadProfile(user.uid);
-    if(prof){ ME=prof; syncME(); startMyNotifications(); render(); }
+    if(prof){ ME=prof; syncME(); startMyNotifications(); listenForIncomingCalls(); render(); }
     else { ME={ id:user.uid, name:user.displayName||"" }; render(); }   // no profile yet → onboarding
   } else { ME=null; syncME(); startMyNotifications(); render(); }
 });
