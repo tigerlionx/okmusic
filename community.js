@@ -491,15 +491,25 @@ function openUpload(){
     <button class="btn primary block" data-action="dopublish">Add to my music</button>`);
   window._upColor=COLORS[0]; window._upVis="public"; window._trackCover=null; window._audioFile=null;
 }
+function fileToArrayBuffer(file){
+  if(file.arrayBuffer) return file.arrayBuffer();
+  return new Promise((res,rej)=>{ const r=new FileReader(); r.onload=()=>res(r.result); r.onerror=()=>rej(r.error); r.readAsArrayBuffer(file); });
+}
 async function doPublish(){
   const title=($("upTitle").value||"").trim(); if(!title) return toast("Give it a title"); if(!ME) return openEmailAuth();
   const coverImg=window._trackCover||"";
   if(coverImg&&coverImg.length>900000) return toast("Cover photo is too large — use a smaller image (under ~600KB).");
   let src=($("upSrc").value||"").trim();
+  if(src.startsWith("blob:")){ return toast("Blob URLs can't be shared — please use the 'Choose audio file' button to upload your file directly."); }
+  if(src.startsWith("file://")){ return toast("Local file paths can't be shared — please use the 'Choose audio file' button to upload your file directly."); }
+  if(!src && !window._audioFile){ return toast("Please add an audio file or paste a music link."); }
   if(window._audioFile){
     const localKey="local_track_"+Date.now();
-    try{ await audioPut(localKey, new Blob([await window._audioFile.arrayBuffer()],{type:window._audioFile.type||"audio/mpeg"})); src="local:"+localKey; }
-    catch(e){ return toast("Couldn't cache audio file: "+(e.message||e)); }
+    try{
+      const buf=await fileToArrayBuffer(window._audioFile);
+      await audioPut(localKey, new Blob([buf],{type:window._audioFile.type||"audio/mpeg"}));
+      src="local:"+localKey;
+    }catch(e){ return toast("Couldn't save audio file: "+(e.message||e)+". Try a smaller file or a different format."); }
   }
   fbDB.collection("tracks").add({ userId:ME.id, title, src, genre:($("upGenre")&&$("upGenre").value)||"Other", accent:window._upColor||COLORS[0], coverImg, visibility:window._upVis||"public", share:!!($("upShare")&&$("upShare").checked), createdAt:Date.now() })
     .then(()=>{ closeOverlay(); window._trackCover=null; window._audioFile=null; toast(window._upVis==="private"?"Saved private 🔒":"Published! 🎵"); go("mymusic"); })
