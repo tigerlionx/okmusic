@@ -652,7 +652,26 @@ function renderAdmin(){
       <div class="avatar" style="${avatarStyle(u,40)}">${u.avatarImg?'':initials(u.name)}</div>
       <div class="minfo"><div class="mt">${esc(u.name)} <span style="font-size:12px;color:var(--muted)">@${esc(u.handle||'')}</span></div>
         <div class="ms">${u.createdAt?timeAgo(u.createdAt):'unknown'}</div></div>
-      </div>`).join(''):'<div class="empty">No users yet.</div>'}`;
+      </div>`).join(''):'<div class="empty">No users yet.</div>'}
+    <div class="section-title" style="margin-top:28px">Broadcast</div>
+    <div style="background:#fff;border-radius:14px;padding:16px;box-shadow:0 2px 8px rgba(180,120,60,.08)">
+      <p style="font-size:14px;margin:0 0 12px">Send the getting-started guide to every registered user as a notification they can read in the app.</p>
+      <button class="btn primary" data-action="broadcastwelcome">📢 Send Instructions to All Users (${users.length})</button>
+    </div>`;
+}
+async function broadcastWelcome(){
+  if(!isAdmin()) return;
+  const users=Object.values(CACHE.users).filter(u=>u.id&&!String(u.id).startsWith("u_"));
+  if(!users.length) return toast("No users loaded yet — wait a moment and try again.");
+  const text="📖 OK Music Guide: learn how to share music, create playlists, buy & sell in the Marketplace, and more. Tap to open the guide.";
+  let sent=0;
+  for(const u of users){
+    try{
+      await fbDB.collection("notifications").add({ forUid:u.id, type:"welcome_broadcast", fromUid:"platform", fromName:"OK Music", text, time:Date.now(), read:false });
+      sent++;
+    }catch(e){ console.warn("broadcast fail",u.id,e.code); }
+  }
+  toast(`Guide sent to ${sent} user${sent!==1?"s":""} ✓`);
 }
 
 // ============ MARKETPLACE ============
@@ -937,9 +956,15 @@ function markAllRead(){
 function renderNotifs(){
   const list=(CACHE.notifications||[]).slice().sort((a,b)=>b.time-a.time);
   $("page").innerHTML=`<div class="h-title">Notifications 🔔</div>${
-    list.length?list.map(n=>`<div class="mrow2" data-action="profile" data-uid="${n.fromUid}" style="cursor:pointer;${n.read?'':'background:#fff7f1'}">
-      <div class="avatar" style="${avatarStyle(userById(n.fromUid)||{color:'#FB7A28'},42)}">${(userById(n.fromUid)?.avatarImg)?'':initials(n.fromName||'?')}</div>
-      <div class="minfo"><div class="mt">${esc(n.text)}</div><div class="ms">${timeAgo(n.time)}</div></div></div>`).join("")
+    list.length?list.map(n=>{
+      const isPlatform=n.fromUid==="platform";
+      const action=isPlatform?`data-action="showguide"`:`data-action="profile" data-uid="${n.fromUid}"`;
+      const av=isPlatform
+        ?`<div class="avatar" style="width:42px;height:42px;font-size:20px;background:var(--orange);flex-shrink:0;border-radius:50%;display:grid;place-items:center;color:#fff">◎</div>`
+        :`<div class="avatar" style="${avatarStyle(userById(n.fromUid)||{color:'#FB7A28'},42)}">${(userById(n.fromUid)?.avatarImg)?'':initials(n.fromName||'?')}</div>`;
+      return `<div class="mrow2" ${action} style="cursor:pointer;${n.read?'':'background:#fff7f1'}">${av}
+        <div class="minfo"><div class="mt">${esc(n.text)}</div><div class="ms">${timeAgo(n.time)}</div></div></div>`;
+    }).join("")
     :'<div class="empty">No notifications yet. When fans follow you or react to your music & posts, they\'ll show up here. 🔔</div>'}`;
   setTimeout(markAllRead,400);
 }
@@ -998,7 +1023,9 @@ document.addEventListener("click",e=>{
     swatch:()=>{window._upColor=el.dataset.c;document.querySelectorAll("#swatches .swatch").forEach(s=>s.classList.toggle("sel",s===el));},
     vis:()=>{window._upVis=el.dataset.v;document.querySelectorAll("#visRow .radio-card").forEach(c=>c.classList.toggle("sel",c===el));},
     bgcolor:()=>{window._bgColor=el.dataset.c;window._bgTheme="";document.querySelectorAll("#bgSw .swatch").forEach(s=>s.classList.toggle("sel",s===el));document.querySelectorAll("#themeGrid .theme-swatch").forEach(s=>s.classList.remove("sel"));const bi=$("bgImg");if(bi)bi.value="";},
-    theme:()=>{window._bgTheme=el.dataset.t;window._bgColor="";document.querySelectorAll("#themeGrid .theme-swatch").forEach(s=>s.classList.toggle("sel",s===el));document.querySelectorAll("#bgSw .swatch").forEach(s=>s.classList.remove("sel"));const bi=$("bgImg");if(bi)bi.value="";}
+    theme:()=>{window._bgTheme=el.dataset.t;window._bgColor="";document.querySelectorAll("#themeGrid .theme-swatch").forEach(s=>s.classList.toggle("sel",s===el));document.querySelectorAll("#bgSw .swatch").forEach(s=>s.classList.remove("sel"));const bi=$("bgImg");if(bi)bi.value="";},
+    broadcastwelcome:broadcastWelcome,
+    showguide:()=>showWelcomeGuide(ME?.name||"there")
   };
   if(M[a]) M[a]();
 });
