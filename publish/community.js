@@ -119,7 +119,8 @@ function renderLanding(){
     <div class="authfoot">No account needed to listen — sign in to share & follow.</div>
   </div></div>`;
 }
-function signInGoogle(){ fbAuth.signInWithPopup(new firebase.auth.GoogleAuthProvider()).catch(e=>toast("Google sign-in failed: "+(e.code||e.message))); }
+function signInGoogle(){ fbAuth.signInWithRedirect(new firebase.auth.GoogleAuthProvider()).catch(e=>toast("Google sign-in failed: "+(e.code||e.message))); }
+fbAuth.getRedirectResult().catch(e=>{ if(e.code&&e.code!=="auth/credential-already-in-use") toast("Google sign-in failed: "+(e.code||e.message)); });
 function openEmailAuth(email){
   openOverlay(`<h2>Continue with email</h2><p class="sub">Log in, or create a new account.</p>
     <div class="field"><label>Email</label><input class="fb-field" id="emEmail" type="email" value="${esc(email||'')}" /></div>
