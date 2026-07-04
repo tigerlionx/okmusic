@@ -530,24 +530,23 @@ async function doPublish(){
   if(!src && !window._audioFile){ return toast("Please add an audio file or paste a music link."); }
   if(window._audioFile){
     const file=window._audioFile;
-    const ext=(file.name||"audio").split(".").pop().split("?")[0]||"mp3";
-    const path=`tracks/${ME.id}/${Date.now()}.${ext}`;
-    const ref=fbStorage.ref(path);
     const pubBtn=document.querySelector('[data-action="dopublish"]');
     if(pubBtn){ pubBtn.disabled=true; pubBtn.textContent="Uploading… 0%"; }
     try{
-      await new Promise((resolve,reject)=>{
-        const task=ref.put(file,{contentType:file.type||"audio/mpeg"});
-        task.on("state_changed",
-          snap=>{ const pct=Math.round(snap.bytesTransferred/snap.totalBytes*100); if(pubBtn) pubBtn.textContent=`Uploading… ${pct}%`; },
-          reject,
-          resolve
-        );
+      src=await new Promise((resolve,reject)=>{
+        const fd=new FormData();
+        fd.append("file",file);
+        fd.append("upload_preset","okmusic_audio");
+        const xhr=new XMLHttpRequest();
+        xhr.open("POST","https://api.cloudinary.com/v1_1/llka5use/video/upload");
+        xhr.upload.onprogress=e=>{ if(e.lengthComputable&&pubBtn) pubBtn.textContent=`Uploading… ${Math.round(e.loaded/e.total*100)}%`; };
+        xhr.onload=()=>{ try{ const r=JSON.parse(xhr.responseText); if(r.secure_url) resolve(r.secure_url); else reject(new Error(r.error?.message||"Upload failed")); }catch(err){ reject(err); } };
+        xhr.onerror=()=>reject(new Error("Network error — check your connection"));
+        xhr.send(fd);
       });
-      src=await ref.getDownloadURL();
     }catch(e){
       if(pubBtn){ pubBtn.disabled=false; pubBtn.textContent="Add to my music"; }
-      return toast("Upload failed: "+(e.message||e.code||e)+". Check your connection and try again.");
+      return toast("Upload failed: "+(e.message||e)+". Check your connection and try again.");
     }
   }
   fbDB.collection("tracks").add({ userId:ME.id, title, src, genre:($("upGenre")&&$("upGenre").value)||"Other", accent:window._upColor||COLORS[0], coverImg, visibility:window._upVis||"public", share:!!($("upShare")&&$("upShare").checked), createdAt:Date.now() })

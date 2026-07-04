@@ -22,4 +22,4 @@ const fbAuth = firebase.auth();
 const fbDB = firebase.firestore();
 // Offline cache + queued writes — keeps the app usable on flaky connections.
 fbDB.enablePersistence({ synchronizeTabs: true }).catch(()=>{});
-const fbStorage = firebase.storage();
+// const fbStorage = firebase.storage();   // not used — audio uploads go via Cloudinary
