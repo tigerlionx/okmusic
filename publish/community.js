@@ -1149,6 +1149,11 @@ document.addEventListener("click",e=>{
     showguide:()=>showWelcomeGuide(ME?.name||"there"),
     openchat:()=>{ state.chatUid=el.dataset.uid; state.view="chat"; renderApp(); },
     sendmsg:()=>sendMsg(el.dataset.uid),
+    editmsg:()=>editMsg(el.dataset.msgid,el.dataset.cid,el.dataset.text),
+    saveeditmsg:()=>saveEditMsg(el.dataset.msgid,el.dataset.cid),
+    deletemsgmenu:()=>deleteMsgMenu(el.dataset.msgid,el.dataset.cid),
+    deletemsgall:()=>deleteMsgForAll(el.dataset.msgid,el.dataset.cid),
+    deletemsgme:()=>deleteMsgForMe(el.dataset.msgid,el.dataset.cid),
     startcall:()=>startCall(el.dataset.uid),
     acceptcall:()=>acceptCall(el.dataset.uid),
     mutecall:muteCall,
@@ -1276,14 +1281,25 @@ function openChat(uid){
       const el=$("chatMsgs");if(!el)return;
       if(_prevMsgCount>0&&snap.docs.length>_prevMsgCount){
         const newest=snap.docs[snap.docs.length-1].data();
-        if(newest.senderId!==ME.id) playMsgSound();
+        if(newest.senderId!==ME.id&&!newest.deleted&&!(newest.deletedFor||[]).includes(ME.id)) playMsgSound();
       }
       _prevMsgCount=snap.docs.length;
-      el.innerHTML=snap.docs.map(d=>{const m=d.data();const mine=m.senderId===ME.id;
-        return`<div class="msg-bubble ${mine?'mine':'theirs'}">
-          <div class="msg-text">${esc(m.text)}</div>
-          <div class="msg-time">${timeAgo(m.time)}</div></div>`;
-      }).join('');
+      el.innerHTML=snap.docs
+        .filter(d=>!(d.data().deletedFor||[]).includes(ME.id))
+        .map(d=>{const m=d.data();const mine=m.senderId===ME.id;
+          if(m.deleted) return`<div class="msg-bubble ${mine?'mine':'theirs'} deleted">
+            <div class="msg-text"><em>🗑️ Message deleted</em></div>
+            <div class="msg-time">${timeAgo(m.time)}</div></div>`;
+          return`<div class="msg-bubble ${mine?'mine':'theirs'}">
+            <div class="msg-text">${esc(m.text)}${m.edited?'<span class="msg-edited"> · edited</span>':''}</div>
+            <div class="msg-meta">
+              <span class="msg-time">${timeAgo(m.time)}</span>
+              ${mine?`<span class="msg-actions">
+                <button class="msg-act" data-action="editmsg" data-msgid="${d.id}" data-cid="${cid}" data-text="${esc(m.text)}" title="Edit">✏️</button>
+                <button class="msg-act" data-action="deletemsgmenu" data-msgid="${d.id}" data-cid="${cid}" title="Delete">🗑️</button>
+              </span>`:''}
+            </div></div>`;
+        }).join('');
       el.scrollTop=el.scrollHeight;
     },e=>console.warn("msgs",e));
   setTimeout(()=>{
@@ -1303,6 +1319,39 @@ async function sendMsg(uid){
     unread:{[ME.id]:0,[uid]:firebase.firestore.FieldValue.increment(1)}
   },{merge:true});
   if(!String(uid).startsWith("u_")) fbDB.collection("notifications").add({forUid:uid,type:"message",fromUid:ME.id,fromName:ME.name,text:`💬 ${ME.name}: ${text.slice(0,60)}`,time,read:false}).catch(()=>{});
+}
+
+function editMsg(msgId,cid,currentText){
+  openOverlay(`<h2>✏️ Edit message</h2>
+    <div class="field"><textarea id="editMsgText" style="min-height:80px;width:100%">${esc(currentText)}</textarea></div>
+    <div style="display:flex;gap:8px;margin-top:4px">
+      <button class="btn primary" data-action="saveeditmsg" data-msgid="${msgId}" data-cid="${cid}">Save</button>
+      <button class="btn" data-action="close">Cancel</button>
+    </div>`);
+  setTimeout(()=>{const t=$("editMsgText");if(t){t.focus();t.setSelectionRange(t.value.length,t.value.length);}},50);
+}
+async function saveEditMsg(msgId,cid){
+  const text=($("editMsgText")||{value:""}).value.trim();
+  if(!text) return toast("Message can't be empty.");
+  try{ await fbDB.collection("messages").doc(cid).collection("msgs").doc(msgId).update({text,edited:true}); closeOverlay(); }
+  catch(e){ toast("Couldn't edit: "+(e.code||e.message)); }
+}
+function deleteMsgMenu(msgId,cid){
+  openOverlay(`<h2>🗑️ Delete message</h2>
+    <p class="sub">Choose who to delete it for.</p>
+    <div style="display:flex;flex-direction:column;gap:10px;margin-top:16px">
+      <button class="btn primary" data-action="deletemsgall" data-msgid="${msgId}" data-cid="${cid}">Delete for everyone</button>
+      <button class="btn" data-action="deletemsgme" data-msgid="${msgId}" data-cid="${cid}">Delete for me only</button>
+      <button class="btn" data-action="close">Cancel</button>
+    </div>`);
+}
+async function deleteMsgForAll(msgId,cid){
+  try{ await fbDB.collection("messages").doc(cid).collection("msgs").doc(msgId).update({deleted:true,text:""}); closeOverlay(); }
+  catch(e){ toast("Couldn't delete: "+(e.code||e.message)); }
+}
+async function deleteMsgForMe(msgId,cid){
+  try{ await fbDB.collection("messages").doc(cid).collection("msgs").doc(msgId).update({deletedFor:firebase.firestore.FieldValue.arrayUnion(ME.id)}); closeOverlay(); }
+  catch(e){ toast("Couldn't delete: "+(e.code||e.message)); }
 }
 
 // ---- VOICE CALLS ----
