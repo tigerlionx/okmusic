@@ -119,8 +119,17 @@ function renderLanding(){
     <div class="authfoot">No account needed to listen — sign in to share & follow.</div>
   </div></div>`;
 }
-function signInGoogle(){ fbAuth.signInWithRedirect(new firebase.auth.GoogleAuthProvider()).catch(e=>toast("Google sign-in failed: "+(e.code||e.message))); }
-fbAuth.getRedirectResult().then(result=>{ if(result&&result.user) console.log("Redirect sign-in OK:",result.user.email); }).catch(e=>{ if(e.code==="auth/unauthorized-domain") toast("Login blocked: add this domain to Firebase Authorized Domains. ("+location.hostname+")"); else if(e.code&&e.code!=="auth/credential-already-in-use") toast("Google sign-in failed: "+(e.code||e.message)); });
+function signInGoogle(){
+  const provider=new firebase.auth.GoogleAuthProvider();
+  fbAuth.signInWithPopup(provider).catch(e=>{
+    if(e.code==="auth/popup-blocked"||e.code==="auth/popup-closed-by-user"){
+      fbAuth.signInWithRedirect(provider).catch(e2=>toast("Google sign-in failed: "+(e2.code||e2.message)));
+    } else if(e.code!=="auth/cancelled-popup-request"){
+      toast("Google sign-in failed: "+(e.code||e.message));
+    }
+  });
+}
+fbAuth.getRedirectResult().then(result=>{ if(result&&result.user) console.log("Redirect sign-in OK:",result.user.email); }).catch(e=>{ if(e.code==="auth/unauthorized-domain") toast("Login blocked: domain not authorised in Firebase. ("+location.hostname+")"); else if(e.code&&e.code!=="auth/credential-already-in-use") toast("Google sign-in failed: "+(e.code||e.message)); });
 function openEmailAuth(email){
   openOverlay(`<h2>Continue with email</h2><p class="sub">Log in, or create a new account.</p>
     <div class="field"><label>Email</label><input class="fb-field" id="emEmail" type="email" value="${esc(email||'')}" /></div>
