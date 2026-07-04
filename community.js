@@ -529,12 +529,25 @@ async function doPublish(){
   if(src.startsWith("file://")){ return toast("Local file paths can't be shared — please use the 'Choose audio file' button to upload your file directly."); }
   if(!src && !window._audioFile){ return toast("Please add an audio file or paste a music link."); }
   if(window._audioFile){
-    const localKey="local_track_"+Date.now();
+    const file=window._audioFile;
+    const pubBtn=document.querySelector('[data-action="dopublish"]');
+    if(pubBtn){ pubBtn.disabled=true; pubBtn.textContent="Uploading… 0%"; }
     try{
-      const buf=await fileToArrayBuffer(window._audioFile);
-      await audioPut(localKey, new Blob([buf],{type:window._audioFile.type||"audio/mpeg"}));
-      src="local:"+localKey;
-    }catch(e){ return toast("Couldn't save audio file: "+(e.message||e)+". Try a smaller file or a different format."); }
+      src=await new Promise((resolve,reject)=>{
+        const fd=new FormData();
+        fd.append("file",file);
+        fd.append("upload_preset","okmusic_audio");
+        const xhr=new XMLHttpRequest();
+        xhr.open("POST","https://api.cloudinary.com/v1_1/llka5use/video/upload");
+        xhr.upload.onprogress=e=>{ if(e.lengthComputable&&pubBtn) pubBtn.textContent=`Uploading… ${Math.round(e.loaded/e.total*100)}%`; };
+        xhr.onload=()=>{ try{ const r=JSON.parse(xhr.responseText); if(r.secure_url) resolve(r.secure_url); else reject(new Error(r.error?.message||"Upload failed")); }catch(err){ reject(err); } };
+        xhr.onerror=()=>reject(new Error("Network error — check your connection"));
+        xhr.send(fd);
+      });
+    }catch(e){
+      if(pubBtn){ pubBtn.disabled=false; pubBtn.textContent="Add to my music"; }
+      return toast("Upload failed: "+(e.message||e)+". Check your connection and try again.");
+    }
   }
   fbDB.collection("tracks").add({ userId:ME.id, title, src, genre:($("upGenre")&&$("upGenre").value)||"Other", accent:window._upColor||COLORS[0], coverImg, visibility:window._upVis||"public", share:!!($("upShare")&&$("upShare").checked), createdAt:Date.now() })
     .then(()=>{ closeOverlay(); window._trackCover=null; window._audioFile=null; toast(window._upVis==="private"?"Saved private 🔒":"Published! 🎵"); go("mymusic"); })
