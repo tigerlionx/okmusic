@@ -529,12 +529,26 @@ async function doPublish(){
   if(src.startsWith("file://")){ return toast("Local file paths can't be shared — please use the 'Choose audio file' button to upload your file directly."); }
   if(!src && !window._audioFile){ return toast("Please add an audio file or paste a music link."); }
   if(window._audioFile){
-    const localKey="local_track_"+Date.now();
+    const file=window._audioFile;
+    const ext=(file.name||"audio").split(".").pop().split("?")[0]||"mp3";
+    const path=`tracks/${ME.id}/${Date.now()}.${ext}`;
+    const ref=fbStorage.ref(path);
+    const pubBtn=document.querySelector('[data-action="dopublish"]');
+    if(pubBtn){ pubBtn.disabled=true; pubBtn.textContent="Uploading… 0%"; }
     try{
-      const buf=await fileToArrayBuffer(window._audioFile);
-      await audioPut(localKey, new Blob([buf],{type:window._audioFile.type||"audio/mpeg"}));
-      src="local:"+localKey;
-    }catch(e){ return toast("Couldn't save audio file: "+(e.message||e)+". Try a smaller file or a different format."); }
+      await new Promise((resolve,reject)=>{
+        const task=ref.put(file,{contentType:file.type||"audio/mpeg"});
+        task.on("state_changed",
+          snap=>{ const pct=Math.round(snap.bytesTransferred/snap.totalBytes*100); if(pubBtn) pubBtn.textContent=`Uploading… ${pct}%`; },
+          reject,
+          resolve
+        );
+      });
+      src=await ref.getDownloadURL();
+    }catch(e){
+      if(pubBtn){ pubBtn.disabled=false; pubBtn.textContent="Add to my music"; }
+      return toast("Upload failed: "+(e.message||e.code||e)+". Check your connection and try again.");
+    }
   }
   fbDB.collection("tracks").add({ userId:ME.id, title, src, genre:($("upGenre")&&$("upGenre").value)||"Other", accent:window._upColor||COLORS[0], coverImg, visibility:window._upVis||"public", share:!!($("upShare")&&$("upShare").checked), createdAt:Date.now() })
     .then(()=>{ closeOverlay(); window._trackCover=null; window._audioFile=null; toast(window._upVis==="private"?"Saved private 🔒":"Published! 🎵"); go("mymusic"); })
