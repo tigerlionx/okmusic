@@ -553,18 +553,73 @@ async function doPublish(){
     .then(()=>{ closeOverlay(); window._trackCover=null; window._audioFile=null; toast(window._upVis==="private"?"Saved private 🔒":"Published! 🎵"); go("mymusic"); })
     .catch(e=>toast("Couldn't save: "+(e.code||e.message))); }
 
+// ---------- Cloudinary upload helper ----------
+function uploadToCloudinary(blob, onProgress){
+  return new Promise((resolve,reject)=>{
+    const fd=new FormData();
+    fd.append("file",blob);
+    fd.append("upload_preset","okmusic_audio");
+    const xhr=new XMLHttpRequest();
+    xhr.open("POST","https://api.cloudinary.com/v1_1/llka5use/video/upload");
+    if(onProgress) xhr.upload.onprogress=e=>{ if(e.lengthComputable) onProgress(Math.round(e.loaded/e.total*100)); };
+    xhr.onload=()=>{ try{ const r=JSON.parse(xhr.responseText); if(r.secure_url) resolve(r.secure_url); else reject(new Error(r.error?.message||"Upload failed")); }catch(err){ reject(err); } };
+    xhr.onerror=()=>reject(new Error("Network error — check your connection"));
+    xhr.send(fd);
+  });
+}
+
+async function migrateTrack(trackId){
+  const t=allTracks().find(x=>x.id===trackId); if(!t) return;
+  const blob=await audioGet(t.src.slice(6));
+  if(!blob){ toast("Audio file not found on this device. Use '＋ Add link' to paste a public URL instead."); return; }
+  const btn=document.querySelector(`[data-action="migratetrack"][data-id="${trackId}"]`);
+  if(btn){ btn.disabled=true; btn.textContent="Uploading… 0%"; }
+  try{
+    const url=await uploadToCloudinary(blob, pct=>{ if(btn) btn.textContent=`Uploading… ${pct}%`; });
+    await fbDB.collection("tracks").doc(trackId).update({src:url});
+    toast(`"${t.title}" is now on the cloud ☁️ — everyone can hear it!`);
+    renderMyMusic();
+  }catch(e){
+    if(btn){ btn.disabled=false; btn.textContent="☁️ Move to cloud"; }
+    toast("Migration failed: "+(e.message||e));
+  }
+}
+
+async function migrateAllLocal(){
+  const locals=tracksByUser(ME.id,true).filter(t=>t.src&&t.src.startsWith("local:"));
+  if(!locals.length) return toast("No local tracks to migrate.");
+  const allBtn=document.querySelector('[data-action="migratealltracks"]');
+  if(allBtn){ allBtn.disabled=true; allBtn.textContent=`Migrating… 0/${locals.length}`; }
+  let done=0,failed=0;
+  for(const t of locals){
+    const blob=await audioGet(t.src.slice(6));
+    if(!blob){ failed++; continue; }
+    try{
+      const url=await uploadToCloudinary(blob);
+      await fbDB.collection("tracks").doc(t.id).update({src:url});
+      done++;
+      if(allBtn) allBtn.textContent=`Migrating… ${done}/${locals.length}`;
+    }catch(e){ failed++; }
+  }
+  toast(failed?`${done} moved to cloud ☁️, ${failed} could not be found on this device.`:`All ${done} track${done!==1?"s":""} moved to cloud ☁️ — everyone can now stream them!`);
+  renderMyMusic();
+}
+
 // ---------- my music ----------
 function renderMyMusic(){
   const u=currentUser(); const tracks=tracksByUser(u.id,true); const pls=playlistsByUser(u.id);
+  const localCount=tracks.filter(t=>t.src&&t.src.startsWith("local:")).length;
   const rows=tracks.map(t=>{
     const isLocal=t.src&&t.src.startsWith("local:");
     return `<div class="mrow"><div class="mart" style="background:${grad(t.accent)}">◎</div>
     <div class="minfo"><div class="mt">${esc(t.title)}${isLocal?'<span class="local-badge">📵 Local only</span>':''}</div><div class="ms">▶ ${nfmt(playCount(t.id))} · 👍 ${nfmt(likeCount(t.id))} · 👎 ${nfmt(dislikeCount(t.id))} <span class="pill ${t.visibility==='private'?'prv':'pub'}">${t.visibility==='private'?'Private':'Public'}</span></div></div>
-    ${isLocal?`<button class="btn sm primary" data-action="addlink" data-id="${t.id}" data-title="${esc(t.title)}" title="Add a public URL so fans can play this track">＋ Add link</button>`:''}
+    ${isLocal?`<button class="btn sm primary" data-action="migratetrack" data-id="${t.id}" title="Upload this track to the cloud so all fans can hear it">☁️ Move to cloud</button><button class="btn sm" data-action="addlink" data-id="${t.id}" data-title="${esc(t.title)}" title="Paste a public URL instead">＋ Add link</button>`:''}
     ${t.visibility==='private'?`<button class="btn sm primary" data-action="publish" data-id="${t.id}">Publish</button>`:`<button class="btn sm" data-action="unpublish" data-id="${t.id}">Hide</button>`}
     <button class="btn sm" data-action="deltrack" data-id="${t.id}" style="color:#e2554f;border-color:#f0b3b3">Delete</button></div>`;
   }).join("");
+  const migrateBanner=localCount?`<div class="migrate-banner">📵 <b>${localCount} track${localCount!==1?"s":""} stored locally</b> — only you can hear them on this device. Move them to the cloud so your fans can listen everywhere.<button class="btn sm primary" data-action="migratealltracks" style="margin-left:12px">☁️ Move all to cloud</button></div>`:"";
   $("page").innerHTML=`<div class="h-title">My Music</div>
+    ${migrateBanner}
     <div class="folder-banner">📁 <b>Share your music — works on mobile and desktop.</b> On <b>mobile</b>: tap "Add a folder" to pick music files directly from your phone, iCloud, or Google Drive. On <b>desktop</b> (Chrome/Edge): pick an entire folder from your computer or cloud drive. All tracks are cached after selection so they play even when offline.
       <div class="folder-note">☁️ <b>Cloud drive tip (desktop):</b> Make sure your cloud drive is set to <b>sync files locally</b> (not "stream-only"). In Google Drive: Preferences → open files online only → off. In Dropbox: right-click folder → Make available offline.</div>
     <div style="display:flex;gap:8px;margin-bottom:18px;flex-wrap:wrap"><button class="btn primary" data-action="sharefolder">📁 Add a folder</button><button class="btn" data-action="upload">＋ Add single track</button></div>
@@ -1086,6 +1141,8 @@ document.addEventListener("click",e=>{
     vis:()=>{window._upVis=el.dataset.v;document.querySelectorAll("#visRow .radio-card").forEach(c=>c.classList.toggle("sel",c===el));},
     bgcolor:()=>{window._bgColor=el.dataset.c;window._bgTheme="";document.querySelectorAll("#bgSw .swatch").forEach(s=>s.classList.toggle("sel",s===el));document.querySelectorAll("#themeGrid .theme-swatch").forEach(s=>s.classList.remove("sel"));const bi=$("bgImg");if(bi)bi.value="";},
     theme:()=>{window._bgTheme=el.dataset.t;window._bgColor="";document.querySelectorAll("#themeGrid .theme-swatch").forEach(s=>s.classList.toggle("sel",s===el));document.querySelectorAll("#bgSw .swatch").forEach(s=>s.classList.remove("sel"));const bi=$("bgImg");if(bi)bi.value="";},
+    migratetrack:()=>migrateTrack(el.dataset.id),
+    migratealltracks:migrateAllLocal,
     addlink:()=>openAddLink(el.dataset.id,el.dataset.title),
     savetracklink:()=>saveTrackLink(el.dataset.id),
     broadcastwelcome:broadcastWelcome,
