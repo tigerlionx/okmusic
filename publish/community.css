@@ -325,6 +325,7 @@ img{max-width:100%}
 .conv-row:hover{background:#fff7f1}
 .conv-time{font-size:11px;color:var(--muted);float:right;font-weight:400}
 .unread-badge{display:inline-block;background:#e2554f;color:#fff;font-size:10px;font-weight:800;border-radius:99px;padding:1px 6px;margin-left:6px;line-height:1.5}
+.local-badge{display:inline-flex;align-items:center;gap:3px;background:#fff3e0;color:#bf6500;font-size:11px;font-weight:700;border-radius:99px;padding:1px 8px;margin-left:6px;border:1px solid #ffd08a;vertical-align:middle;cursor:default}
 /* chat thread */
 .chat-header{display:flex;align-items:center;gap:10px;padding:12px 0 14px;border-bottom:1px solid var(--line);margin-bottom:8px;position:sticky;top:0;background:#faf6f2;z-index:5}
 .chat-name{font-weight:700;font-size:15px;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}

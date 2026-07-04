@@ -366,9 +366,11 @@ function renderProfile(uid){
 // ---------- music row (like/dislike only) ----------
 function musicRow(t){
   const priv=t.visibility==="private";
+  const isLocal=t.src&&t.src.startsWith("local:");
   const artStyle=t.coverImg?`background-image:url('${t.coverImg}');background-size:cover;background-position:center`:`background:${grad(t.accent)}`;
+  const localNote=isLocal?`<span class="local-badge" title="Audio stored locally — only the uploader can play this">📵 Local only</span>`:'';
   return `<div class="mrow2"><div class="mart" style="${artStyle}" data-action="play" data-id="${t.id}">${t.coverImg?'':'◎'}</div>
-    <div class="minfo"><div class="mt" data-action="play" data-id="${t.id}">${esc(t.title)}${priv?' 🔒':''}</div><div class="ms">▶ ${nfmt(playCount(t.id))} plays</div></div>
+    <div class="minfo"><div class="mt" data-action="play" data-id="${t.id}">${esc(t.title)}${priv?' 🔒':''}${localNote}</div><div class="ms">▶ ${nfmt(playCount(t.id))} plays</div></div>
     <div class="ld"><button class="${hasLiked(t.id)?'on':''}" data-action="like" data-id="${t.id}">👍 ${nfmt(likeCount(t.id))}</button>
       <button class="${hasDisliked(t.id)?'ondown':''}" data-action="dislike" data-id="${t.id}">👎 ${nfmt(dislikeCount(t.id))}</button></div></div>`;
 }
@@ -541,10 +543,14 @@ async function doPublish(){
 // ---------- my music ----------
 function renderMyMusic(){
   const u=currentUser(); const tracks=tracksByUser(u.id,true); const pls=playlistsByUser(u.id);
-  const rows=tracks.map(t=>`<div class="mrow"><div class="mart" style="background:${grad(t.accent)}">◎</div>
-    <div class="minfo"><div class="mt">${esc(t.title)}</div><div class="ms">▶ ${nfmt(playCount(t.id))} · 👍 ${nfmt(likeCount(t.id))} · 👎 ${nfmt(dislikeCount(t.id))} <span class="pill ${t.visibility==='private'?'prv':'pub'}">${t.visibility==='private'?'Private':'Public'}</span></div></div>
+  const rows=tracks.map(t=>{
+    const isLocal=t.src&&t.src.startsWith("local:");
+    return `<div class="mrow"><div class="mart" style="background:${grad(t.accent)}">◎</div>
+    <div class="minfo"><div class="mt">${esc(t.title)}${isLocal?'<span class="local-badge">📵 Local only</span>':''}</div><div class="ms">▶ ${nfmt(playCount(t.id))} · 👍 ${nfmt(likeCount(t.id))} · 👎 ${nfmt(dislikeCount(t.id))} <span class="pill ${t.visibility==='private'?'prv':'pub'}">${t.visibility==='private'?'Private':'Public'}</span></div></div>
+    ${isLocal?`<button class="btn sm primary" data-action="addlink" data-id="${t.id}" data-title="${esc(t.title)}" title="Add a public URL so fans can play this track">＋ Add link</button>`:''}
     ${t.visibility==='private'?`<button class="btn sm primary" data-action="publish" data-id="${t.id}">Publish</button>`:`<button class="btn sm" data-action="unpublish" data-id="${t.id}">Hide</button>`}
-    <button class="btn sm" data-action="deltrack" data-id="${t.id}" style="color:#e2554f;border-color:#f0b3b3">Delete</button></div>`).join("");
+    <button class="btn sm" data-action="deltrack" data-id="${t.id}" style="color:#e2554f;border-color:#f0b3b3">Delete</button></div>`;
+  }).join("");
   $("page").innerHTML=`<div class="h-title">My Music</div>
     <div class="folder-banner">📁 <b>Share your music — works on mobile and desktop.</b> On <b>mobile</b>: tap "Add a folder" to pick music files directly from your phone, iCloud, or Google Drive. On <b>desktop</b> (Chrome/Edge): pick an entire folder from your computer or cloud drive. All tracks are cached after selection so they play even when offline.
       <div class="folder-note">☁️ <b>Cloud drive tip (desktop):</b> Make sure your cloud drive is set to <b>sync files locally</b> (not "stream-only"). In Google Drive: Preferences → open files online only → off. In Dropbox: right-click folder → Make available offline.</div>
@@ -556,6 +562,26 @@ function renderMyMusic(){
 }
 function setVisibility(id,v){ fbDB.collection("tracks").doc(id).update({ visibility:v }).then(()=>toast(v==="public"?"Published 🎉 (now public)":"Hidden — set to private 🔒")).catch(e=>toast(e.code||e.message)); }
 function deleteTrack(id){ if(!confirm("Delete this track permanently? This cannot be undone.")) return; fbDB.collection("tracks").doc(id).delete().then(()=>toast("Track deleted")).catch(e=>toast(e.code||e.message)); }
+
+function openAddLink(trackId,title){
+  openOverlay(`<h2>🔗 Add streaming link</h2>
+    <p class="sub">Paste a public URL so your fans can stream <b>${esc(title)}</b> directly in OK Music.</p>
+    <div class="field"><label>Audio link (direct .mp3, SoundCloud, etc.)</label>
+      <input id="addLinkUrl" placeholder="https://…/track.mp3" style="width:100%" /></div>
+    <div class="note" style="margin:8px 0 16px">Works with any direct audio URL. For SoundCloud: right-click a track → Copy link.</div>
+    <button class="btn primary block" data-action="savetracklink" data-id="${trackId}">Save link</button>`);
+}
+
+async function saveTrackLink(trackId){
+  const url=($("addLinkUrl")||{value:""}).value.trim();
+  if(!url) return toast("Please paste a link first.");
+  if(!url.startsWith("http")) return toast("Link must start with http:// or https://");
+  try{
+    await fbDB.collection("tracks").doc(trackId).update({src:url});
+    closeOverlay();
+    toast("Streaming link saved! Fans can now play this track. ✓");
+  }catch(e){ toast("Save failed: "+(e.code||e.message)); }
+}
 
 // ---------- edit profile (photo + bg + bio) ----------
 function openCustomize(){
@@ -614,7 +640,8 @@ async function playTrack(id){ const t=allTracks().find(x=>x.id===id); if(!t) ret
   if(t.src&&t.src.startsWith("local:")){
     const blob=await audioGet(t.src.slice(6));
     if(blob){ showPlayer(t.title,u.name,t.accent,URL.createObjectURL(blob)); }
-    else toast("This track's audio is only on the device it was uploaded from. Share a link instead.");
+    else if(ME&&ME.id===t.userId) openAddLink(t.id,t.title);
+    else toast(`📵 "${esc(t.title)}" is stored locally on the artist's device and can't be streamed yet. The artist needs to add a public streaming link.`);
     return;
   }
   showPlayer(t.title,u.name,t.accent,t.src); if(!t.src) toast("Demo track — no audio linked yet. Reactions still work!"); }
@@ -1046,6 +1073,8 @@ document.addEventListener("click",e=>{
     vis:()=>{window._upVis=el.dataset.v;document.querySelectorAll("#visRow .radio-card").forEach(c=>c.classList.toggle("sel",c===el));},
     bgcolor:()=>{window._bgColor=el.dataset.c;window._bgTheme="";document.querySelectorAll("#bgSw .swatch").forEach(s=>s.classList.toggle("sel",s===el));document.querySelectorAll("#themeGrid .theme-swatch").forEach(s=>s.classList.remove("sel"));const bi=$("bgImg");if(bi)bi.value="";},
     theme:()=>{window._bgTheme=el.dataset.t;window._bgColor="";document.querySelectorAll("#themeGrid .theme-swatch").forEach(s=>s.classList.toggle("sel",s===el));document.querySelectorAll("#bgSw .swatch").forEach(s=>s.classList.remove("sel"));const bi=$("bgImg");if(bi)bi.value="";},
+    addlink:()=>openAddLink(el.dataset.id,el.dataset.title),
+    savetracklink:()=>saveTrackLink(el.dataset.id),
     broadcastwelcome:broadcastWelcome,
     showguide:()=>showWelcomeGuide(ME?.name||"there"),
     openchat:()=>{ state.chatUid=el.dataset.uid; state.view="chat"; renderApp(); },
