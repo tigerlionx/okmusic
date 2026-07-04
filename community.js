@@ -1172,6 +1172,51 @@ function scheduleRender(){ clearTimeout(_rt); _rt=setTimeout(()=>{ const a=docum
 // ============ PRIVATE MESSENGER ============
 const ICE=[{urls:"stun:stun.l.google.com:19302"},{urls:"stun:stun1.l.google.com:19302"}];
 let activePc=null,activeStream=null,activeCallId=null,callUnsub=null,callInterval=null,muted=false;
+
+// ---- Sound feedback (Web Audio API — no external files needed) ----
+let _ringCtx=null;
+function playRing(){
+  stopRing();
+  try{
+    const ctx=new(window.AudioContext||window.webkitAudioContext)();
+    _ringCtx=ctx;
+    for(let i=0;i<10;i++){
+      const t=ctx.currentTime+i*6;
+      const g=ctx.createGain();
+      g.connect(ctx.destination);
+      g.gain.setValueAtTime(0,t);
+      g.gain.linearRampToValueAtTime(0.3,t+0.05);
+      g.gain.setValueAtTime(0.3,t+1.85);
+      g.gain.linearRampToValueAtTime(0,t+2.0);
+      [440,480].forEach(freq=>{
+        const o=ctx.createOscillator();
+        o.type="sine";o.frequency.value=freq;
+        o.connect(g);o.start(t);o.stop(t+2.0);
+      });
+    }
+    if(navigator.vibrate) navigator.vibrate([2000,4000,2000,4000,2000,4000,2000,4000,2000,4000]);
+  }catch(e){}
+}
+function stopRing(){
+  if(_ringCtx){try{_ringCtx.close();}catch(e){}_ringCtx=null;}
+  if(navigator.vibrate) navigator.vibrate(0);
+}
+function playMsgSound(){
+  try{
+    const ctx=new(window.AudioContext||window.webkitAudioContext)();
+    const g=ctx.createGain();
+    g.connect(ctx.destination);
+    const o=ctx.createOscillator();
+    o.type="sine";o.frequency.value=880;
+    o.connect(g);
+    g.gain.setValueAtTime(0,ctx.currentTime);
+    g.gain.linearRampToValueAtTime(0.12,ctx.currentTime+0.01);
+    g.gain.exponentialRampToValueAtTime(0.001,ctx.currentTime+0.25);
+    o.start(ctx.currentTime);o.stop(ctx.currentTime+0.25);
+    setTimeout(()=>ctx.close(),500);
+    if(navigator.vibrate) navigator.vibrate(40);
+  }catch(e){}
+}
 let msgUnsub=null,convUnsub=null;
 function convId(a,b){return[a,b].sort().join("_");}
 
@@ -1224,10 +1269,16 @@ function openChat(uid){
       <button class="btn primary" data-action="sendmsg" data-uid="${uid}">Send</button>
     </div>`;
   fbDB.collection("messages").doc(cid).set({participants:[ME.id,uid],unread:{[ME.id]:0}},{merge:true}).catch(()=>{});
+  let _prevMsgCount=0;
   msgUnsub=fbDB.collection("messages").doc(cid).collection("msgs")
     .orderBy("time","asc").limitToLast(80)
     .onSnapshot(snap=>{
       const el=$("chatMsgs");if(!el)return;
+      if(_prevMsgCount>0&&snap.docs.length>_prevMsgCount){
+        const newest=snap.docs[snap.docs.length-1].data();
+        if(newest.senderId!==ME.id) playMsgSound();
+      }
+      _prevMsgCount=snap.docs.length;
       el.innerHTML=snap.docs.map(d=>{const m=d.data();const mine=m.senderId===ME.id;
         return`<div class="msg-bubble ${mine?'mine':'theirs'}">
           <div class="msg-text">${esc(m.text)}</div>
@@ -1244,7 +1295,7 @@ function openChat(uid){
 async function sendMsg(uid){
   const inp=$("chatInput");if(!inp)return;
   const text=inp.value.trim();if(!text)return;
-  inp.value="";
+  inp.value="";playMsgSound();
   const cid=convId(ME.id,uid);const time=Date.now();
   await fbDB.collection("messages").doc(cid).collection("msgs").add({senderId:ME.id,text,time,read:false});
   await fbDB.collection("messages").doc(cid).set({
@@ -1274,6 +1325,7 @@ function openCallUI(uid,mode){
       <button class="call-btn-mute" id="muteBtn" data-action="mutecall">🎙️ Mute</button>
       <button class="call-btn-end" data-action="endcall" data-uid="${uid}">${mode==="incoming"?"❌ Decline":"📵 End"}</button>
     </div></div>`);
+  if(mode==="incoming") playRing();
   if(mode==="outgoing") initiateCall(uid);
 }
 
@@ -1303,6 +1355,7 @@ async function initiateCall(uid){
 }
 
 async function acceptCall(uid){
+  stopRing();
   const s=$("callStatus");if(s)s.textContent="Connecting…";
   const snap=await fbDB.collection("calls").where("callerId","==",uid).where("calleeId","==",ME.id).where("status","==","ringing").orderBy("time","desc").limit(1).get().catch(()=>null);
   if(!snap||snap.empty){toast("Call expired.");closeOverlay();return;}
@@ -1339,6 +1392,7 @@ function muteCall(){
   const b=$("muteBtn");if(b)b.textContent=muted?"🔇 Unmute":"🎙️ Mute";
 }
 async function endCall(){
+  stopRing();
   clearInterval(callInterval);callInterval=null;
   if(callUnsub){callUnsub();callUnsub=null;}
   if(activePc){activePc.close();activePc=null;}
