@@ -1149,6 +1149,11 @@ document.addEventListener("click",e=>{
     showguide:()=>showWelcomeGuide(ME?.name||"there"),
     openchat:()=>{ state.chatUid=el.dataset.uid; state.view="chat"; renderApp(); },
     sendmsg:()=>sendMsg(el.dataset.uid),
+    editmsg:()=>editMsg(el.dataset.msgid,el.dataset.cid,el.dataset.text),
+    saveeditmsg:()=>saveEditMsg(el.dataset.msgid,el.dataset.cid),
+    deletemsgmenu:()=>deleteMsgMenu(el.dataset.msgid,el.dataset.cid),
+    deletemsgall:()=>deleteMsgForAll(el.dataset.msgid,el.dataset.cid),
+    deletemsgme:()=>deleteMsgForMe(el.dataset.msgid,el.dataset.cid),
     startcall:()=>startCall(el.dataset.uid),
     acceptcall:()=>acceptCall(el.dataset.uid),
     mutecall:muteCall,
@@ -1172,6 +1177,51 @@ function scheduleRender(){ clearTimeout(_rt); _rt=setTimeout(()=>{ const a=docum
 // ============ PRIVATE MESSENGER ============
 const ICE=[{urls:"stun:stun.l.google.com:19302"},{urls:"stun:stun1.l.google.com:19302"}];
 let activePc=null,activeStream=null,activeCallId=null,callUnsub=null,callInterval=null,muted=false;
+
+// ---- Sound feedback (Web Audio API — no external files needed) ----
+let _ringCtx=null;
+function playRing(){
+  stopRing();
+  try{
+    const ctx=new(window.AudioContext||window.webkitAudioContext)();
+    _ringCtx=ctx;
+    for(let i=0;i<10;i++){
+      const t=ctx.currentTime+i*6;
+      const g=ctx.createGain();
+      g.connect(ctx.destination);
+      g.gain.setValueAtTime(0,t);
+      g.gain.linearRampToValueAtTime(0.3,t+0.05);
+      g.gain.setValueAtTime(0.3,t+1.85);
+      g.gain.linearRampToValueAtTime(0,t+2.0);
+      [440,480].forEach(freq=>{
+        const o=ctx.createOscillator();
+        o.type="sine";o.frequency.value=freq;
+        o.connect(g);o.start(t);o.stop(t+2.0);
+      });
+    }
+    if(navigator.vibrate) navigator.vibrate([2000,4000,2000,4000,2000,4000,2000,4000,2000,4000]);
+  }catch(e){}
+}
+function stopRing(){
+  if(_ringCtx){try{_ringCtx.close();}catch(e){}_ringCtx=null;}
+  if(navigator.vibrate) navigator.vibrate(0);
+}
+function playMsgSound(){
+  try{
+    const ctx=new(window.AudioContext||window.webkitAudioContext)();
+    const g=ctx.createGain();
+    g.connect(ctx.destination);
+    const o=ctx.createOscillator();
+    o.type="sine";o.frequency.value=880;
+    o.connect(g);
+    g.gain.setValueAtTime(0,ctx.currentTime);
+    g.gain.linearRampToValueAtTime(0.12,ctx.currentTime+0.01);
+    g.gain.exponentialRampToValueAtTime(0.001,ctx.currentTime+0.25);
+    o.start(ctx.currentTime);o.stop(ctx.currentTime+0.25);
+    setTimeout(()=>ctx.close(),500);
+    if(navigator.vibrate) navigator.vibrate(40);
+  }catch(e){}
+}
 let msgUnsub=null,convUnsub=null;
 function convId(a,b){return[a,b].sort().join("_");}
 
@@ -1224,15 +1274,32 @@ function openChat(uid){
       <button class="btn primary" data-action="sendmsg" data-uid="${uid}">Send</button>
     </div>`;
   fbDB.collection("messages").doc(cid).set({participants:[ME.id,uid],unread:{[ME.id]:0}},{merge:true}).catch(()=>{});
+  let _prevMsgCount=0;
   msgUnsub=fbDB.collection("messages").doc(cid).collection("msgs")
     .orderBy("time","asc").limitToLast(80)
     .onSnapshot(snap=>{
       const el=$("chatMsgs");if(!el)return;
-      el.innerHTML=snap.docs.map(d=>{const m=d.data();const mine=m.senderId===ME.id;
-        return`<div class="msg-bubble ${mine?'mine':'theirs'}">
-          <div class="msg-text">${esc(m.text)}</div>
-          <div class="msg-time">${timeAgo(m.time)}</div></div>`;
-      }).join('');
+      if(_prevMsgCount>0&&snap.docs.length>_prevMsgCount){
+        const newest=snap.docs[snap.docs.length-1].data();
+        if(newest.senderId!==ME.id&&!newest.deleted&&!(newest.deletedFor||[]).includes(ME.id)) playMsgSound();
+      }
+      _prevMsgCount=snap.docs.length;
+      el.innerHTML=snap.docs
+        .filter(d=>!(d.data().deletedFor||[]).includes(ME.id))
+        .map(d=>{const m=d.data();const mine=m.senderId===ME.id;
+          if(m.deleted) return`<div class="msg-bubble ${mine?'mine':'theirs'} deleted">
+            <div class="msg-text"><em>🗑️ Message deleted</em></div>
+            <div class="msg-time">${timeAgo(m.time)}</div></div>`;
+          return`<div class="msg-bubble ${mine?'mine':'theirs'}">
+            <div class="msg-text">${esc(m.text)}${m.edited?'<span class="msg-edited"> · edited</span>':''}</div>
+            <div class="msg-meta">
+              <span class="msg-time">${timeAgo(m.time)}</span>
+              ${mine?`<span class="msg-actions">
+                <button class="msg-act" data-action="editmsg" data-msgid="${d.id}" data-cid="${cid}" data-text="${esc(m.text)}" title="Edit">✏️</button>
+                <button class="msg-act" data-action="deletemsgmenu" data-msgid="${d.id}" data-cid="${cid}" title="Delete">🗑️</button>
+              </span>`:''}
+            </div></div>`;
+        }).join('');
       el.scrollTop=el.scrollHeight;
     },e=>console.warn("msgs",e));
   setTimeout(()=>{
@@ -1244,7 +1311,7 @@ function openChat(uid){
 async function sendMsg(uid){
   const inp=$("chatInput");if(!inp)return;
   const text=inp.value.trim();if(!text)return;
-  inp.value="";
+  inp.value="";playMsgSound();
   const cid=convId(ME.id,uid);const time=Date.now();
   await fbDB.collection("messages").doc(cid).collection("msgs").add({senderId:ME.id,text,time,read:false});
   await fbDB.collection("messages").doc(cid).set({
@@ -1252,6 +1319,39 @@ async function sendMsg(uid){
     unread:{[ME.id]:0,[uid]:firebase.firestore.FieldValue.increment(1)}
   },{merge:true});
   if(!String(uid).startsWith("u_")) fbDB.collection("notifications").add({forUid:uid,type:"message",fromUid:ME.id,fromName:ME.name,text:`💬 ${ME.name}: ${text.slice(0,60)}`,time,read:false}).catch(()=>{});
+}
+
+function editMsg(msgId,cid,currentText){
+  openOverlay(`<h2>✏️ Edit message</h2>
+    <div class="field"><textarea id="editMsgText" style="min-height:80px;width:100%">${esc(currentText)}</textarea></div>
+    <div style="display:flex;gap:8px;margin-top:4px">
+      <button class="btn primary" data-action="saveeditmsg" data-msgid="${msgId}" data-cid="${cid}">Save</button>
+      <button class="btn" data-action="close">Cancel</button>
+    </div>`);
+  setTimeout(()=>{const t=$("editMsgText");if(t){t.focus();t.setSelectionRange(t.value.length,t.value.length);}},50);
+}
+async function saveEditMsg(msgId,cid){
+  const text=($("editMsgText")||{value:""}).value.trim();
+  if(!text) return toast("Message can't be empty.");
+  try{ await fbDB.collection("messages").doc(cid).collection("msgs").doc(msgId).update({text,edited:true}); closeOverlay(); }
+  catch(e){ toast("Couldn't edit: "+(e.code||e.message)); }
+}
+function deleteMsgMenu(msgId,cid){
+  openOverlay(`<h2>🗑️ Delete message</h2>
+    <p class="sub">Choose who to delete it for.</p>
+    <div style="display:flex;flex-direction:column;gap:10px;margin-top:16px">
+      <button class="btn primary" data-action="deletemsgall" data-msgid="${msgId}" data-cid="${cid}">Delete for everyone</button>
+      <button class="btn" data-action="deletemsgme" data-msgid="${msgId}" data-cid="${cid}">Delete for me only</button>
+      <button class="btn" data-action="close">Cancel</button>
+    </div>`);
+}
+async function deleteMsgForAll(msgId,cid){
+  try{ await fbDB.collection("messages").doc(cid).collection("msgs").doc(msgId).update({deleted:true,text:""}); closeOverlay(); }
+  catch(e){ toast("Couldn't delete: "+(e.code||e.message)); }
+}
+async function deleteMsgForMe(msgId,cid){
+  try{ await fbDB.collection("messages").doc(cid).collection("msgs").doc(msgId).update({deletedFor:firebase.firestore.FieldValue.arrayUnion(ME.id)}); closeOverlay(); }
+  catch(e){ toast("Couldn't delete: "+(e.code||e.message)); }
 }
 
 // ---- VOICE CALLS ----
@@ -1274,6 +1374,7 @@ function openCallUI(uid,mode){
       <button class="call-btn-mute" id="muteBtn" data-action="mutecall">🎙️ Mute</button>
       <button class="call-btn-end" data-action="endcall" data-uid="${uid}">${mode==="incoming"?"❌ Decline":"📵 End"}</button>
     </div></div>`);
+  if(mode==="incoming") playRing();
   if(mode==="outgoing") initiateCall(uid);
 }
 
@@ -1303,6 +1404,7 @@ async function initiateCall(uid){
 }
 
 async function acceptCall(uid){
+  stopRing();
   const s=$("callStatus");if(s)s.textContent="Connecting…";
   const snap=await fbDB.collection("calls").where("callerId","==",uid).where("calleeId","==",ME.id).where("status","==","ringing").orderBy("time","desc").limit(1).get().catch(()=>null);
   if(!snap||snap.empty){toast("Call expired.");closeOverlay();return;}
@@ -1339,6 +1441,7 @@ function muteCall(){
   const b=$("muteBtn");if(b)b.textContent=muted?"🔇 Unmute":"🎙️ Mute";
 }
 async function endCall(){
+  stopRing();
   clearInterval(callInterval);callInterval=null;
   if(callUnsub){callUnsub();callUnsub=null;}
   if(activePc){activePc.close();activePc=null;}

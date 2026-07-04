@@ -341,7 +341,14 @@ img{max-width:100%}
 .msg-text{padding:10px 14px;border-radius:18px;font-size:14px;line-height:1.5;word-break:break-word;white-space:pre-wrap}
 .mine .msg-text{background:var(--orange);color:#fff;border-bottom-right-radius:4px}
 .theirs .msg-text{background:#fff;color:var(--ink);border-bottom-left-radius:4px;box-shadow:0 1px 4px rgba(180,120,60,.1)}
-.msg-time{font-size:10px;color:var(--muted);padding:0 4px}
+.msg-time{font-size:10px;color:var(--muted);padding:0 2px}
+.msg-meta{display:flex;align-items:center;gap:4px;padding:0 2px}
+.msg-actions{display:flex;gap:1px;opacity:.45;transition:opacity .15s}
+.msg-bubble:hover .msg-actions,.msg-bubble:focus-within .msg-actions{opacity:1}
+.msg-act{background:none;border:none;font-size:12px;cursor:pointer;padding:2px 4px;border-radius:5px;line-height:1}
+.msg-act:hover{background:rgba(0,0,0,.08)}
+.msg-edited{font-size:10px;opacity:.55;font-style:italic}
+.msg-bubble.deleted .msg-text{opacity:.5;font-style:italic}
 /* voice call UI */
 .call-ui{text-align:center;padding:12px 0 4px}
 .call-avatar{margin-bottom:14px}
