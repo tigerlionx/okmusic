@@ -150,7 +150,7 @@ function emailGo(mode){
   });
 }
 async function loadProfile(uid){ try{ const s=await fbDB.collection("users").doc(uid).get(); return s.exists?{ id:uid, ...s.data() }:null; }catch(e){ console.warn(e); return null; } }
-function syncME(){ const d=db(); if(ME){ d.session=ME.id; d.usersById[ME.id]={ id:ME.id, name:ME.name, handle:ME.handle, bio:ME.bio, color:ME.color, avatarImg:ME.avatarImg, bgColor:ME.bgColor, bgImg:ME.bgImg }; } else d.session=null; commit(d); }
+function syncME(){ const d=db(); if(ME){ d.session=ME.id; d.usersById[ME.id]={ id:ME.id, name:ME.name, handle:ME.handle, bio:ME.bio, color:ME.color, avatarImg:ME.avatarImg, bgColor:ME.bgColor, bgImg:ME.bgImg, pageBgImg:ME.pageBgImg||"" }; } else d.session=null; commit(d); }
 function openOnboard(){
   openOverlay(`<h2>Welcome to OK Music 👋</h2><p class="sub">Pick a name and handle to set up your creator profile.</p>
     <div class="field"><label>Display name</label><input class="fb-field" id="obName" placeholder="e.g. Emmanuel Leveille" value="${esc((ME&&ME.name)||'')}" /></div>
@@ -274,6 +274,7 @@ function renderApp(){
   setTimeout(()=>{ const s=$("search"); if(s) s.oninput=e=>{ state.query=e.target.value; if(state.view!=="discover") state.view="discover"; renderMain(); }; },0);
 }
 function renderMain(){
+  if(state.view!=="profile"){ document.body.style.backgroundImage=""; document.body.style.backgroundSize=""; document.body.style.backgroundPosition=""; document.body.style.backgroundAttachment=""; }
   if(state.view==="profile") return renderProfile(state.profileId);
   if(state.view==="mymusic") return renderMyMusic();
   if(state.view==="fans") return renderFans();
@@ -333,6 +334,8 @@ function renderProfile(uid){
   const me=currentUser(); const mine=me&&me.id===uid;
   const themeCSS=u.bgTheme?(THEMES.find(t=>t.id===u.bgTheme)||{}).css:"";
   const cover=u.bgImg?`background-image:url('${u.bgImg}');background-size:cover;background-position:center`:themeCSS?`background:${themeCSS}`:u.bgColor?`background:${u.bgColor}`:"";
+  if(u.pageBgImg){ document.body.style.backgroundImage=`url('${u.pageBgImg}')`; document.body.style.backgroundSize="cover"; document.body.style.backgroundPosition="center"; document.body.style.backgroundAttachment="fixed"; }
+  else { document.body.style.backgroundImage=""; document.body.style.backgroundSize=""; document.body.style.backgroundPosition=""; document.body.style.backgroundAttachment=""; }
   const tracks=tracksByUser(uid,mine); const pls=playlistsByUser(uid); const sts=statusesByUser(uid);
   const headActions=mine
     ? `<button class="btn primary" data-action="customize">🎨 Edit profile</button><button class="btn" data-action="invite">✉️ Invite</button>`
@@ -583,7 +586,19 @@ async function doPublish(){
     .then(()=>{ closeOverlay(); window._trackCover=null; window._audioFile=null; toast(window._upVis==="private"?"Saved private 🔒":"Published! 🎵"); go("mymusic"); })
     .catch(e=>toast("Couldn't save: "+(e.code||e.message))); }
 
-// ---------- Cloudinary upload helper ----------
+// ---------- Cloudinary upload helpers ----------
+function uploadMediaToCloudinary(file, type="image"){
+  return new Promise((resolve,reject)=>{
+    const fd=new FormData();
+    fd.append("file",file);
+    fd.append("upload_preset","okmusic_audio");
+    const xhr=new XMLHttpRequest();
+    xhr.open("POST",`https://api.cloudinary.com/v1_1/llka5use/${type}/upload`);
+    xhr.onload=()=>{ try{ const r=JSON.parse(xhr.responseText); if(r.secure_url) resolve(r.secure_url); else reject(new Error(r.error?.message||"Upload failed")); }catch(err){ reject(err); } };
+    xhr.onerror=()=>reject(new Error("Network error"));
+    xhr.send(fd);
+  });
+}
 function uploadToCloudinary(blob, onProgress){
   return new Promise((resolve,reject)=>{
     const fd=new FormData();
@@ -684,24 +699,50 @@ async function saveTrackLink(trackId){
 // ---------- edit profile (photo + bg + bio) ----------
 function openCustomize(){
   const u=currentUser();
-  openOverlay(`<h2>🎨 Edit profile</h2><p class="sub">Add your photo and make your page yours.</p>
+  const bannerStyle=u.bgImg?`background-image:url('${u.bgImg}');background-size:cover;background-position:center`:`background:linear-gradient(135deg,var(--orange-2),var(--orange-3))`;
+  const pageBgStyle=u.pageBgImg?`background-image:url('${u.pageBgImg}');background-size:cover;background-position:center`:`background:var(--orange-1)`;
+  openOverlay(`<h2>🎨 Edit profile</h2><p class="sub">Make your page unique — fans see all of this on any device.</p>
     <div class="field"><label>Profile photo</label><div class="avup"><div class="avprev" id="avPrev" style="${u.avatarImg?`background-image:url('${u.avatarImg}')`:''}">${u.avatarImg?'':initials(u.name)}</div>
-      <div><input type="file" id="avFile" accept="image/*" /><div class="note" style="margin-top:4px">JPG/PNG from your computer — or paste a link below.</div></div></div></div>
+      <div><input type="file" id="avFile" accept="image/*" /><div class="note" style="margin-top:4px">JPG/PNG — or paste a link below.</div></div></div></div>
     <div class="field"><label>Photo link (optional)</label><input id="avUrl" placeholder="https://…/photo.jpg" /></div>
-    <div class="field"><label>Bio (shown on your profile)</label><textarea id="bgBio" placeholder="Tell fans about your music…">${esc(u.bio||"")}</textarea></div>
-    <div class="field"><label>Profile theme</label>
+    <div class="field"><label>Bio</label><textarea id="bgBio" placeholder="Tell fans about your music…">${esc(u.bio||"")}</textarea></div>
+    <div class="field">
+      <label>🖼️ Banner — wide photo at the top of your page</label>
+      <div class="cust-banner-prev" id="bannerPrev" style="${bannerStyle}"><span class="cust-hint">Concert · Album art · Artist photo</span></div>
+      <input type="file" id="bannerFile" accept="image/*" style="margin-top:6px" />
+      <input id="bannerUrl" placeholder="Or paste a banner image link" value="${esc(u.bgImg||"")}" style="margin-top:6px;width:100%" />
+    </div>
+    <div class="field">
+      <label>🌄 Page background image</label>
+      <div class="cust-bg-prev" id="pageBgPrev" style="${pageBgStyle}"><span class="cust-hint" style="color:rgba(60,30,0,.6)">Shown behind your whole page</span></div>
+      <input type="file" id="pageBgFile" accept="image/*" style="margin-top:6px" />
+      <input id="pageBgUrl" placeholder="Or paste a background image link" value="${esc(u.pageBgImg||"")}" style="margin-top:6px;width:100%" />
+    </div>
+    <div class="field"><label>Banner colour (if no photo)</label>
       <div class="theme-grid" id="themeGrid">${THEMES.map(t=>`<div class="theme-swatch ${(u.bgTheme||"")===t.id?'sel':''}" style="background:${t.css}" data-action="theme" data-t="${t.id}" title="${t.label}"><span class="theme-label">${t.label}</span></div>`).join("")}</div></div>
-    <div class="field"><label>Or a solid color</label><div class="swatches" id="bgSw">${["#FFCBA0","#7c5cff","#36d1c4","#ff5c7c","#2bbf4e","#5c8bff","#33272f"].map(c=>`<div class="swatch ${u.bgColor===c&&!u.bgTheme?'sel':''}" style="background:${c}" data-action="bgcolor" data-c="${c}"></div>`).join("")}</div></div>
-    <div class="field"><label>Or a banner image link</label><input id="bgImg" placeholder="https://…/banner.jpg" value="${esc(u.bgImg||"")}" /></div>
+    <div class="field"><label>Or a solid colour</label><div class="swatches" id="bgSw">${["#FFCBA0","#7c5cff","#36d1c4","#ff5c7c","#2bbf4e","#5c8bff","#33272f"].map(c=>`<div class="swatch ${u.bgColor===c&&!u.bgTheme?'sel':''}" style="background:${c}" data-action="bgcolor" data-c="${c}"></div>`).join("")}</div></div>
     <button class="btn primary block" data-action="savecustom">Save profile</button>`);
-  window._bgColor=u.bgColor||""; window._bgTheme=u.bgTheme||""; window._avatar=null;
+  window._bgColor=u.bgColor||""; window._bgTheme=u.bgTheme||""; window._avatar=null; window._bannerFile=null; window._pageBgFile=null;
 }
-function saveCustom(){
-  if(!ME) return; const url=($("avUrl").value||"").trim();
-  const upd={ bio:($("bgBio").value||"").trim()||ME.bio||"", bgColor:window._bgTheme?"":(window._bgColor||""), bgTheme:window._bgTheme||"", bgImg:($("bgImg").value||"").trim() };
-  if(window._avatar){ if(window._avatar.length>700000) return toast("That photo is too big — paste a link instead, or use a smaller image."); upd.avatarImg=window._avatar; }
+async function saveCustom(){
+  if(!ME) return;
+  const saveBtn=document.querySelector('[data-action="savecustom"]');
+  if(saveBtn){ saveBtn.disabled=true; saveBtn.textContent="Saving…"; }
+  const url=($("avUrl").value||"").trim();
+  const upd={ bio:($("bgBio").value||"").trim()||ME.bio||"", bgColor:window._bgTheme?"":(window._bgColor||""), bgTheme:window._bgTheme||"" };
+  if(window._avatar){ if(window._avatar.length>700000){ if(saveBtn){saveBtn.disabled=false;saveBtn.textContent="Save profile";} return toast("Photo too big — paste a link instead."); } upd.avatarImg=window._avatar; }
   else if(url) upd.avatarImg=url;
-  fbDB.collection("users").doc(ME.id).set(upd,{merge:true}).then(()=>{ Object.assign(ME,upd); closeOverlay(); toast("Profile saved ✨"); go("profile",{profileId:ME.id}); }).catch(e=>toast("Couldn't save: "+(e.code||e.message)));
+  if(window._bannerFile){
+    try{ if(saveBtn) saveBtn.textContent="Uploading banner…"; upd.bgImg=await uploadMediaToCloudinary(window._bannerFile,"image"); }
+    catch(e){ if(saveBtn){saveBtn.disabled=false;saveBtn.textContent="Save profile";} return toast("Banner upload failed: "+(e.message||e)); }
+  } else { const v=($("bannerUrl")||{value:""}).value.trim(); if(v) upd.bgImg=v; }
+  if(window._pageBgFile){
+    try{ if(saveBtn) saveBtn.textContent="Uploading background…"; upd.pageBgImg=await uploadMediaToCloudinary(window._pageBgFile,"image"); }
+    catch(e){ if(saveBtn){saveBtn.disabled=false;saveBtn.textContent="Save profile";} return toast("Background upload failed: "+(e.message||e)); }
+  } else { const v=($("pageBgUrl")||{value:""}).value.trim(); if(v) upd.pageBgImg=v; }
+  fbDB.collection("users").doc(ME.id).set(upd,{merge:true})
+    .then(()=>{ Object.assign(ME,upd); closeOverlay(); toast("Profile saved ✨"); go("profile",{profileId:ME.id}); })
+    .catch(e=>{ if(saveBtn){saveBtn.disabled=false;saveBtn.textContent="Save profile";} toast("Couldn't save: "+(e.code||e.message)); });
 }
 
 // ---------- invite ----------
@@ -1196,6 +1237,8 @@ document.addEventListener("change",e=>{
   if(e.target.id==="covFile"){ const f=e.target.files[0]; if(!f) return; const r=new FileReader(); r.onload=()=>{ window._trackCover=r.result; const p=$("covPrev"); if(p){ p.style.backgroundImage=`url('${r.result}')`; p.style.backgroundSize="cover"; p.style.backgroundPosition="center"; p.style.background=""; p.textContent=""; } }; r.readAsDataURL(f); }
   if(e.target.id==="audioFile"){ const f=e.target.files[0]; if(!f) return; window._audioFile=f; const fn=$("audioFilename"); if(fn) fn.textContent="✓ "+f.name+" ("+Math.round(f.size/1024)+" KB)"; }
   if(e.target.id==="mpPhotoFile"){ const f=e.target.files[0]; if(!f) return; const r=new FileReader(); r.onload=()=>{ window._mpPhoto=r.result; const p=$("mpPhotoPrev"); if(p){ p.style.backgroundImage=`url('${r.result}')`; p.style.backgroundSize="cover"; p.style.backgroundPosition="center"; p.textContent=""; } }; r.readAsDataURL(f); }
+  if(e.target.id==="bannerFile"){ const f=e.target.files[0]; if(!f) return; window._bannerFile=f; const p=$("bannerPrev"); if(p){ const url=URL.createObjectURL(f); p.style.backgroundImage=`url('${url}')`; p.style.backgroundSize="cover"; p.style.backgroundPosition="center"; const h=p.querySelector(".cust-hint"); if(h) h.style.opacity="0"; } }
+  if(e.target.id==="pageBgFile"){ const f=e.target.files[0]; if(!f) return; window._pageBgFile=f; const p=$("pageBgPrev"); if(p){ const url=URL.createObjectURL(f); p.style.backgroundImage=`url('${url}')`; p.style.backgroundSize="cover"; p.style.backgroundPosition="center"; const h=p.querySelector(".cust-hint"); if(h) h.style.opacity="0"; } }
 });
 $("overlay").addEventListener("click",e=>{ if(e.target.id==="overlay") closeOverlay(); });
 document.addEventListener("keydown",e=>{ if(e.key==="Escape") closeOverlay(); });
