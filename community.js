@@ -446,10 +446,27 @@ async function loadCovers(p){
 async function shareMusicFolder(){
   if(!window.showDirectoryPicker){ mobilePickFiles(); return; }
   let dir; try{ dir=await window.showDirectoryPicker(); }catch{ return; }
-  const files=[]; for await(const e of dir.values()){ if(e.kind==="file"&&/\.(mp3|m4a|wav|ogg|flac|aac)$/i.test(e.name)) files.push(e.name); }
-  if(!files.length) return toast("No audio files in that folder."); files.sort();
-  const d=db(); const id="pl_"+Date.now(); d.playlists.unshift({ id, userId:d.session, name:dir.name, files, thumbs:null, createdAt:Date.now() });
-  commit(d); dirCache[id]={ music:dir }; await fsPut(id+"_music",dir); toast(`Playlist "${dir.name}" — ${files.length} tracks 🎵`); go("mymusic");
+  const fileNames=[]; for await(const e of dir.values()){ if(e.kind==="file"&&/\.(mp3|m4a|wav|ogg|flac|aac)$/i.test(e.name)) fileNames.push(e.name); }
+  if(!fileNames.length) return toast("No audio files in that folder."); fileNames.sort();
+  if(!ME) return toast("Please log in first.");
+  const id="pl_"+Date.now();
+  const d=db(); d.playlists.unshift({ id, userId:ME.id, name:dir.name, files:fileNames, thumbs:null, createdAt:Date.now() });
+  commit(d); dirCache[id]={ music:dir }; await fsPut(id+"_music",dir);
+  toast(`Uploading "${dir.name}" — ${fileNames.length} tracks to cloud…`); go("mymusic");
+  let done=0,failed=0;
+  for(const fname of fileNames){
+    try{
+      const fh=await dir.getFileHandle(fname); const f=await fh.getFile();
+      const buf=await fileToArrayBuffer(f);
+      const blob=new Blob([buf],{type:f.type||"audio/mpeg"});
+      await audioPut(id+"/"+fname,blob);
+      const url=await uploadToCloudinary(blob);
+      await fbDB.collection("tracks").add({ userId:ME.id, title:fname.replace(/\.[^.]+$/,""), src:url, playlistId:id, playlistName:dir.name, genre:"Other", accent:COLORS[Math.floor(Math.random()*COLORS.length)], coverImg:"", visibility:"public", createdAt:Date.now()+done });
+      done++;
+    }catch(e){ failed++; console.warn("upload fail",fname,e); }
+    toast(`Uploading "${dir.name}"… ${done+failed}/${fileNames.length}`);
+  }
+  toast(failed?`"${dir.name}" — ${done} tracks uploaded ☁️, ${failed} failed.`:`"${dir.name}" — all ${done} tracks on the cloud ☁️`);
 }
 function mobilePickFiles(){
   const inp=document.createElement("input");
@@ -467,11 +484,24 @@ async function saveMobilePlaylist(){
   const files=window._mobileFiles; if(!files||!files.length) return;
   const name=($("plName").value||"").trim()||"My Music";
   closeOverlay();
-  const d=db(); const id="pl_"+Date.now();
-  d.playlists.unshift({ id, userId:d.session, name, files:files.map(f=>f.name), thumbs:null, createdAt:Date.now() });
-  commit(d); toast(`Caching ${files.length} track${files.length>1?'s':''}…`);
-  for(const f of files){ try{ await audioPut(id+"/"+f.name, new Blob([await f.arrayBuffer()],{type:f.type||"audio/mpeg"})); }catch{} }
-  window._mobileFiles=null; toast(`"${name}" ready — ${files.length} tracks 🎵`); go("mymusic");
+  if(!ME) return toast("Please log in first.");
+  const id="pl_"+Date.now();
+  const d=db(); d.playlists.unshift({ id, userId:ME.id, name, files:files.map(f=>f.name), thumbs:null, createdAt:Date.now() });
+  commit(d); toast(`Uploading ${files.length} track${files.length>1?'s':''}…`); go("mymusic");
+  let done=0,failed=0;
+  for(const f of files){
+    try{
+      const buf=await fileToArrayBuffer(f);
+      const blob=new Blob([buf],{type:f.type||"audio/mpeg"});
+      await audioPut(id+"/"+f.name,blob);
+      const url=await uploadToCloudinary(blob);
+      await fbDB.collection("tracks").add({ userId:ME.id, title:f.name.replace(/\.[^.]+$/,""), src:url, playlistId:id, playlistName:name, genre:"Other", accent:COLORS[Math.floor(Math.random()*COLORS.length)], coverImg:"", visibility:"public", createdAt:Date.now()+done });
+      done++;
+    }catch(e){ failed++; console.warn("upload fail",f.name,e); }
+    toast(`Uploading… ${done+failed}/${files.length}`);
+  }
+  window._mobileFiles=null;
+  toast(failed?`"${name}" — ${done} tracks on cloud ☁️, ${failed} failed.`:`"${name}" — all ${done} tracks on the cloud ☁️`);
 }
 async function setThumbsFolder(plId){ if(!window.showDirectoryPicker) return toast("Needs Chrome/Edge."); let dir; try{ dir=await window.showDirectoryPicker(); }catch{ return; }
   const d=db(); const p=d.playlists.find(x=>x.id===plId); if(p){ p.thumbs=dir.name; commit(d); } dirCache[plId]=dirCache[plId]||{}; dirCache[plId].thumbs=dir; await fsPut(plId+"_thumbs",dir); toast("Thumbnails linked ✓"); renderMain(); }
