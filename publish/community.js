@@ -1264,11 +1264,11 @@ function renderMessages(){
   if(convUnsub){convUnsub();convUnsub=null;}
   $("page").innerHTML=`<div class="h-title">💬 Messages</div><div id="convList" class="conv-list"><div class="empty">Loading…</div></div>`;
   convUnsub=fbDB.collection("messages").where("participants","array-contains",ME.id)
-    .orderBy("lastTime","desc").onSnapshot(snap=>{
+    .onSnapshot(snap=>{
       CACHE.convos={};
       snap.docs.forEach(d=>{CACHE.convos[d.id]={id:d.id,...d.data()};});
       const el=$("convList");if(!el)return;
-      const convs=snap.docs.map(d=>({id:d.id,...d.data()}));
+      const convs=snap.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>(b.lastTime||0)-(a.lastTime||0));
       if(!convs.length){el.innerHTML='<div class="empty">No messages yet — open any profile and tap 💬 Message to start a chat.</div>';return;}
       el.innerHTML=convs.map(c=>{
         const otherId=c.participants.find(p=>p!==ME.id);
