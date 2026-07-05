@@ -98,7 +98,10 @@ img{max-width:100%}
 .card-meta .spacer{flex:1}
 
 /* ============ profile ============ */
-.profile-cover{height:170px;border-radius:18px;background:linear-gradient(135deg,var(--orange-2),var(--orange-3));position:relative;margin-bottom:-50px}
+.profile-cover{height:220px;border-radius:18px;background:linear-gradient(135deg,var(--orange-2),var(--orange-3));position:relative;margin-bottom:-60px}
+.cust-banner-prev{height:100px;border-radius:12px;margin-bottom:4px;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,var(--orange-2),var(--orange-3))}
+.cust-bg-prev{height:80px;border-radius:12px;margin-bottom:4px;display:flex;align-items:center;justify-content:center;background:var(--orange-1)}
+.cust-hint{font-size:12px;color:rgba(255,255,255,.75);font-style:italic;pointer-events:none;text-align:center;padding:0 8px;transition:opacity .2s}
 .profile-head{display:flex;gap:20px;align-items:flex-end;padding:0 10px;position:relative}
 .profile-avatar{width:104px;height:104px;border-radius:50%;border:4px solid #fff;font-size:40px;display:grid;place-items:center;color:#fff;font-weight:800;flex-shrink:0}
 .profile-info{flex:1;min-width:0;padding-bottom:6px}
@@ -325,6 +328,8 @@ img{max-width:100%}
 .conv-row:hover{background:#fff7f1}
 .conv-time{font-size:11px;color:var(--muted);float:right;font-weight:400}
 .unread-badge{display:inline-block;background:#e2554f;color:#fff;font-size:10px;font-weight:800;border-radius:99px;padding:1px 6px;margin-left:6px;line-height:1.5}
+.local-badge{display:inline-flex;align-items:center;gap:3px;background:#fff3e0;color:#bf6500;font-size:11px;font-weight:700;border-radius:99px;padding:1px 8px;margin-left:6px;border:1px solid #ffd08a;vertical-align:middle;cursor:default}
+.migrate-banner{background:#fff8e1;border:1px solid #ffd08a;border-radius:12px;padding:12px 16px;margin-bottom:16px;font-size:14px;display:flex;align-items:center;flex-wrap:wrap;gap:8px;color:#7a5500}
 /* chat thread */
 .chat-header{display:flex;align-items:center;gap:10px;padding:12px 0 14px;border-bottom:1px solid var(--line);margin-bottom:8px;position:sticky;top:0;background:#faf6f2;z-index:5}
 .chat-name{font-weight:700;font-size:15px;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -339,7 +344,14 @@ img{max-width:100%}
 .msg-text{padding:10px 14px;border-radius:18px;font-size:14px;line-height:1.5;word-break:break-word;white-space:pre-wrap}
 .mine .msg-text{background:var(--orange);color:#fff;border-bottom-right-radius:4px}
 .theirs .msg-text{background:#fff;color:var(--ink);border-bottom-left-radius:4px;box-shadow:0 1px 4px rgba(180,120,60,.1)}
-.msg-time{font-size:10px;color:var(--muted);padding:0 4px}
+.msg-time{font-size:10px;color:var(--muted);padding:0 2px}
+.msg-meta{display:flex;align-items:center;gap:4px;padding:0 2px}
+.msg-actions{display:flex;gap:1px;opacity:.45;transition:opacity .15s}
+.msg-bubble:hover .msg-actions,.msg-bubble:focus-within .msg-actions{opacity:1}
+.msg-act{background:none;border:none;font-size:12px;cursor:pointer;padding:2px 4px;border-radius:5px;line-height:1}
+.msg-act:hover{background:rgba(0,0,0,.08)}
+.msg-edited{font-size:10px;opacity:.55;font-style:italic}
+.msg-bubble.deleted .msg-text{opacity:.5;font-style:italic}
 /* voice call UI */
 .call-ui{text-align:center;padding:12px 0 4px}
 .call-avatar{margin-bottom:14px}
