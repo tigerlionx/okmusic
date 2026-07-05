@@ -366,9 +366,11 @@ function renderProfile(uid){
 // ---------- music row (like/dislike only) ----------
 function musicRow(t){
   const priv=t.visibility==="private";
+  const isLocal=t.src&&t.src.startsWith("local:");
   const artStyle=t.coverImg?`background-image:url('${t.coverImg}');background-size:cover;background-position:center`:`background:${grad(t.accent)}`;
+  const localNote=isLocal?`<span class="local-badge" title="Audio stored locally — only the uploader can play this">📵 Local only</span>`:'';
   return `<div class="mrow2"><div class="mart" style="${artStyle}" data-action="play" data-id="${t.id}">${t.coverImg?'':'◎'}</div>
-    <div class="minfo"><div class="mt" data-action="play" data-id="${t.id}">${esc(t.title)}${priv?' 🔒':''}</div><div class="ms">▶ ${nfmt(playCount(t.id))} plays</div></div>
+    <div class="minfo"><div class="mt" data-action="play" data-id="${t.id}">${esc(t.title)}${priv?' 🔒':''}${localNote}</div><div class="ms">▶ ${nfmt(playCount(t.id))} plays</div></div>
     <div class="ld"><button class="${hasLiked(t.id)?'on':''}" data-action="like" data-id="${t.id}">👍 ${nfmt(likeCount(t.id))}</button>
       <button class="${hasDisliked(t.id)?'ondown':''}" data-action="dislike" data-id="${t.id}">👎 ${nfmt(dislikeCount(t.id))}</button></div></div>`;
 }
@@ -444,10 +446,27 @@ async function loadCovers(p){
 async function shareMusicFolder(){
   if(!window.showDirectoryPicker){ mobilePickFiles(); return; }
   let dir; try{ dir=await window.showDirectoryPicker(); }catch{ return; }
-  const files=[]; for await(const e of dir.values()){ if(e.kind==="file"&&/\.(mp3|m4a|wav|ogg|flac|aac)$/i.test(e.name)) files.push(e.name); }
-  if(!files.length) return toast("No audio files in that folder."); files.sort();
-  const d=db(); const id="pl_"+Date.now(); d.playlists.unshift({ id, userId:d.session, name:dir.name, files, thumbs:null, createdAt:Date.now() });
-  commit(d); dirCache[id]={ music:dir }; await fsPut(id+"_music",dir); toast(`Playlist "${dir.name}" — ${files.length} tracks 🎵`); go("mymusic");
+  const fileNames=[]; for await(const e of dir.values()){ if(e.kind==="file"&&/\.(mp3|m4a|wav|ogg|flac|aac)$/i.test(e.name)) fileNames.push(e.name); }
+  if(!fileNames.length) return toast("No audio files in that folder."); fileNames.sort();
+  if(!ME) return toast("Please log in first.");
+  const id="pl_"+Date.now();
+  const d=db(); d.playlists.unshift({ id, userId:ME.id, name:dir.name, files:fileNames, thumbs:null, createdAt:Date.now() });
+  commit(d); dirCache[id]={ music:dir }; await fsPut(id+"_music",dir);
+  toast(`Uploading "${dir.name}" — ${fileNames.length} tracks to cloud…`); go("mymusic");
+  let done=0,failed=0;
+  for(const fname of fileNames){
+    try{
+      const fh=await dir.getFileHandle(fname); const f=await fh.getFile();
+      const buf=await fileToArrayBuffer(f);
+      const blob=new Blob([buf],{type:f.type||"audio/mpeg"});
+      await audioPut(id+"/"+fname,blob);
+      const url=await uploadToCloudinary(blob);
+      await fbDB.collection("tracks").add({ userId:ME.id, title:fname.replace(/\.[^.]+$/,""), src:url, playlistId:id, playlistName:dir.name, genre:"Other", accent:COLORS[Math.floor(Math.random()*COLORS.length)], coverImg:"", visibility:"public", createdAt:Date.now()+done });
+      done++;
+    }catch(e){ failed++; console.warn("upload fail",fname,e); }
+    toast(`Uploading "${dir.name}"… ${done+failed}/${fileNames.length}`);
+  }
+  toast(failed?`"${dir.name}" — ${done} tracks uploaded ☁️, ${failed} failed.`:`"${dir.name}" — all ${done} tracks on the cloud ☁️`);
 }
 function mobilePickFiles(){
   const inp=document.createElement("input");
@@ -465,11 +484,24 @@ async function saveMobilePlaylist(){
   const files=window._mobileFiles; if(!files||!files.length) return;
   const name=($("plName").value||"").trim()||"My Music";
   closeOverlay();
-  const d=db(); const id="pl_"+Date.now();
-  d.playlists.unshift({ id, userId:d.session, name, files:files.map(f=>f.name), thumbs:null, createdAt:Date.now() });
-  commit(d); toast(`Caching ${files.length} track${files.length>1?'s':''}…`);
-  for(const f of files){ try{ await audioPut(id+"/"+f.name, new Blob([await f.arrayBuffer()],{type:f.type||"audio/mpeg"})); }catch{} }
-  window._mobileFiles=null; toast(`"${name}" ready — ${files.length} tracks 🎵`); go("mymusic");
+  if(!ME) return toast("Please log in first.");
+  const id="pl_"+Date.now();
+  const d=db(); d.playlists.unshift({ id, userId:ME.id, name, files:files.map(f=>f.name), thumbs:null, createdAt:Date.now() });
+  commit(d); toast(`Uploading ${files.length} track${files.length>1?'s':''}…`); go("mymusic");
+  let done=0,failed=0;
+  for(const f of files){
+    try{
+      const buf=await fileToArrayBuffer(f);
+      const blob=new Blob([buf],{type:f.type||"audio/mpeg"});
+      await audioPut(id+"/"+f.name,blob);
+      const url=await uploadToCloudinary(blob);
+      await fbDB.collection("tracks").add({ userId:ME.id, title:f.name.replace(/\.[^.]+$/,""), src:url, playlistId:id, playlistName:name, genre:"Other", accent:COLORS[Math.floor(Math.random()*COLORS.length)], coverImg:"", visibility:"public", createdAt:Date.now()+done });
+      done++;
+    }catch(e){ failed++; console.warn("upload fail",f.name,e); }
+    toast(`Uploading… ${done+failed}/${files.length}`);
+  }
+  window._mobileFiles=null;
+  toast(failed?`"${name}" — ${done} tracks on cloud ☁️, ${failed} failed.`:`"${name}" — all ${done} tracks on the cloud ☁️`);
 }
 async function setThumbsFolder(plId){ if(!window.showDirectoryPicker) return toast("Needs Chrome/Edge."); let dir; try{ dir=await window.showDirectoryPicker(); }catch{ return; }
   const d=db(); const p=d.playlists.find(x=>x.id===plId); if(p){ p.thumbs=dir.name; commit(d); } dirCache[plId]=dirCache[plId]||{}; dirCache[plId].thumbs=dir; await fsPut(plId+"_thumbs",dir); toast("Thumbnails linked ✓"); renderMain(); }
@@ -527,25 +559,97 @@ async function doPublish(){
   if(src.startsWith("file://")){ return toast("Local file paths can't be shared — please use the 'Choose audio file' button to upload your file directly."); }
   if(!src && !window._audioFile){ return toast("Please add an audio file or paste a music link."); }
   if(window._audioFile){
-    const localKey="local_track_"+Date.now();
+    const file=window._audioFile;
+    const pubBtn=document.querySelector('[data-action="dopublish"]');
+    if(pubBtn){ pubBtn.disabled=true; pubBtn.textContent="Uploading… 0%"; }
     try{
-      const buf=await fileToArrayBuffer(window._audioFile);
-      await audioPut(localKey, new Blob([buf],{type:window._audioFile.type||"audio/mpeg"}));
-      src="local:"+localKey;
-    }catch(e){ return toast("Couldn't save audio file: "+(e.message||e)+". Try a smaller file or a different format."); }
+      src=await new Promise((resolve,reject)=>{
+        const fd=new FormData();
+        fd.append("file",file);
+        fd.append("upload_preset","okmusic_audio");
+        const xhr=new XMLHttpRequest();
+        xhr.open("POST","https://api.cloudinary.com/v1_1/llka5use/video/upload");
+        xhr.upload.onprogress=e=>{ if(e.lengthComputable&&pubBtn) pubBtn.textContent=`Uploading… ${Math.round(e.loaded/e.total*100)}%`; };
+        xhr.onload=()=>{ try{ const r=JSON.parse(xhr.responseText); if(r.secure_url) resolve(r.secure_url); else reject(new Error(r.error?.message||"Upload failed")); }catch(err){ reject(err); } };
+        xhr.onerror=()=>reject(new Error("Network error — check your connection"));
+        xhr.send(fd);
+      });
+    }catch(e){
+      if(pubBtn){ pubBtn.disabled=false; pubBtn.textContent="Add to my music"; }
+      return toast("Upload failed: "+(e.message||e)+". Check your connection and try again.");
+    }
   }
   fbDB.collection("tracks").add({ userId:ME.id, title, src, genre:($("upGenre")&&$("upGenre").value)||"Other", accent:window._upColor||COLORS[0], coverImg, visibility:window._upVis||"public", share:!!($("upShare")&&$("upShare").checked), createdAt:Date.now() })
     .then(()=>{ closeOverlay(); window._trackCover=null; window._audioFile=null; toast(window._upVis==="private"?"Saved private 🔒":"Published! 🎵"); go("mymusic"); })
     .catch(e=>toast("Couldn't save: "+(e.code||e.message))); }
 
+// ---------- Cloudinary upload helper ----------
+function uploadToCloudinary(blob, onProgress){
+  return new Promise((resolve,reject)=>{
+    const fd=new FormData();
+    fd.append("file",blob);
+    fd.append("upload_preset","okmusic_audio");
+    const xhr=new XMLHttpRequest();
+    xhr.open("POST","https://api.cloudinary.com/v1_1/llka5use/video/upload");
+    if(onProgress) xhr.upload.onprogress=e=>{ if(e.lengthComputable) onProgress(Math.round(e.loaded/e.total*100)); };
+    xhr.onload=()=>{ try{ const r=JSON.parse(xhr.responseText); if(r.secure_url) resolve(r.secure_url); else reject(new Error(r.error?.message||"Upload failed")); }catch(err){ reject(err); } };
+    xhr.onerror=()=>reject(new Error("Network error — check your connection"));
+    xhr.send(fd);
+  });
+}
+
+async function migrateTrack(trackId){
+  const t=allTracks().find(x=>x.id===trackId); if(!t) return;
+  const blob=await audioGet(t.src.slice(6));
+  if(!blob){ toast("Audio file not found on this device. Use '＋ Add link' to paste a public URL instead."); return; }
+  const btn=document.querySelector(`[data-action="migratetrack"][data-id="${trackId}"]`);
+  if(btn){ btn.disabled=true; btn.textContent="Uploading… 0%"; }
+  try{
+    const url=await uploadToCloudinary(blob, pct=>{ if(btn) btn.textContent=`Uploading… ${pct}%`; });
+    await fbDB.collection("tracks").doc(trackId).update({src:url});
+    toast(`"${t.title}" is now on the cloud ☁️ — everyone can hear it!`);
+    renderMyMusic();
+  }catch(e){
+    if(btn){ btn.disabled=false; btn.textContent="☁️ Move to cloud"; }
+    toast("Migration failed: "+(e.message||e));
+  }
+}
+
+async function migrateAllLocal(){
+  const locals=tracksByUser(ME.id,true).filter(t=>t.src&&t.src.startsWith("local:"));
+  if(!locals.length) return toast("No local tracks to migrate.");
+  const allBtn=document.querySelector('[data-action="migratealltracks"]');
+  if(allBtn){ allBtn.disabled=true; allBtn.textContent=`Migrating… 0/${locals.length}`; }
+  let done=0,failed=0;
+  for(const t of locals){
+    const blob=await audioGet(t.src.slice(6));
+    if(!blob){ failed++; continue; }
+    try{
+      const url=await uploadToCloudinary(blob);
+      await fbDB.collection("tracks").doc(t.id).update({src:url});
+      done++;
+      if(allBtn) allBtn.textContent=`Migrating… ${done}/${locals.length}`;
+    }catch(e){ failed++; }
+  }
+  toast(failed?`${done} moved to cloud ☁️, ${failed} could not be found on this device.`:`All ${done} track${done!==1?"s":""} moved to cloud ☁️ — everyone can now stream them!`);
+  renderMyMusic();
+}
+
 // ---------- my music ----------
 function renderMyMusic(){
   const u=currentUser(); const tracks=tracksByUser(u.id,true); const pls=playlistsByUser(u.id);
-  const rows=tracks.map(t=>`<div class="mrow"><div class="mart" style="background:${grad(t.accent)}">◎</div>
-    <div class="minfo"><div class="mt">${esc(t.title)}</div><div class="ms">▶ ${nfmt(playCount(t.id))} · 👍 ${nfmt(likeCount(t.id))} · 👎 ${nfmt(dislikeCount(t.id))} <span class="pill ${t.visibility==='private'?'prv':'pub'}">${t.visibility==='private'?'Private':'Public'}</span></div></div>
+  const localCount=tracks.filter(t=>t.src&&t.src.startsWith("local:")).length;
+  const rows=tracks.map(t=>{
+    const isLocal=t.src&&t.src.startsWith("local:");
+    return `<div class="mrow"><div class="mart" style="background:${grad(t.accent)}">◎</div>
+    <div class="minfo"><div class="mt">${esc(t.title)}${isLocal?'<span class="local-badge">📵 Local only</span>':''}</div><div class="ms">▶ ${nfmt(playCount(t.id))} · 👍 ${nfmt(likeCount(t.id))} · 👎 ${nfmt(dislikeCount(t.id))} <span class="pill ${t.visibility==='private'?'prv':'pub'}">${t.visibility==='private'?'Private':'Public'}</span></div></div>
+    ${isLocal?`<button class="btn sm primary" data-action="migratetrack" data-id="${t.id}" title="Upload this track to the cloud so all fans can hear it">☁️ Move to cloud</button><button class="btn sm" data-action="addlink" data-id="${t.id}" data-title="${esc(t.title)}" title="Paste a public URL instead">＋ Add link</button>`:''}
     ${t.visibility==='private'?`<button class="btn sm primary" data-action="publish" data-id="${t.id}">Publish</button>`:`<button class="btn sm" data-action="unpublish" data-id="${t.id}">Hide</button>`}
-    <button class="btn sm" data-action="deltrack" data-id="${t.id}" style="color:#e2554f;border-color:#f0b3b3">Delete</button></div>`).join("");
+    <button class="btn sm" data-action="deltrack" data-id="${t.id}" style="color:#e2554f;border-color:#f0b3b3">Delete</button></div>`;
+  }).join("");
+  const migrateBanner=localCount?`<div class="migrate-banner">📵 <b>${localCount} track${localCount!==1?"s":""} stored locally</b> — only you can hear them on this device. Move them to the cloud so your fans can listen everywhere.<button class="btn sm primary" data-action="migratealltracks" style="margin-left:12px">☁️ Move all to cloud</button></div>`:"";
   $("page").innerHTML=`<div class="h-title">My Music</div>
+    ${migrateBanner}
     <div class="folder-banner">📁 <b>Share your music — works on mobile and desktop.</b> On <b>mobile</b>: tap "Add a folder" to pick music files directly from your phone, iCloud, or Google Drive. On <b>desktop</b> (Chrome/Edge): pick an entire folder from your computer or cloud drive. All tracks are cached after selection so they play even when offline.
       <div class="folder-note">☁️ <b>Cloud drive tip (desktop):</b> Make sure your cloud drive is set to <b>sync files locally</b> (not "stream-only"). In Google Drive: Preferences → open files online only → off. In Dropbox: right-click folder → Make available offline.</div>
     <div style="display:flex;gap:8px;margin-bottom:18px;flex-wrap:wrap"><button class="btn primary" data-action="sharefolder">📁 Add a folder</button><button class="btn" data-action="upload">＋ Add single track</button></div>
@@ -556,6 +660,26 @@ function renderMyMusic(){
 }
 function setVisibility(id,v){ fbDB.collection("tracks").doc(id).update({ visibility:v }).then(()=>toast(v==="public"?"Published 🎉 (now public)":"Hidden — set to private 🔒")).catch(e=>toast(e.code||e.message)); }
 function deleteTrack(id){ if(!confirm("Delete this track permanently? This cannot be undone.")) return; fbDB.collection("tracks").doc(id).delete().then(()=>toast("Track deleted")).catch(e=>toast(e.code||e.message)); }
+
+function openAddLink(trackId,title){
+  openOverlay(`<h2>🔗 Add streaming link</h2>
+    <p class="sub">Paste a public URL so your fans can stream <b>${esc(title)}</b> directly in OK Music.</p>
+    <div class="field"><label>Audio link (direct .mp3, SoundCloud, etc.)</label>
+      <input id="addLinkUrl" placeholder="https://…/track.mp3" style="width:100%" /></div>
+    <div class="note" style="margin:8px 0 16px">Works with any direct audio URL. For SoundCloud: right-click a track → Copy link.</div>
+    <button class="btn primary block" data-action="savetracklink" data-id="${trackId}">Save link</button>`);
+}
+
+async function saveTrackLink(trackId){
+  const url=($("addLinkUrl")||{value:""}).value.trim();
+  if(!url) return toast("Please paste a link first.");
+  if(!url.startsWith("http")) return toast("Link must start with http:// or https://");
+  try{
+    await fbDB.collection("tracks").doc(trackId).update({src:url});
+    closeOverlay();
+    toast("Streaming link saved! Fans can now play this track. ✓");
+  }catch(e){ toast("Save failed: "+(e.code||e.message)); }
+}
 
 // ---------- edit profile (photo + bg + bio) ----------
 function openCustomize(){
@@ -614,7 +738,8 @@ async function playTrack(id){ const t=allTracks().find(x=>x.id===id); if(!t) ret
   if(t.src&&t.src.startsWith("local:")){
     const blob=await audioGet(t.src.slice(6));
     if(blob){ showPlayer(t.title,u.name,t.accent,URL.createObjectURL(blob)); }
-    else toast("This track's audio is only on the device it was uploaded from. Share a link instead.");
+    else if(ME&&ME.id===t.userId) openAddLink(t.id,t.title);
+    else toast(`📵 "${esc(t.title)}" is stored locally on the artist's device and can't be streamed yet. The artist needs to add a public streaming link.`);
     return;
   }
   showPlayer(t.title,u.name,t.accent,t.src); if(!t.src) toast("Demo track — no audio linked yet. Reactions still work!"); }
@@ -1046,10 +1171,19 @@ document.addEventListener("click",e=>{
     vis:()=>{window._upVis=el.dataset.v;document.querySelectorAll("#visRow .radio-card").forEach(c=>c.classList.toggle("sel",c===el));},
     bgcolor:()=>{window._bgColor=el.dataset.c;window._bgTheme="";document.querySelectorAll("#bgSw .swatch").forEach(s=>s.classList.toggle("sel",s===el));document.querySelectorAll("#themeGrid .theme-swatch").forEach(s=>s.classList.remove("sel"));const bi=$("bgImg");if(bi)bi.value="";},
     theme:()=>{window._bgTheme=el.dataset.t;window._bgColor="";document.querySelectorAll("#themeGrid .theme-swatch").forEach(s=>s.classList.toggle("sel",s===el));document.querySelectorAll("#bgSw .swatch").forEach(s=>s.classList.remove("sel"));const bi=$("bgImg");if(bi)bi.value="";},
+    migratetrack:()=>migrateTrack(el.dataset.id),
+    migratealltracks:migrateAllLocal,
+    addlink:()=>openAddLink(el.dataset.id,el.dataset.title),
+    savetracklink:()=>saveTrackLink(el.dataset.id),
     broadcastwelcome:broadcastWelcome,
     showguide:()=>showWelcomeGuide(ME?.name||"there"),
     openchat:()=>{ state.chatUid=el.dataset.uid; state.view="chat"; renderApp(); },
     sendmsg:()=>sendMsg(el.dataset.uid),
+    editmsg:()=>editMsg(el.dataset.msgid,el.dataset.cid,el.dataset.text),
+    saveeditmsg:()=>saveEditMsg(el.dataset.msgid,el.dataset.cid),
+    deletemsgmenu:()=>deleteMsgMenu(el.dataset.msgid,el.dataset.cid),
+    deletemsgall:()=>deleteMsgForAll(el.dataset.msgid,el.dataset.cid),
+    deletemsgme:()=>deleteMsgForMe(el.dataset.msgid,el.dataset.cid),
     startcall:()=>startCall(el.dataset.uid),
     acceptcall:()=>acceptCall(el.dataset.uid),
     mutecall:muteCall,
@@ -1073,6 +1207,51 @@ function scheduleRender(){ clearTimeout(_rt); _rt=setTimeout(()=>{ const a=docum
 // ============ PRIVATE MESSENGER ============
 const ICE=[{urls:"stun:stun.l.google.com:19302"},{urls:"stun:stun1.l.google.com:19302"}];
 let activePc=null,activeStream=null,activeCallId=null,callUnsub=null,callInterval=null,muted=false;
+
+// ---- Sound feedback (Web Audio API — no external files needed) ----
+let _ringCtx=null;
+function playRing(){
+  stopRing();
+  try{
+    const ctx=new(window.AudioContext||window.webkitAudioContext)();
+    _ringCtx=ctx;
+    for(let i=0;i<10;i++){
+      const t=ctx.currentTime+i*6;
+      const g=ctx.createGain();
+      g.connect(ctx.destination);
+      g.gain.setValueAtTime(0,t);
+      g.gain.linearRampToValueAtTime(0.3,t+0.05);
+      g.gain.setValueAtTime(0.3,t+1.85);
+      g.gain.linearRampToValueAtTime(0,t+2.0);
+      [440,480].forEach(freq=>{
+        const o=ctx.createOscillator();
+        o.type="sine";o.frequency.value=freq;
+        o.connect(g);o.start(t);o.stop(t+2.0);
+      });
+    }
+    if(navigator.vibrate) navigator.vibrate([2000,4000,2000,4000,2000,4000,2000,4000,2000,4000]);
+  }catch(e){}
+}
+function stopRing(){
+  if(_ringCtx){try{_ringCtx.close();}catch(e){}_ringCtx=null;}
+  if(navigator.vibrate) navigator.vibrate(0);
+}
+function playMsgSound(){
+  try{
+    const ctx=new(window.AudioContext||window.webkitAudioContext)();
+    const g=ctx.createGain();
+    g.connect(ctx.destination);
+    const o=ctx.createOscillator();
+    o.type="sine";o.frequency.value=880;
+    o.connect(g);
+    g.gain.setValueAtTime(0,ctx.currentTime);
+    g.gain.linearRampToValueAtTime(0.12,ctx.currentTime+0.01);
+    g.gain.exponentialRampToValueAtTime(0.001,ctx.currentTime+0.25);
+    o.start(ctx.currentTime);o.stop(ctx.currentTime+0.25);
+    setTimeout(()=>ctx.close(),500);
+    if(navigator.vibrate) navigator.vibrate(40);
+  }catch(e){}
+}
 let msgUnsub=null,convUnsub=null;
 function convId(a,b){return[a,b].sort().join("_");}
 
@@ -1085,11 +1264,11 @@ function renderMessages(){
   if(convUnsub){convUnsub();convUnsub=null;}
   $("page").innerHTML=`<div class="h-title">💬 Messages</div><div id="convList" class="conv-list"><div class="empty">Loading…</div></div>`;
   convUnsub=fbDB.collection("messages").where("participants","array-contains",ME.id)
-    .orderBy("lastTime","desc").onSnapshot(snap=>{
+    .onSnapshot(snap=>{
       CACHE.convos={};
       snap.docs.forEach(d=>{CACHE.convos[d.id]={id:d.id,...d.data()};});
       const el=$("convList");if(!el)return;
-      const convs=snap.docs.map(d=>({id:d.id,...d.data()}));
+      const convs=snap.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>(b.lastTime||0)-(a.lastTime||0));
       if(!convs.length){el.innerHTML='<div class="empty">No messages yet — open any profile and tap 💬 Message to start a chat.</div>';return;}
       el.innerHTML=convs.map(c=>{
         const otherId=c.participants.find(p=>p!==ME.id);
@@ -1125,15 +1304,32 @@ function openChat(uid){
       <button class="btn primary" data-action="sendmsg" data-uid="${uid}">Send</button>
     </div>`;
   fbDB.collection("messages").doc(cid).set({participants:[ME.id,uid],unread:{[ME.id]:0}},{merge:true}).catch(()=>{});
+  let _prevMsgCount=0;
   msgUnsub=fbDB.collection("messages").doc(cid).collection("msgs")
     .orderBy("time","asc").limitToLast(80)
     .onSnapshot(snap=>{
       const el=$("chatMsgs");if(!el)return;
-      el.innerHTML=snap.docs.map(d=>{const m=d.data();const mine=m.senderId===ME.id;
-        return`<div class="msg-bubble ${mine?'mine':'theirs'}">
-          <div class="msg-text">${esc(m.text)}</div>
-          <div class="msg-time">${timeAgo(m.time)}</div></div>`;
-      }).join('');
+      if(_prevMsgCount>0&&snap.docs.length>_prevMsgCount){
+        const newest=snap.docs[snap.docs.length-1].data();
+        if(newest.senderId!==ME.id&&!newest.deleted&&!(newest.deletedFor||[]).includes(ME.id)) playMsgSound();
+      }
+      _prevMsgCount=snap.docs.length;
+      el.innerHTML=snap.docs
+        .filter(d=>!(d.data().deletedFor||[]).includes(ME.id))
+        .map(d=>{const m=d.data();const mine=m.senderId===ME.id;
+          if(m.deleted) return`<div class="msg-bubble ${mine?'mine':'theirs'} deleted">
+            <div class="msg-text"><em>🗑️ Message deleted</em></div>
+            <div class="msg-time">${timeAgo(m.time)}</div></div>`;
+          return`<div class="msg-bubble ${mine?'mine':'theirs'}">
+            <div class="msg-text">${esc(m.text)}${m.edited?'<span class="msg-edited"> · edited</span>':''}</div>
+            <div class="msg-meta">
+              <span class="msg-time">${timeAgo(m.time)}</span>
+              ${mine?`<span class="msg-actions">
+                <button class="msg-act" data-action="editmsg" data-msgid="${d.id}" data-cid="${cid}" data-text="${esc(m.text)}" title="Edit">✏️</button>
+                <button class="msg-act" data-action="deletemsgmenu" data-msgid="${d.id}" data-cid="${cid}" title="Delete">🗑️</button>
+              </span>`:''}
+            </div></div>`;
+        }).join('');
       el.scrollTop=el.scrollHeight;
     },e=>console.warn("msgs",e));
   setTimeout(()=>{
@@ -1145,7 +1341,7 @@ function openChat(uid){
 async function sendMsg(uid){
   const inp=$("chatInput");if(!inp)return;
   const text=inp.value.trim();if(!text)return;
-  inp.value="";
+  inp.value="";playMsgSound();
   const cid=convId(ME.id,uid);const time=Date.now();
   await fbDB.collection("messages").doc(cid).collection("msgs").add({senderId:ME.id,text,time,read:false});
   await fbDB.collection("messages").doc(cid).set({
@@ -1153,6 +1349,39 @@ async function sendMsg(uid){
     unread:{[ME.id]:0,[uid]:firebase.firestore.FieldValue.increment(1)}
   },{merge:true});
   if(!String(uid).startsWith("u_")) fbDB.collection("notifications").add({forUid:uid,type:"message",fromUid:ME.id,fromName:ME.name,text:`💬 ${ME.name}: ${text.slice(0,60)}`,time,read:false}).catch(()=>{});
+}
+
+function editMsg(msgId,cid,currentText){
+  openOverlay(`<h2>✏️ Edit message</h2>
+    <div class="field"><textarea id="editMsgText" style="min-height:80px;width:100%">${esc(currentText)}</textarea></div>
+    <div style="display:flex;gap:8px;margin-top:4px">
+      <button class="btn primary" data-action="saveeditmsg" data-msgid="${msgId}" data-cid="${cid}">Save</button>
+      <button class="btn" data-action="close">Cancel</button>
+    </div>`);
+  setTimeout(()=>{const t=$("editMsgText");if(t){t.focus();t.setSelectionRange(t.value.length,t.value.length);}},50);
+}
+async function saveEditMsg(msgId,cid){
+  const text=($("editMsgText")||{value:""}).value.trim();
+  if(!text) return toast("Message can't be empty.");
+  try{ await fbDB.collection("messages").doc(cid).collection("msgs").doc(msgId).update({text,edited:true}); closeOverlay(); }
+  catch(e){ toast("Couldn't edit: "+(e.code||e.message)); }
+}
+function deleteMsgMenu(msgId,cid){
+  openOverlay(`<h2>🗑️ Delete message</h2>
+    <p class="sub">Choose who to delete it for.</p>
+    <div style="display:flex;flex-direction:column;gap:10px;margin-top:16px">
+      <button class="btn primary" data-action="deletemsgall" data-msgid="${msgId}" data-cid="${cid}">Delete for everyone</button>
+      <button class="btn" data-action="deletemsgme" data-msgid="${msgId}" data-cid="${cid}">Delete for me only</button>
+      <button class="btn" data-action="close">Cancel</button>
+    </div>`);
+}
+async function deleteMsgForAll(msgId,cid){
+  try{ await fbDB.collection("messages").doc(cid).collection("msgs").doc(msgId).update({deleted:true,text:""}); closeOverlay(); }
+  catch(e){ toast("Couldn't delete: "+(e.code||e.message)); }
+}
+async function deleteMsgForMe(msgId,cid){
+  try{ await fbDB.collection("messages").doc(cid).collection("msgs").doc(msgId).update({deletedFor:firebase.firestore.FieldValue.arrayUnion(ME.id)}); closeOverlay(); }
+  catch(e){ toast("Couldn't delete: "+(e.code||e.message)); }
 }
 
 // ---- VOICE CALLS ----
@@ -1175,6 +1404,7 @@ function openCallUI(uid,mode){
       <button class="call-btn-mute" id="muteBtn" data-action="mutecall">🎙️ Mute</button>
       <button class="call-btn-end" data-action="endcall" data-uid="${uid}">${mode==="incoming"?"❌ Decline":"📵 End"}</button>
     </div></div>`);
+  if(mode==="incoming") playRing();
   if(mode==="outgoing") initiateCall(uid);
 }
 
@@ -1204,6 +1434,7 @@ async function initiateCall(uid){
 }
 
 async function acceptCall(uid){
+  stopRing();
   const s=$("callStatus");if(s)s.textContent="Connecting…";
   const snap=await fbDB.collection("calls").where("callerId","==",uid).where("calleeId","==",ME.id).where("status","==","ringing").orderBy("time","desc").limit(1).get().catch(()=>null);
   if(!snap||snap.empty){toast("Call expired.");closeOverlay();return;}
@@ -1240,6 +1471,7 @@ function muteCall(){
   const b=$("muteBtn");if(b)b.textContent=muted?"🔇 Unmute":"🎙️ Mute";
 }
 async function endCall(){
+  stopRing();
   clearInterval(callInterval);callInterval=null;
   if(callUnsub){callUnsub();callUnsub=null;}
   if(activePc){activePc.close();activePc=null;}
