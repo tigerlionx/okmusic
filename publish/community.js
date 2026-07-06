@@ -96,16 +96,31 @@ let state={ view:"discover", profileId:null, query:"" };
 let playMode="continuous"; // "continuous" | "repeat" | "shuffle"
 let nowPlayingId=null;
 function go(v,x={}){ state={ ...state, view:v, ...x }; render(); window.scrollTo(0,0); }
+function _setBgStyle(img, mode){
+  document.body.style.backgroundImage=`url('${img}')`;
+  document.body.style.backgroundAttachment="fixed";
+  if(mode==="tile"){
+    document.body.style.backgroundSize="auto";
+    document.body.style.backgroundRepeat="repeat";
+    document.body.style.backgroundPosition="top left";
+  } else if(mode==="center"){
+    document.body.style.backgroundSize="auto";
+    document.body.style.backgroundRepeat="no-repeat";
+    document.body.style.backgroundPosition="center center";
+  } else {
+    document.body.style.backgroundSize="cover";
+    document.body.style.backgroundRepeat="no-repeat";
+    document.body.style.backgroundPosition="center";
+  }
+  document.body.classList.add("has-page-bg");
+}
 function applyMyBackground(){
   if(ME&&ME.pageBgImg){
-    document.body.style.backgroundImage=`url('${ME.pageBgImg}')`;
-    document.body.style.backgroundSize="cover";
-    document.body.style.backgroundPosition="center";
-    document.body.style.backgroundAttachment="fixed";
-    document.body.classList.add("has-page-bg");
+    _setBgStyle(ME.pageBgImg, ME.pageBgMode||"stretch");
   } else {
     document.body.style.backgroundImage="";
     document.body.style.backgroundSize="";
+    document.body.style.backgroundRepeat="";
     document.body.style.backgroundPosition="";
     document.body.style.backgroundAttachment="";
     document.body.classList.remove("has-page-bg");
@@ -165,7 +180,7 @@ function emailGo(mode){
   });
 }
 async function loadProfile(uid){ try{ const s=await fbDB.collection("users").doc(uid).get(); return s.exists?{ id:uid, ...s.data() }:null; }catch(e){ console.warn(e); return null; } }
-function syncME(){ const d=db(); if(ME){ d.session=ME.id; d.usersById[ME.id]={ id:ME.id, name:ME.name, handle:ME.handle, bio:ME.bio, color:ME.color, avatarImg:ME.avatarImg, bgColor:ME.bgColor, bgImg:ME.bgImg, pageBgImg:ME.pageBgImg||"" }; } else d.session=null; commit(d); }
+function syncME(){ const d=db(); if(ME){ d.session=ME.id; d.usersById[ME.id]={ id:ME.id, name:ME.name, handle:ME.handle, bio:ME.bio, color:ME.color, avatarImg:ME.avatarImg, bgColor:ME.bgColor, bgImg:ME.bgImg, pageBgImg:ME.pageBgImg||"", pageBgMode:ME.pageBgMode||"stretch" }; } else d.session=null; commit(d); }
 function openOnboard(){
   openOverlay(`<h2>Welcome to OK Music 👋</h2><p class="sub">Pick a name and handle to set up your creator profile.</p>
     <div class="field"><label>Display name</label><input class="fb-field" id="obName" placeholder="e.g. Emmanuel Leveille" value="${esc((ME&&ME.name)||'')}" /></div>
@@ -392,7 +407,8 @@ function renderProfile(uid){
   const cover=u.bgImg?`background-image:url('${u.bgImg}');background-size:cover;background-position:center`:themeCSS?`background:${themeCSS}`:u.bgColor?`background:${u.bgColor}`:"";
   // Apply page background: profile owner's if set, otherwise fall back to the logged-in user's own background
   const pageBg=u.pageBgImg||(mine&&ME?.pageBgImg)||"";
-  if(pageBg){ document.body.style.backgroundImage=`url('${pageBg}')`; document.body.style.backgroundSize="cover"; document.body.style.backgroundPosition="center"; document.body.style.backgroundAttachment="fixed"; document.body.classList.add("has-page-bg"); }
+  const bgMode=pageBg?(u.pageBgMode||(mine&&ME?.pageBgMode)||"stretch"):"stretch";
+  if(pageBg){ _setBgStyle(pageBg,bgMode); }
   else applyMyBackground();
   const tracks=tracksByUser(uid,mine); const pls=playlistsByUser(uid); const sts=statusesByUser(uid);
   const headActions=mine
@@ -777,19 +793,29 @@ function openCustomize(){
       <div class="cust-bg-prev" id="pageBgPrev" style="${pageBgStyle}"><span class="cust-hint" style="color:rgba(60,30,0,.6)">Shown behind your whole page</span></div>
       <input type="file" id="pageBgFile" accept="image/*" style="margin-top:6px" />
       <input id="pageBgUrl" placeholder="Or paste a background image link" value="${esc(u.pageBgImg||"")}" style="margin-top:6px;width:100%" />
+      <label style="margin-top:10px;display:block;font-size:13px;color:var(--muted)">Display mode</label>
+      <div class="bg-mode-row">
+        <button class="bg-mode-btn ${(u.pageBgMode||'stretch')==='stretch'?'sel':''}" data-action="setbgmode" data-mode="stretch">⤢ Stretch</button>
+        <button class="bg-mode-btn ${(u.pageBgMode||'')==='tile'?'sel':''}" data-action="setbgmode" data-mode="tile">▦ Tile</button>
+        <button class="bg-mode-btn ${(u.pageBgMode||'')==='center'?'sel':''}" data-action="setbgmode" data-mode="center">⊡ Center</button>
+      </div>
     </div>
     <div class="field"><label>Banner colour (if no photo)</label>
       <div class="theme-grid" id="themeGrid">${THEMES.map(t=>`<div class="theme-swatch ${(u.bgTheme||"")===t.id?'sel':''}" style="background:${t.css}" data-action="theme" data-t="${t.id}" title="${t.label}"><span class="theme-label">${t.label}</span></div>`).join("")}</div></div>
     <div class="field"><label>Or a solid colour</label><div class="swatches" id="bgSw">${["#FFCBA0","#7c5cff","#36d1c4","#ff5c7c","#2bbf4e","#5c8bff","#33272f"].map(c=>`<div class="swatch ${u.bgColor===c&&!u.bgTheme?'sel':''}" style="background:${c}" data-action="bgcolor" data-c="${c}"></div>`).join("")}</div></div>
     <button class="btn primary block" data-action="savecustom">Save profile</button>`);
-  window._bgColor=u.bgColor||""; window._bgTheme=u.bgTheme||""; window._avatar=null; window._bannerFile=null; window._pageBgFile=null;
+  window._bgColor=u.bgColor||""; window._bgTheme=u.bgTheme||""; window._avatar=null; window._bannerFile=null; window._pageBgFile=null; window._bgMode=u.pageBgMode||"stretch";
+}
+function setBgMode(mode){
+  window._bgMode=mode;
+  document.querySelectorAll(".bg-mode-btn").forEach(b=>b.classList.toggle("sel",b.dataset.mode===mode));
 }
 async function saveCustom(){
   if(!ME) return;
   const saveBtn=document.querySelector('[data-action="savecustom"]');
   if(saveBtn){ saveBtn.disabled=true; saveBtn.textContent="Saving…"; }
   const url=($("avUrl").value||"").trim();
-  const upd={ bio:($("bgBio").value||"").trim()||ME.bio||"", bgColor:window._bgTheme?"":(window._bgColor||""), bgTheme:window._bgTheme||"" };
+  const upd={ bio:($("bgBio").value||"").trim()||ME.bio||"", bgColor:window._bgTheme?"":(window._bgColor||""), bgTheme:window._bgTheme||"", pageBgMode:window._bgMode||"stretch" };
   if(window._avatar){ if(window._avatar.length>700000){ if(saveBtn){saveBtn.disabled=false;saveBtn.textContent="Save profile";} return toast("Photo too big — paste a link instead."); } upd.avatarImg=window._avatar; }
   else if(url) upd.avatarImg=url;
   if(window._bannerFile){
@@ -1253,7 +1279,7 @@ document.addEventListener("click",e=>{
     auth:()=>{ if(el.dataset.p==="google") signInGoogle(); else toast("Apple sign-in needs a paid Apple Developer account — coming later. Use Google or email 🙂"); },
     authemail:()=>openEmailAuth(($("liEmail").value||"").trim()), emailgo:()=>emailGo(el.dataset.mode), finishonboard:()=>finishOnboard(),
     sharefolder:shareMusicFolder, savemobilepl:saveMobilePlaylist, setthumbs:()=>setThumbsFolder(el.dataset.pl), relink:()=>relinkFolder(el.dataset.pl), playfile:()=>playFolderTrack(el.dataset.pl,el.dataset.file),
-    upload:openUpload, dopublish:doPublish, customize:openCustomize, savecustom:saveCustom, invite:openInvite,
+    upload:openUpload, dopublish:doPublish, customize:openCustomize, savecustom:saveCustom, invite:openInvite, setbgmode:()=>setBgMode(el.dataset.mode),
     copyinvite:()=>{ const i=$("invLink"); i.select(); if(navigator.clipboard)navigator.clipboard.writeText(i.value); toast("Invite link copied ✓"); },
     play:()=>playTrack(el.dataset.id), like:()=>toggleLike(el.dataset.id), dislike:()=>toggleDislike(el.dataset.id),
     poststatus:postStatus, slike:()=>stLike(el.dataset.id), sdislike:()=>stDislike(el.dataset.id), scomment:()=>stComment(el.dataset.id),
