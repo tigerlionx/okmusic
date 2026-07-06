@@ -114,17 +114,13 @@ function _setBgStyle(img, mode){
   }
   document.body.classList.add("has-page-bg");
 }
-function applyMyBackground(){
-  if(ME&&ME.pageBgImg){
-    _setBgStyle(ME.pageBgImg, ME.pageBgMode||"stretch");
-  } else {
-    document.body.style.backgroundImage="";
-    document.body.style.backgroundSize="";
-    document.body.style.backgroundRepeat="";
-    document.body.style.backgroundPosition="";
-    document.body.style.backgroundAttachment="";
-    document.body.classList.remove("has-page-bg");
-  }
+function _clearBg(){
+  document.body.style.backgroundImage="";
+  document.body.style.backgroundSize="";
+  document.body.style.backgroundRepeat="";
+  document.body.style.backgroundPosition="";
+  document.body.style.backgroundAttachment="";
+  document.body.classList.remove("has-page-bg");
 }
 function render(){
   if(!ME){ renderLanding(); return; }
@@ -340,12 +336,11 @@ function renderApp(){
       </nav>
       <main class="main"><div class="page" id="page"></div></main>
     </div>`;
-  applyMyBackground();
   renderMain();
   setTimeout(()=>{ const s=$("search"); if(s) s.oninput=e=>{ state.query=e.target.value; if(state.view!=="discover") state.view="discover"; renderMain(); }; },0);
 }
 function renderMain(){
-  if(state.view!=="profile") applyMyBackground();
+  if(state.view!=="profile") _clearBg();
   if(state.view==="profile") return renderProfile(state.profileId);
   if(state.view==="mymusic") return renderMyMusic();
   if(state.view==="fans") return renderFans();
@@ -405,11 +400,11 @@ function renderProfile(uid){
   const me=currentUser(); const mine=me&&me.id===uid;
   const themeCSS=u.bgTheme?(THEMES.find(t=>t.id===u.bgTheme)||{}).css:"";
   const cover=u.bgImg?`background-image:url('${u.bgImg}');background-size:cover;background-position:center`:themeCSS?`background:${themeCSS}`:u.bgColor?`background:${u.bgColor}`:"";
-  // Apply page background: profile owner's if set, otherwise fall back to the logged-in user's own background
-  const pageBg=u.pageBgImg||(mine&&ME?.pageBgImg)||"";
-  const bgMode=pageBg?(u.pageBgMode||(mine&&ME?.pageBgMode)||"stretch"):"stretch";
+  // Each profile shows only its own background — no cross-user leaking
+  const pageBg=u.pageBgImg||"";
+  const bgMode=u.pageBgMode||"stretch";
   if(pageBg){ _setBgStyle(pageBg,bgMode); }
-  else applyMyBackground();
+  else _clearBg();
   const tracks=tracksByUser(uid,mine); const pls=playlistsByUser(uid); const sts=statusesByUser(uid);
   const headActions=mine
     ? `<button class="btn primary" data-action="customize">🎨 Edit profile</button><button class="btn" data-action="invite">✉️ Invite</button>`
@@ -784,14 +779,14 @@ function openCustomize(){
     <div class="field"><label>Bio</label><textarea id="bgBio" placeholder="Tell fans about your music…">${esc(u.bio||"")}</textarea></div>
     <div class="field">
       <label>🖼️ Banner — wide photo at the top of your page</label>
-      <div class="cust-banner-prev" id="bannerPrev" style="${bannerStyle}"><span class="cust-hint">Concert · Album art · Artist photo</span></div>
-      <input type="file" id="bannerFile" accept="image/*" style="margin-top:6px" />
+      <div class="cust-banner-prev" id="bannerPrev" style="${bannerStyle}"><span class="cust-hint">Concert · Album art · Artist photo</span>${u.bgImg?`<button class="cust-remove-btn" data-action="removebanner" title="Remove banner">✕</button>`:''}</div>
+      <input type="file" id="bannerFile" accept="image/*,.heic,.heif" style="margin-top:6px" />
       <input id="bannerUrl" placeholder="Or paste a banner image link" value="${esc(u.bgImg||"")}" style="margin-top:6px;width:100%" />
     </div>
     <div class="field">
       <label>🌄 Page background image</label>
-      <div class="cust-bg-prev" id="pageBgPrev" style="${pageBgStyle}"><span class="cust-hint" style="color:rgba(60,30,0,.6)">Shown behind your whole page</span></div>
-      <input type="file" id="pageBgFile" accept="image/*" style="margin-top:6px" />
+      <div class="cust-bg-prev" id="pageBgPrev" style="${pageBgStyle}"><span class="cust-hint" style="color:rgba(60,30,0,.6)">Shown behind your whole page</span>${u.pageBgImg?`<button class="cust-remove-btn" data-action="removepagebg" title="Remove background">✕</button>`:''}</div>
+      <input type="file" id="pageBgFile" accept="image/*,.heic,.heif" style="margin-top:6px" />
       <input id="pageBgUrl" placeholder="Or paste a background image link" value="${esc(u.pageBgImg||"")}" style="margin-top:6px;width:100%" />
       <label style="margin-top:10px;display:block;font-size:13px;color:var(--muted)">Display mode</label>
       <div class="bg-mode-row">
@@ -803,8 +798,36 @@ function openCustomize(){
     <div class="field"><label>Banner colour (if no photo)</label>
       <div class="theme-grid" id="themeGrid">${THEMES.map(t=>`<div class="theme-swatch ${(u.bgTheme||"")===t.id?'sel':''}" style="background:${t.css}" data-action="theme" data-t="${t.id}" title="${t.label}"><span class="theme-label">${t.label}</span></div>`).join("")}</div></div>
     <div class="field"><label>Or a solid colour</label><div class="swatches" id="bgSw">${["#FFCBA0","#7c5cff","#36d1c4","#ff5c7c","#2bbf4e","#5c8bff","#33272f"].map(c=>`<div class="swatch ${u.bgColor===c&&!u.bgTheme?'sel':''}" style="background:${c}" data-action="bgcolor" data-c="${c}"></div>`).join("")}</div></div>
-    <button class="btn primary block" data-action="savecustom">Save profile</button>`);
-  window._bgColor=u.bgColor||""; window._bgTheme=u.bgTheme||""; window._avatar=null; window._bannerFile=null; window._pageBgFile=null; window._bgMode=u.pageBgMode||"stretch";
+    <button class="btn primary block" data-action="savecustom">Save profile</button>
+    <button class="btn block" data-action="openresetcustom" style="margin-top:10px;color:#c0392b;border-color:#f5c6c6">🔄 Reset page to default</button>`);
+  window._bgColor=u.bgColor||""; window._bgTheme=u.bgTheme||""; window._avatar=null; window._bannerFile=null; window._pageBgFile=null; window._bgMode=u.pageBgMode||"stretch"; window._clearBanner=false; window._clearPageBg=false;
+}
+function removeBanner(){
+  window._bannerFile=null; window._clearBanner=true;
+  const p=$("bannerPrev"); if(p){ p.style.backgroundImage=""; p.style.background="linear-gradient(135deg,var(--orange-2),var(--orange-3))"; const h=p.querySelector(".cust-hint"); if(h) h.style.opacity="1"; const rb=p.querySelector(".cust-remove-btn"); if(rb) rb.remove(); }
+  const u=$("bannerUrl"); if(u) u.value="";
+}
+function removePageBg(){
+  window._pageBgFile=null; window._clearPageBg=true;
+  const p=$("pageBgPrev"); if(p){ p.style.backgroundImage=""; p.style.background="var(--orange-1)"; const h=p.querySelector(".cust-hint"); if(h) h.style.opacity="1"; const rb=p.querySelector(".cust-remove-btn"); if(rb) rb.remove(); }
+  const u=$("pageBgUrl"); if(u) u.value="";
+}
+function openResetCustom(){
+  openOverlay(`<h2>🔄 Reset page to default?</h2>
+    <p style="margin:10px 0 22px;color:var(--muted);line-height:1.5">This removes your banner photo, page background, colour theme and solid colour.<br>Your profile photo and bio will be kept.</p>
+    <div style="display:flex;gap:10px">
+      <button class="btn block" data-action="close">Cancel</button>
+      <button class="btn block" data-action="resetcustom" style="color:#c0392b;border-color:#f5c6c6">Yes, reset</button>
+    </div>`);
+}
+async function resetCustom(){
+  if(!ME) return;
+  const upd={ bgImg:"", pageBgImg:"", pageBgMode:"stretch", bgColor:"", bgTheme:"" };
+  try{
+    await fbDB.collection("users").doc(ME.id).set(upd,{merge:true});
+    Object.assign(ME,upd); _clearBg(); closeOverlay(); toast("Page reset to default ✓");
+    go("profile",{profileId:ME.id});
+  }catch(e){ toast("Reset failed: "+(e.code||e.message)); }
 }
 function setBgMode(mode){
   window._bgMode=mode;
@@ -821,11 +844,13 @@ async function saveCustom(){
   if(window._bannerFile){
     try{ if(saveBtn) saveBtn.textContent="Uploading banner…"; upd.bgImg=await uploadMediaToCloudinary(window._bannerFile); }
     catch(e){ if(saveBtn){saveBtn.disabled=false;saveBtn.textContent="Save profile";} return toast("Banner upload failed: "+(e.message||e)); }
-  } else { const v=($("bannerUrl")||{value:""}).value.trim(); if(v) upd.bgImg=v; }
+  } else if(window._clearBanner){ upd.bgImg=""; }
+  else { const v=($("bannerUrl")||{value:""}).value.trim(); if(v) upd.bgImg=v; }
   if(window._pageBgFile){
     try{ if(saveBtn) saveBtn.textContent="Uploading background…"; upd.pageBgImg=await uploadMediaToCloudinary(window._pageBgFile); }
     catch(e){ if(saveBtn){saveBtn.disabled=false;saveBtn.textContent="Save profile";} return toast("Background upload failed: "+(e.message||e)); }
-  } else { const v=($("pageBgUrl")||{value:""}).value.trim(); if(v) upd.pageBgImg=v; }
+  } else if(window._clearPageBg){ upd.pageBgImg=""; }
+  else { const v=($("pageBgUrl")||{value:""}).value.trim(); if(v) upd.pageBgImg=v; }
   fbDB.collection("users").doc(ME.id).set(upd,{merge:true})
     .then(()=>{ Object.assign(ME,upd); closeOverlay(); toast("Profile saved ✨"); go("profile",{profileId:ME.id}); })
     .catch(e=>{ if(saveBtn){saveBtn.disabled=false;saveBtn.textContent="Save profile";} toast("Couldn't save: "+(e.code||e.message)); });
@@ -1279,7 +1304,7 @@ document.addEventListener("click",e=>{
     auth:()=>{ if(el.dataset.p==="google") signInGoogle(); else toast("Apple sign-in needs a paid Apple Developer account — coming later. Use Google or email 🙂"); },
     authemail:()=>openEmailAuth(($("liEmail").value||"").trim()), emailgo:()=>emailGo(el.dataset.mode), finishonboard:()=>finishOnboard(),
     sharefolder:shareMusicFolder, savemobilepl:saveMobilePlaylist, setthumbs:()=>setThumbsFolder(el.dataset.pl), relink:()=>relinkFolder(el.dataset.pl), playfile:()=>playFolderTrack(el.dataset.pl,el.dataset.file),
-    upload:openUpload, dopublish:doPublish, customize:openCustomize, savecustom:saveCustom, invite:openInvite, setbgmode:()=>setBgMode(el.dataset.mode),
+    upload:openUpload, dopublish:doPublish, customize:openCustomize, savecustom:saveCustom, openresetcustom:openResetCustom, resetcustom:resetCustom, removebanner:removeBanner, removepagebg:removePageBg, invite:openInvite, setbgmode:()=>setBgMode(el.dataset.mode),
     copyinvite:()=>{ const i=$("invLink"); i.select(); if(navigator.clipboard)navigator.clipboard.writeText(i.value); toast("Invite link copied ✓"); },
     play:()=>playTrack(el.dataset.id), like:()=>toggleLike(el.dataset.id), dislike:()=>toggleDislike(el.dataset.id),
     poststatus:postStatus, slike:()=>stLike(el.dataset.id), sdislike:()=>stDislike(el.dataset.id), scomment:()=>stComment(el.dataset.id),
@@ -1323,8 +1348,8 @@ document.addEventListener("change",e=>{
   if(e.target.id==="covFile"){ const f=e.target.files[0]; if(!f) return; const r=new FileReader(); r.onload=()=>{ window._trackCover=r.result; const p=$("covPrev"); if(p){ p.style.backgroundImage=`url('${r.result}')`; p.style.backgroundSize="cover"; p.style.backgroundPosition="center"; p.style.background=""; p.textContent=""; } }; r.readAsDataURL(f); }
   if(e.target.id==="audioFile"){ const f=e.target.files[0]; if(!f) return; window._audioFile=f; const fn=$("audioFilename"); if(fn) fn.textContent="✓ "+f.name+" ("+Math.round(f.size/1024)+" KB)"; }
   if(e.target.id==="mpPhotoFile"){ const f=e.target.files[0]; if(!f) return; const r=new FileReader(); r.onload=()=>{ window._mpPhoto=r.result; const p=$("mpPhotoPrev"); if(p){ p.style.backgroundImage=`url('${r.result}')`; p.style.backgroundSize="cover"; p.style.backgroundPosition="center"; p.textContent=""; } }; r.readAsDataURL(f); }
-  if(e.target.id==="bannerFile"){ const f=e.target.files[0]; if(!f) return; window._bannerFile=f; const p=$("bannerPrev"); if(p){ const url=URL.createObjectURL(f); p.style.backgroundImage=`url('${url}')`; p.style.backgroundSize="cover"; p.style.backgroundPosition="center"; const h=p.querySelector(".cust-hint"); if(h) h.style.opacity="0"; } }
-  if(e.target.id==="pageBgFile"){ const f=e.target.files[0]; if(!f) return; window._pageBgFile=f; const p=$("pageBgPrev"); if(p){ const url=URL.createObjectURL(f); p.style.backgroundImage=`url('${url}')`; p.style.backgroundSize="cover"; p.style.backgroundPosition="center"; const h=p.querySelector(".cust-hint"); if(h) h.style.opacity="0"; } }
+  if(e.target.id==="bannerFile"){ const f=e.target.files[0]; if(!f) return; window._bannerFile=f; window._clearBanner=false; const p=$("bannerPrev"); if(p){ const url=URL.createObjectURL(f); p.style.backgroundImage=`url('${url}')`; p.style.backgroundSize="cover"; p.style.backgroundPosition="center"; const h=p.querySelector(".cust-hint"); if(h) h.style.opacity="0"; } }
+  if(e.target.id==="pageBgFile"){ const f=e.target.files[0]; if(!f) return; window._pageBgFile=f; window._clearPageBg=false; const p=$("pageBgPrev"); if(p){ const url=URL.createObjectURL(f); p.style.backgroundImage=`url('${url}')`; p.style.backgroundSize="cover"; p.style.backgroundPosition="center"; const h=p.querySelector(".cust-hint"); if(h) h.style.opacity="0"; } }
 });
 $("overlay").addEventListener("click",e=>{ if(e.target.id==="overlay") closeOverlay(); });
 document.addEventListener("keydown",e=>{ if(e.key==="Escape") closeOverlay(); });
