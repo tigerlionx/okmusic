@@ -96,6 +96,19 @@ let state={ view:"discover", profileId:null, query:"" };
 let playMode="continuous"; // "continuous" | "repeat" | "shuffle"
 let nowPlayingId=null;
 function go(v,x={}){ state={ ...state, view:v, ...x }; render(); window.scrollTo(0,0); }
+function applyMyBackground(){
+  if(ME&&ME.pageBgImg){
+    document.body.style.backgroundImage=`url('${ME.pageBgImg}')`;
+    document.body.style.backgroundSize="cover";
+    document.body.style.backgroundPosition="center";
+    document.body.style.backgroundAttachment="fixed";
+  } else {
+    document.body.style.backgroundImage="";
+    document.body.style.backgroundSize="";
+    document.body.style.backgroundPosition="";
+    document.body.style.backgroundAttachment="";
+  }
+}
 function render(){
   if(!ME){ renderLanding(); return; }
   if(!ME.handle){ renderLanding(); openOnboard(); return; }   // signed in but no profile yet
@@ -170,7 +183,7 @@ async function finishOnboard(){
     await fbDB.collection("users").doc(uid).set(prof);
     ME={ id:uid, ...prof }; syncME(); closeOverlay();
     // Send welcome notification
-    fbDB.collection("notifications").add({ forUid:uid, type:"welcome", fromUid:"platform", fromName:"OK Music", text:"👋 Welcome to OK Music! Tap here to read your getting-started guide.", time:Date.now(), read:false }).catch(()=>{});
+    fbDB.collection("notifications").add({ forUid:uid, type:"welcome", fromUid:"platform", fromName:"OK Music", text:"👋 Welcome to OK Music! Tap here for your complete guide — music, chat, calls, marketplace & more.", time:Date.now(), read:false }).catch(()=>{});
     showWelcomeGuide(name);
   }catch(e){ toast("Couldn't save profile: "+(e.code||e.message)); }
 }
@@ -180,56 +193,96 @@ function showWelcomeGuide(name){
     <div class="wg-header">
       <div style="font-size:36px">🎵</div>
       <h2>Welcome to OK Music, ${esc(name)}!</h2>
-      <p class="sub">Everything you need to know to get started.</p>
+      <p class="sub">Your complete guide — everything you need to enjoy the platform.</p>
     </div>
 
     <div class="wg-section">
       <div class="wg-icon">🎵</div>
       <div><b>Share a single track</b><br>
-      Tap <b>"Add single track"</b> in the sidebar. Upload an audio file directly from your phone or computer, or paste a public link (SoundCloud, Google Drive, etc.). Add a cover photo, pick a genre, and choose Public or Private. Your track appears on your profile instantly.</div>
+      Tap <b>"Add single track"</b> in the sidebar. Upload an audio file (MP3, M4A, WAV, FLAC…) from your phone or computer — it uploads to the cloud automatically so fans on <em>any</em> device can play it. Or paste a public streaming link (SoundCloud, Google Drive, Dropbox, etc.). Add a cover photo, pick a genre, set Public or Private, then publish.</div>
     </div>
 
     <div class="wg-section">
       <div class="wg-icon">📁</div>
-      <div><b>Share folders (playlists &amp; albums)</b><br>
-      Tap <b>"Add a folder"</b> to share an entire music folder at once. On <b>mobile</b>: select multiple audio files — they become a playlist. On <b>desktop</b> (Chrome/Edge): pick a whole folder from your computer, Google Drive, Dropbox, or iCloud. Tracks are cached after the first play and work offline.</div>
+      <div><b>Share a folder / album / playlist</b><br>
+      Tap <b>"Add a folder"</b> to upload a whole set of tracks at once. On <b>mobile</b>: select multiple audio files and give them a playlist name. On <b>desktop</b> (Chrome / Edge): pick an entire folder from your computer, Google Drive, Dropbox, or iCloud. Every track uploads to the cloud so it plays on all devices — for you and your fans.</div>
     </div>
 
     <div class="wg-section">
-      <div class="wg-icon">👥</div>
-      <div><b>Build your fanbase</b><br>
-      Go to <b>Discover</b> to find and follow other artists. Post <b>statuses</b> on your Wall to talk to your fans. Share your <b>invite link</b> (Invite Friends) on social media to grow your audience. Fans can like, dislike, and comment on your music and posts.</div>
+      <div class="wg-icon">☁️</div>
+      <div><b>Cloud storage — always in sync</b><br>
+      All uploaded audio is stored securely in the cloud. Your music plays on your phone, your laptop, your tablet — and on any fan's device — without re-uploading. If you have old tracks that say <b>"Local only"</b>, tap <b>"☁️ Move to cloud"</b> next to the track in <b>My Music</b> to migrate them.</div>
+    </div>
+
+    <div class="wg-section">
+      <div class="wg-icon">▶️</div>
+      <div><b>Playback &amp; mini-player</b><br>
+      Tap any track art or title to play. The <b>mini-player</b> stays at the bottom of the screen while you browse. Use the <b>🔁 mode button</b> to switch between:<br>
+      &nbsp;• <b>Continuous</b> — plays the whole playlist in order<br>
+      &nbsp;• <b>🔀 Shuffle</b> — random order<br>
+      &nbsp;• <b>🔂 Repeat one</b> — loops the current track<br>
+      Tap the progress bar to seek. Tracks are cached after the first play for offline listening.</div>
     </div>
 
     <div class="wg-section">
       <div class="wg-icon">🎨</div>
-      <div><b>Personalise your profile</b><br>
-      Go to <b>"Edit profile"</b> to upload a profile photo, write your bio, and choose a background theme, colour, or banner image. Make your page unique so fans remember you.</div>
+      <div><b>Personalise your page</b><br>
+      Go to <b>"Edit profile"</b> (sidebar or your page) to:<br>
+      &nbsp;• Upload a <b>profile photo</b> or paste a photo link<br>
+      &nbsp;• Write your <b>bio</b><br>
+      &nbsp;• Set a <b>banner image</b> at the top of your page — concert photo, album art, anything wide and bold<br>
+      &nbsp;• Set a <b>page background image</b> that fills the whole page for every visitor<br>
+      &nbsp;• Choose a <b>colour theme</b> or a solid colour for the banner if you prefer<br>
+      All changes are saved to the cloud and visible to every fan on every device instantly.</div>
+    </div>
+
+    <div class="wg-section">
+      <div class="wg-icon">👥</div>
+      <div><b>Discover, follow &amp; grow your fanbase</b><br>
+      Go to <b>Discover</b> to browse all artists and tracks. Use the search bar to find someone by name. Click <b>Follow</b> on any profile to become a fan — they'll get a notification. Post <b>statuses</b> on your Wall to talk directly to your followers. Share your <b>invite link</b> (Invite Friends in the sidebar) on social media to bring more fans in. Fans can <b>like, dislike, and comment</b> on your tracks and posts.</div>
+    </div>
+
+    <div class="wg-section">
+      <div class="wg-icon">🔥</div>
+      <div><b>Buzzing &amp; My Feed</b><br>
+      <b>🔥 Buzzing</b> shows the hottest tracks on the platform right now, ranked by plays and likes — great for discovering new music.<br>
+      <b>🏠 My Feed</b> shows the latest posts and statuses from artists you follow, so you never miss an update from your favourite creators.</div>
+    </div>
+
+    <div class="wg-section">
+      <div class="wg-icon">💬</div>
+      <div><b>Private Messenger</b><br>
+      Go to any artist's profile and tap <b>💬 Message</b> to open a private chat. All your conversations are in the <b>💬 Messages</b> tab — new messages show an unread badge.<br><br>
+      Inside a chat you can:<br>
+      &nbsp;• <b>Edit</b> a message you sent (tap ✏️)<br>
+      &nbsp;• <b>Delete for me</b> — removes it from your view only<br>
+      &nbsp;• <b>Delete for everyone</b> — removes it for both sides<br>
+      You hear a <b>ping sound</b> when a new message arrives.</div>
+    </div>
+
+    <div class="wg-section">
+      <div class="wg-icon">📞</div>
+      <div><b>Free voice calls</b><br>
+      Inside any chat, tap <b>📞 Call</b> to start a free real-time voice call. The other person hears a <b>ring tone</b> and sees an incoming call screen — they can tap <b>✅ Accept</b> or <b>❌ Decline</b>. During the call you can <b>mute</b> yourself and see a live call timer. Calls work peer-to-peer over the internet — completely free.</div>
     </div>
 
     <div class="wg-section wg-market">
       <div class="wg-icon">🛍️</div>
       <div><b>Marketplace — buy &amp; sell</b><br>
-      Click <b>MARKETPLACE</b> in the sidebar. You have two options:<br><br>
-      <b>🏪 Sell:</b> Open your store by entering your store name, location, and Payoneer email. List products with photos, a description, and your price. You set your own <b>shipping &amp; handling costs</b> — delivery is entirely your responsibility. You receive <b>97% of each sale</b> (3% platform fee) paid to your Payoneer account within 1–2 business days after payment clears.<br><br>
-      <b>🛒 Buy:</b> Browse all products, search by name or seller, click any photo to zoom and read the full description, add items to your cart. At checkout you provide your shipping address. Payment is made via <b>Payoneer</b> to the platform, which forwards your order to the seller.</div>
-    </div>
-
-    <div class="wg-section wg-market">
-      <div class="wg-icon">💬</div>
-      <div><b>Private Messenger &amp; Voice Calls</b><br>
-      You can message any member of the community privately. Go to any artist's profile and tap <b>💬 Message</b> to open a direct chat. Your conversations appear in the <b>💬 Messages</b> tab in the sidebar — new messages show an unread badge so you never miss one.<br><br>
-      <b>📞 Voice calls:</b> Inside any chat, tap <b>📞 Call</b> to start a free voice call with that person in real time. If someone calls you, an incoming call overlay appears on screen — tap <b>✅ Accept</b> to connect or <b>❌ Decline</b> to ignore. You can mute yourself during a call and see how long you've been talking.</div>
+      Click <b>MARKETPLACE</b> in the sidebar.<br><br>
+      <b>🏪 Sell:</b> Open your store — enter a store name, location, and Payoneer email. List products with photos, description, and price. You set your own shipping &amp; handling costs. You receive <b>97% of every sale</b> (3% platform fee) paid to your Payoneer account within 1–2 business days.<br><br>
+      <b>🛒 Buy:</b> Browse all products, search by name or seller, tap any photo to zoom, add to cart. At checkout provide your shipping address. Payment goes via <b>Payoneer</b> and your order is forwarded to the seller.</div>
     </div>
 
     <div class="wg-section">
       <div class="wg-icon">💡</div>
       <div><b>Good to know</b><br>
-      • Click any profile photo to view it full size<br>
-      • <b>Buzzing</b> shows the hottest tracks ranked by plays &amp; likes<br>
-      • <b>My Feed</b> shows posts from artists you follow<br>
-      • Use <b>Suggest a Feature</b> to send us your ideas — we read every one<br>
-      • Your music and playlists are yours — only you can delete them</div>
+      • Tap any profile photo to view it full size<br>
+      • Your music is yours — only you can edit or delete your tracks<br>
+      • <b>🔒 Private</b> tracks are visible only to you<br>
+      • Add a streaming link to any existing track: go to <b>My Music</b>, tap the track menu, choose <b>🔗 Add streaming link</b><br>
+      • Use <b>💡 Suggest a Feature</b> in the sidebar to send us ideas — we read every one<br>
+      • Log in with Google or email on any device to access your full profile and music</div>
     </div>
 
     <button class="btn primary block" data-action="close" style="margin-top:20px;font-size:16px;padding:14px">Let's go! 🚀</button>
@@ -270,11 +323,12 @@ function renderApp(){
       </nav>
       <main class="main"><div class="page" id="page"></div></main>
     </div>`;
+  applyMyBackground();
   renderMain();
   setTimeout(()=>{ const s=$("search"); if(s) s.oninput=e=>{ state.query=e.target.value; if(state.view!=="discover") state.view="discover"; renderMain(); }; },0);
 }
 function renderMain(){
-  if(state.view!=="profile"){ document.body.style.backgroundImage=""; document.body.style.backgroundSize=""; document.body.style.backgroundPosition=""; document.body.style.backgroundAttachment=""; }
+  if(state.view!=="profile") applyMyBackground();
   if(state.view==="profile") return renderProfile(state.profileId);
   if(state.view==="mymusic") return renderMyMusic();
   if(state.view==="fans") return renderFans();
@@ -334,8 +388,10 @@ function renderProfile(uid){
   const me=currentUser(); const mine=me&&me.id===uid;
   const themeCSS=u.bgTheme?(THEMES.find(t=>t.id===u.bgTheme)||{}).css:"";
   const cover=u.bgImg?`background-image:url('${u.bgImg}');background-size:cover;background-position:center`:themeCSS?`background:${themeCSS}`:u.bgColor?`background:${u.bgColor}`:"";
-  if(u.pageBgImg){ document.body.style.backgroundImage=`url('${u.pageBgImg}')`; document.body.style.backgroundSize="cover"; document.body.style.backgroundPosition="center"; document.body.style.backgroundAttachment="fixed"; }
-  else { document.body.style.backgroundImage=""; document.body.style.backgroundSize=""; document.body.style.backgroundPosition=""; document.body.style.backgroundAttachment=""; }
+  // Apply page background: profile owner's if set, otherwise fall back to the logged-in user's own background
+  const pageBg=u.pageBgImg||(mine&&ME?.pageBgImg)||"";
+  if(pageBg){ document.body.style.backgroundImage=`url('${pageBg}')`; document.body.style.backgroundSize="cover"; document.body.style.backgroundPosition="center"; document.body.style.backgroundAttachment="fixed"; }
+  else applyMyBackground();
   const tracks=tracksByUser(uid,mine); const pls=playlistsByUser(uid); const sts=statusesByUser(uid);
   const headActions=mine
     ? `<button class="btn primary" data-action="customize">🎨 Edit profile</button><button class="btn" data-action="invite">✉️ Invite</button>`
@@ -850,7 +906,7 @@ async function broadcastWelcome(){
   if(!isAdmin()) return;
   const users=Object.values(CACHE.users).filter(u=>u.id&&!String(u.id).startsWith("u_"));
   if(!users.length) return toast("No users loaded yet — wait a moment and try again.");
-  const text="📖 OK Music Guide updated! Share music, playlists, buy & sell in the Marketplace, and now send private messages & voice call any member. Tap to open the guide.";
+  const text="📖 OK Music Guide updated! Cloud music, custom banners & page backgrounds, private chat with edit/delete, free voice calls, Marketplace & more. Tap to read the full guide.";
   let sent=0;
   for(const u of users){
     try{
