@@ -96,31 +96,24 @@ let state={ view:"discover", profileId:null, query:"" };
 let playMode="continuous"; // "continuous" | "repeat" | "shuffle"
 let nowPlayingId=null;
 function go(v,x={}){ state={ ...state, view:v, ...x }; render(); window.scrollTo(0,0); }
-function _setBgStyle(img, mode){
-  document.body.style.backgroundImage=`url('${img}')`;
-  document.body.style.backgroundAttachment="fixed";
-  if(mode==="tile"){
-    document.body.style.backgroundSize="auto";
-    document.body.style.backgroundRepeat="repeat";
-    document.body.style.backgroundPosition="top left";
-  } else if(mode==="center"){
-    document.body.style.backgroundSize="auto";
-    document.body.style.backgroundRepeat="no-repeat";
-    document.body.style.backgroundPosition="center center";
-  } else {
-    document.body.style.backgroundSize="cover";
-    document.body.style.backgroundRepeat="no-repeat";
-    document.body.style.backgroundPosition="center";
-  }
-  document.body.classList.add("has-page-bg");
+function _getBgLayer(){
+  let el=document.getElementById("page-bg-layer");
+  if(!el){ el=document.createElement("div"); el.id="page-bg-layer"; el.style.cssText="display:none;position:fixed;inset:0;z-index:-1;background-attachment:fixed;pointer-events:none;"; document.body.prepend(el); }
+  return el;
+}
+function _setBgStyle(img, mode, f){
+  const el=_getBgLayer();
+  el.style.backgroundImage=`url('${img}')`;
+  if(mode==="tile"){ el.style.backgroundSize="auto"; el.style.backgroundRepeat="repeat"; el.style.backgroundPosition="top left"; }
+  else if(mode==="center"){ el.style.backgroundSize="auto"; el.style.backgroundRepeat="no-repeat"; el.style.backgroundPosition="center center"; }
+  else { el.style.backgroundSize="cover"; el.style.backgroundRepeat="no-repeat"; el.style.backgroundPosition="center"; }
+  const bf=f||{}; const br=(bf.brightness!=null?bf.brightness:100)/100; const co=(bf.contrast!=null?bf.contrast:100)/100; const sa=(bf.saturate!=null?bf.saturate:100)/100;
+  el.style.filter=`brightness(${br}) contrast(${co}) saturate(${sa})`; el.style.opacity=(bf.opacity!=null?bf.opacity:100)/100;
+  el.style.display="block"; document.body.style.backgroundImage=""; document.body.classList.add("has-page-bg");
 }
 function _clearBg(){
-  document.body.style.backgroundImage="";
-  document.body.style.backgroundSize="";
-  document.body.style.backgroundRepeat="";
-  document.body.style.backgroundPosition="";
-  document.body.style.backgroundAttachment="";
-  document.body.classList.remove("has-page-bg");
+  const el=document.getElementById("page-bg-layer"); if(el) el.style.display="none";
+  document.body.style.backgroundImage=""; document.body.classList.remove("has-page-bg");
 }
 function render(){
   if(!ME){ renderLanding(); return; }
@@ -176,7 +169,7 @@ function emailGo(mode){
   });
 }
 async function loadProfile(uid){ try{ const s=await fbDB.collection("users").doc(uid).get(); return s.exists?{ id:uid, ...s.data() }:null; }catch(e){ console.warn(e); return null; } }
-function syncME(){ const d=db(); if(ME){ d.session=ME.id; d.usersById[ME.id]={ id:ME.id, name:ME.name, handle:ME.handle, bio:ME.bio, color:ME.color, avatarImg:ME.avatarImg, bgColor:ME.bgColor, bgImg:ME.bgImg, pageBgImg:ME.pageBgImg||"", pageBgMode:ME.pageBgMode||"stretch" }; } else d.session=null; commit(d); }
+function syncME(){ const d=db(); if(ME){ d.session=ME.id; d.usersById[ME.id]={ id:ME.id, name:ME.name, handle:ME.handle, bio:ME.bio, color:ME.color, avatarImg:ME.avatarImg, bgColor:ME.bgColor, bgImg:ME.bgImg, pageBgImg:ME.pageBgImg||"", pageBgMode:ME.pageBgMode||"stretch", pageBgFilter:ME.pageBgFilter||{} }; } else d.session=null; commit(d); }
 function openOnboard(){
   openOverlay(`<h2>Welcome to OK Music 👋</h2><p class="sub">Pick a name and handle to set up your creator profile.</p>
     <div class="field"><label>Display name</label><input class="fb-field" id="obName" placeholder="e.g. Emmanuel Leveille" value="${esc((ME&&ME.name)||'')}" /></div>
@@ -403,7 +396,7 @@ function renderProfile(uid){
   // Each profile shows only its own background — no cross-user leaking
   const pageBg=u.pageBgImg||"";
   const bgMode=u.pageBgMode||"stretch";
-  if(pageBg){ _setBgStyle(pageBg,bgMode); }
+  if(pageBg){ _setBgStyle(pageBg,bgMode,u.pageBgFilter||{}); }
   else _clearBg();
   const tracks=tracksByUser(uid,mine); const pls=playlistsByUser(uid); const sts=statusesByUser(uid);
   const headActions=mine
@@ -769,7 +762,7 @@ async function saveTrackLink(trackId){
 
 // ---------- edit profile (photo + bg + bio) ----------
 function openCustomize(){
-  const u=currentUser();
+  const u=currentUser(); const bgF=u.pageBgFilter||{};
   const bannerStyle=u.bgImg?`background-image:url('${u.bgImg}');background-size:cover;background-position:center`:`background:linear-gradient(135deg,var(--orange-2),var(--orange-3))`;
   const pageBgStyle=u.pageBgImg?`background-image:url('${u.pageBgImg}');background-size:cover;background-position:center`:`background:var(--orange-1)`;
   openOverlay(`<h2>🎨 Edit profile</h2><p class="sub">Make your page unique — fans see all of this on any device.</p>
@@ -794,6 +787,11 @@ function openCustomize(){
         <button class="bg-mode-btn ${(u.pageBgMode||'')==='tile'?'sel':''}" data-action="setbgmode" data-mode="tile">▦ Tile</button>
         <button class="bg-mode-btn ${(u.pageBgMode||'')==='center'?'sel':''}" data-action="setbgmode" data-mode="center">⊡ Center</button>
       </div>
+      <label style="margin-top:12px;display:block;font-size:13px;color:var(--muted)">🎛️ Adjustments</label>
+      <div class="adj-row"><span class="adj-label">☀️ Brightness</span><input type="range" id="adjBrightness" class="adj-slider" min="0" max="200" value="${bgF.brightness!=null?bgF.brightness:100}" /><span class="adj-val" id="adjBrightnessVal">${bgF.brightness!=null?bgF.brightness:100}%</span></div>
+      <div class="adj-row"><span class="adj-label">◑ Contrast</span><input type="range" id="adjContrast" class="adj-slider" min="0" max="200" value="${bgF.contrast!=null?bgF.contrast:100}" /><span class="adj-val" id="adjContrastVal">${bgF.contrast!=null?bgF.contrast:100}%</span></div>
+      <div class="adj-row"><span class="adj-label">🎨 Color</span><input type="range" id="adjSaturate" class="adj-slider" min="0" max="200" value="${bgF.saturate!=null?bgF.saturate:100}" /><span class="adj-val" id="adjSaturateVal">${bgF.saturate!=null?bgF.saturate:100}%</span></div>
+      <div class="adj-row"><span class="adj-label">◻ Transparency</span><input type="range" id="adjOpacity" class="adj-slider" min="10" max="100" value="${bgF.opacity!=null?bgF.opacity:100}" /><span class="adj-val" id="adjOpacityVal">${bgF.opacity!=null?bgF.opacity:100}%</span></div>
     </div>
     <div class="field"><label>Banner colour (if no photo)</label>
       <div class="theme-grid" id="themeGrid">${THEMES.map(t=>`<div class="theme-swatch ${(u.bgTheme||"")===t.id?'sel':''}" style="background:${t.css}" data-action="theme" data-t="${t.id}" title="${t.label}"><span class="theme-label">${t.label}</span></div>`).join("")}</div></div>
@@ -822,7 +820,7 @@ function openResetCustom(){
 }
 async function resetCustom(){
   if(!ME) return;
-  const upd={ bgImg:"", pageBgImg:"", pageBgMode:"stretch", bgColor:"", bgTheme:"" };
+  const upd={ bgImg:"", pageBgImg:"", pageBgMode:"stretch", bgColor:"", bgTheme:"", pageBgFilter:{} };
   try{
     await fbDB.collection("users").doc(ME.id).set(upd,{merge:true});
     Object.assign(ME,upd); _clearBg(); closeOverlay(); toast("Page reset to default ✓");
@@ -839,6 +837,7 @@ async function saveCustom(){
   if(saveBtn){ saveBtn.disabled=true; saveBtn.textContent="Saving…"; }
   const url=($("avUrl").value||"").trim();
   const upd={ bio:($("bgBio").value||"").trim()||ME.bio||"", bgColor:window._bgTheme?"":(window._bgColor||""), bgTheme:window._bgTheme||"", pageBgMode:window._bgMode||"stretch" };
+  upd.pageBgFilter={ brightness:parseInt(($("adjBrightness")||{value:"100"}).value)||100, contrast:parseInt(($("adjContrast")||{value:"100"}).value)||100, saturate:parseInt(($("adjSaturate")||{value:"100"}).value)||100, opacity:parseInt(($("adjOpacity")||{value:"100"}).value)||100 };
   if(window._avatar){ if(window._avatar.length>700000){ if(saveBtn){saveBtn.disabled=false;saveBtn.textContent="Save profile";} return toast("Photo too big — paste a link instead."); } upd.avatarImg=window._avatar; }
   else if(url) upd.avatarImg=url;
   if(window._bannerFile){
@@ -1353,6 +1352,16 @@ document.addEventListener("change",e=>{
 });
 $("overlay").addEventListener("click",e=>{ if(e.target.id==="overlay") closeOverlay(); });
 document.addEventListener("keydown",e=>{ if(e.key==="Escape") closeOverlay(); });
+document.addEventListener("input",e=>{
+  if(!["adjBrightness","adjContrast","adjSaturate","adjOpacity"].includes(e.target.id)) return;
+  const vEl=document.getElementById(e.target.id+"Val"); if(vEl) vEl.textContent=e.target.value+"%";
+  const br=parseInt(($("adjBrightness")||{value:"100"}).value)/100;
+  const co=parseInt(($("adjContrast")||{value:"100"}).value)/100;
+  const sa=parseInt(($("adjSaturate")||{value:"100"}).value)/100;
+  const op=parseInt(($("adjOpacity")||{value:"100"}).value)/100;
+  const prev=$("pageBgPrev"); if(prev){ prev.style.filter=`brightness(${br}) contrast(${co}) saturate(${sa})`; prev.style.opacity=op; }
+  const bgEl=document.getElementById("page-bg-layer"); if(bgEl){ bgEl.style.filter=`brightness(${br}) contrast(${co}) saturate(${sa})`; bgEl.style.opacity=op; }
+});
 
 // ---------- live Firestore listeners (shared data) ----------
 let _rt=null;
