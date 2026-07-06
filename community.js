@@ -91,8 +91,9 @@ let toastTimer; function toast(m){ const e=$("toast"); e.textContent=m; e.hidden
 // ---------- state ----------
 let ME=null;                                   // the signed-in user's profile (Firebase)
 // live shared data, kept in sync by Firestore listeners
-const CACHE={ users:{}, tracks:[], statuses:[], follows:{}, reactions:{}, comments:[], notifications:[], products:[], sellers:{}, orders:[], convos:{} };
-let state={ view:"discover", profileId:null, query:"" };
+const CACHE={ users:{}, tracks:[], statuses:[], follows:{}, reactions:{}, comments:[], notifications:[], products:[], sellers:{}, orders:[], convos:{}, suggestions:[] };
+let state={ view:"discover", profileId:null, query:"", cart:JSON.parse(localStorage.getItem("okmusic_cart")||"[]") };
+function persistCart(){ try{ localStorage.setItem("okmusic_cart",JSON.stringify(state.cart||[])); }catch(e){} }
 let playMode="continuous"; // "continuous" | "repeat" | "shuffle"
 let nowPlayingId=null;
 function go(v,x={}){ state={ ...state, view:v, ...x }; render(); window.scrollTo(0,0); }
@@ -323,6 +324,7 @@ function renderApp(){
         <div class="side-item" data-action="invite"><span class="ic">✉️</span>Invite friends</div>
         <div class="side-item" data-action="suggest"><span class="ic">💡</span>Suggest a feature</div>
         <div class="side-item ${state.view==='marketplace'||state.view==='mystore'||state.view==='cart'?'active':''}" data-action="openmarketplace"><span class="ic">🛍️</span>MARKETPLACE</div>
+        ${(()=>{const myOrders=(CACHE.orders||[]).filter(o=>o.buyerId===ME?.id);return myOrders.length?`<div class="side-item ${state.view==='myorders'?'active':''}" data-action="nav" data-view="myorders"><span class="ic">📦</span>My Orders (${myOrders.length})</div>`:'';})()}
         ${isAdmin()?`<div class="side-item ${state.view==='admin'?'active':''}" data-action="nav" data-view="admin"><span class="ic">📊</span>Admin Stats</div>`:''}
         <div class="side-sep"></div>
         <div class="side-item" data-action="logout"><span class="ic">↩️</span>Log out</div>
@@ -333,6 +335,7 @@ function renderApp(){
   setTimeout(()=>{ const s=$("search"); if(s) s.oninput=e=>{ state.query=e.target.value; if(state.view!=="discover") state.view="discover"; renderMain(); }; },0);
 }
 function renderMain(){
+  if(state.view!=="chat" && msgUnsub){ msgUnsub(); msgUnsub=null; }
   if(ME && ME.pageBgImg){ _setBgStyle(ME.pageBgImg, ME.pageBgMode||"stretch", ME.pageBgFilter||{}); }
   else _clearBg();
   if(state.view==="profile") return renderProfile(state.profileId);
@@ -346,6 +349,7 @@ function renderMain(){
   if(state.view==="marketplace") return renderMarketplace();
   if(state.view==="mystore") return renderSellerStore();
   if(state.view==="cart") return renderCart();
+  if(state.view==="myorders") return renderMyOrders();
   if(state.view==="admin"&&isAdmin()) return renderAdmin();
   renderDiscover();
 }
@@ -471,11 +475,32 @@ function stComment(id){ const el=$("sc_"+id); const t=(el?.value||"").trim(); if
   if(!ME) return openEmailAuth();
   fbDB.collection("comments").add({ statusId:id, uid:ME.id, name:ME.name, text:t, time:Date.now() }).catch(e=>toast(e.code||e.message));
   const s=allStatuses().find(x=>x.id===id); if(s) notify(s.userId,"comment",`${ME.name} commented: "${t.slice(0,50)}"`); }
-function editComment(cid){ const c=CACHE.comments.find(x=>x.id===cid); if(!c) return; if(!ME||c.uid!==ME.id) return;
-  const t=prompt("Edit your comment:", c.text); if(t==null) return; const v=t.trim(); if(!v) return toast("Comment can't be empty");
-  fbDB.collection("comments").doc(cid).update({ text:v, edited:true }).then(()=>toast("Comment updated")).catch(e=>toast(e.code||e.message)); }
-function deleteComment(cid){ const c=CACHE.comments.find(x=>x.id===cid); if(!ME||!c||c.uid!==ME.id) return; if(!confirm("Delete this comment?")) return;
-  fbDB.collection("comments").doc(cid).delete().then(()=>toast("Comment deleted")).catch(e=>toast(e.code||e.message)); }
+function editComment(cid){
+  const c=CACHE.comments.find(x=>x.id===cid); if(!c) return; if(!ME||c.uid!==ME.id) return;
+  openOverlay(`<h2>✏️ Edit comment</h2>
+    <div class="field"><textarea id="editCmtText" style="min-height:80px;width:100%">${esc(c.text)}</textarea></div>
+    <div style="display:flex;gap:8px;margin-top:4px">
+      <button class="btn primary" data-action="saveeditcmt" data-id="${cid}">Save</button>
+      <button class="btn" data-action="close">Cancel</button>
+    </div>`);
+  setTimeout(()=>{const t=$("editCmtText");if(t){t.focus();t.setSelectionRange(t.value.length,t.value.length);}},50);
+}
+async function saveEditComment(cid){
+  const text=($("editCmtText")||{value:""}).value.trim();
+  if(!text) return toast("Comment can't be empty.");
+  try{ await fbDB.collection("comments").doc(cid).update({text,edited:true}); closeOverlay(); toast("Comment updated"); }
+  catch(e){ toast("Couldn't edit: "+(e.code||e.message)); }
+}
+function deleteComment(cid){
+  const c=CACHE.comments.find(x=>x.id===cid); if(!ME||!c||c.uid!==ME.id) return;
+  openOverlay(`<h2>🗑️ Delete comment?</h2>
+    <p style="margin:10px 0 22px;color:var(--muted)">This cannot be undone.</p>
+    <div style="display:flex;gap:10px">
+      <button class="btn block" data-action="close">Cancel</button>
+      <button class="btn block" data-action="confirmdelcmt" data-id="${cid}" style="color:#c0392b;border-color:#f5c6c6">Yes, delete</button>
+    </div>`);
+}
+function doDeleteComment(cid){ fbDB.collection("comments").doc(cid).delete().then(()=>{ closeOverlay(); toast("Comment deleted"); }).catch(e=>toast(e.code||e.message)); }
 
 // ---------- track like/dislike (music = reactions only) ----------
 function toggleLike(id){ if(!ME) return openEmailAuth(); const F=firebase.firestore.FieldValue; const has=(CACHE.reactions["t_"+id]?.likes||[]).includes(ME.id);
@@ -606,7 +631,7 @@ function openUpload(){
     <div class="field"><label>Visibility</label><div class="radio-row" id="visRow"><div class="radio-card sel" data-action="vis" data-v="public"><b>Public</b>Everyone can play it</div><div class="radio-card" data-action="vis" data-v="private"><b>Private</b>Only you, until you publish</div></div></div>
     <label class="check"><input type="checkbox" id="upShare" checked> Allow fans to share this track</label>
     <button class="btn primary block" data-action="dopublish">Add to my music</button>`);
-  window._upColor=COLORS[0]; window._upVis="public"; window._trackCover=null; window._audioFile=null;
+  window._upColor=COLORS[0]; window._upVis="public"; window._trackCover=null; window._coverFile=null; window._audioFile=null;
 }
 function fileToArrayBuffer(file){
   if(file.arrayBuffer) return file.arrayBuffer();
@@ -614,8 +639,12 @@ function fileToArrayBuffer(file){
 }
 async function doPublish(){
   const title=($("upTitle").value||"").trim(); if(!title) return toast("Give it a title"); if(!ME) return openEmailAuth();
-  const coverImg=window._trackCover||"";
-  if(coverImg&&coverImg.length>900000) return toast("Cover photo is too large — use a smaller image (under ~600KB).");
+  let coverImg="";
+  if(window._coverFile){
+    const pubBtn=document.querySelector('[data-action="dopublish"]');
+    try{ if(pubBtn){pubBtn.disabled=true;pubBtn.textContent="Uploading cover…";} coverImg=await uploadMediaToCloudinary(window._coverFile); }
+    catch(e){ if(pubBtn){pubBtn.disabled=false;pubBtn.textContent="Add to my music";} return toast("Cover upload failed: "+(e.message||e)); }
+  } else if(window._trackCover&&window._trackCover.startsWith("http")){ coverImg=window._trackCover; }
   let src=($("upSrc").value||"").trim();
   if(src.startsWith("blob:")){ return toast("Blob URLs can't be shared — please use the 'Choose audio file' button to upload your file directly."); }
   if(src.startsWith("file://")){ return toast("Local file paths can't be shared — please use the 'Choose audio file' button to upload your file directly."); }
@@ -717,7 +746,8 @@ function renderMyMusic(){
   const localCount=tracks.filter(t=>t.src&&t.src.startsWith("local:")).length;
   const rows=tracks.map(t=>{
     const isLocal=t.src&&t.src.startsWith("local:");
-    return `<div class="mrow"><div class="mart" style="background:${grad(t.accent)}">◎</div>
+    const artStyle2=t.coverImg?`background-image:url('${t.coverImg}');background-size:cover;background-position:center`:`background:${grad(t.accent)}`;
+    return `<div class="mrow"><div class="mart" style="${artStyle2}" data-action="play" data-id="${t.id}">${t.coverImg?'':'◎'}</div>
     <div class="minfo"><div class="mt">${esc(t.title)}${isLocal?'<span class="local-badge">📵 Local only</span>':''}</div><div class="ms">▶ ${nfmt(playCount(t.id))} · 👍 ${nfmt(likeCount(t.id))} · 👎 ${nfmt(dislikeCount(t.id))} <span class="pill ${t.visibility==='private'?'prv':'pub'}">${t.visibility==='private'?'Private':'Public'}</span></div></div>
     ${isLocal?`<button class="btn sm primary" data-action="migratetrack" data-id="${t.id}" title="Upload this track to the cloud so all fans can hear it">☁️ Move to cloud</button><button class="btn sm" data-action="addlink" data-id="${t.id}" data-title="${esc(t.title)}" title="Paste a public URL instead">＋ Add link</button>`:''}
     ${t.visibility==='private'?`<button class="btn sm primary" data-action="publish" data-id="${t.id}">Publish</button>`:`<button class="btn sm" data-action="unpublish" data-id="${t.id}">Hide</button>`}
@@ -735,7 +765,15 @@ function renderMyMusic(){
   pls.forEach(loadCovers);
 }
 function setVisibility(id,v){ fbDB.collection("tracks").doc(id).update({ visibility:v }).then(()=>toast(v==="public"?"Published 🎉 (now public)":"Hidden — set to private 🔒")).catch(e=>toast(e.code||e.message)); }
-function deleteTrack(id){ if(!confirm("Delete this track permanently? This cannot be undone.")) return; fbDB.collection("tracks").doc(id).delete().then(()=>toast("Track deleted")).catch(e=>toast(e.code||e.message)); }
+function deleteTrack(id){
+  openOverlay(`<h2>🗑️ Delete track?</h2>
+    <p style="margin:10px 0 22px;color:var(--muted);line-height:1.5">This will permanently remove the track. This cannot be undone.</p>
+    <div style="display:flex;gap:10px">
+      <button class="btn block" data-action="close">Cancel</button>
+      <button class="btn block" data-action="confirmdel" data-id="${id}" style="color:#c0392b;border-color:#f5c6c6">Yes, delete</button>
+    </div>`);
+}
+function doDeleteTrack(id){ fbDB.collection("tracks").doc(id).delete().then(()=>{ closeOverlay(); toast("Track deleted"); }).catch(e=>toast(e.code||e.message)); }
 
 function openAddLink(trackId,title){
   openOverlay(`<h2>🔗 Add streaming link</h2>
@@ -795,7 +833,7 @@ function openCustomize(){
     <div class="field"><label>Or a solid colour</label><div class="swatches" id="bgSw">${["#FFCBA0","#7c5cff","#36d1c4","#ff5c7c","#2bbf4e","#5c8bff","#33272f"].map(c=>`<div class="swatch ${u.bgColor===c&&!u.bgTheme?'sel':''}" style="background:${c}" data-action="bgcolor" data-c="${c}"></div>`).join("")}</div></div>
     <button class="btn primary block" data-action="savecustom">Save profile</button>
     <button class="btn block" data-action="openresetcustom" style="margin-top:10px;color:#c0392b;border-color:#f5c6c6">🔄 Reset page to default</button>`);
-  window._bgColor=u.bgColor||""; window._bgTheme=u.bgTheme||""; window._avatar=null; window._bannerFile=null; window._pageBgFile=null; window._bgMode=u.pageBgMode||"stretch"; window._clearBanner=false; window._clearPageBg=false;
+  window._bgColor=u.bgColor||""; window._bgTheme=u.bgTheme||""; window._avatar=null; window._avatarFile=null; window._bannerFile=null; window._pageBgFile=null; window._bgMode=u.pageBgMode||"stretch"; window._clearBanner=false; window._clearPageBg=false;
 }
 function removeBanner(){
   window._bannerFile=null; window._clearBanner=true;
@@ -835,8 +873,10 @@ async function saveCustom(){
   const url=($("avUrl").value||"").trim();
   const upd={ bio:($("bgBio").value||"").trim()||ME.bio||"", bgColor:window._bgTheme?"":(window._bgColor||""), bgTheme:window._bgTheme||"", pageBgMode:window._bgMode||"stretch" };
   upd.pageBgFilter={ brightness:parseInt(($("adjBrightness")||{value:"100"}).value)||100, contrast:parseInt(($("adjContrast")||{value:"100"}).value)||100, saturate:parseInt(($("adjSaturate")||{value:"100"}).value)||100, opacity:parseInt(($("adjOpacity")||{value:"100"}).value)||100 };
-  if(window._avatar){ if(window._avatar.length>700000){ if(saveBtn){saveBtn.disabled=false;saveBtn.textContent="Save profile";} return toast("Photo too big — paste a link instead."); } upd.avatarImg=window._avatar; }
-  else if(url) upd.avatarImg=url;
+  if(window._avatarFile){
+    try{ if(saveBtn) saveBtn.textContent="Uploading photo…"; upd.avatarImg=await uploadMediaToCloudinary(window._avatarFile); }
+    catch(e){ if(saveBtn){saveBtn.disabled=false;saveBtn.textContent="Save profile";} return toast("Photo upload failed: "+(e.message||e)); }
+  } else if(url) upd.avatarImg=url;
   if(window._bannerFile){
     try{ if(saveBtn) saveBtn.textContent="Uploading banner…"; upd.bgImg=await uploadMediaToCloudinary(window._bannerFile); }
     catch(e){ if(saveBtn){saveBtn.disabled=false;saveBtn.textContent="Save profile";} return toast("Banner upload failed: "+(e.message||e)); }
@@ -951,7 +991,11 @@ function renderAdmin(){
     <div style="background:#fff;border-radius:14px;padding:16px;box-shadow:0 2px 8px rgba(180,120,60,.08)">
       <p style="font-size:14px;margin:0 0 12px">Send the getting-started guide to every registered user as a notification they can read in the app.</p>
       <button class="btn primary" data-action="broadcastwelcome">📢 Send Instructions to All Users (${users.length})</button>
-    </div>`;
+    </div>
+    <div class="section-title" style="margin-top:28px">💡 Feature Suggestions (${(CACHE.suggestions||[]).length})</div>
+    ${(CACHE.suggestions||[]).length?(CACHE.suggestions||[]).map(s=>`<div class="mrow2" style="padding:12px;background:#fff;border-radius:12px;margin-bottom:8px;box-shadow:0 2px 6px rgba(180,120,60,.06)">
+      <div class="minfo"><div class="mt">${esc(s.text)}</div><div class="ms">${esc(s.name||'Anonymous')} · ${timeAgo(s.time)}</div></div>
+    </div>`).join(''):'<div class="empty" style="margin-top:8px">No suggestions yet.</div>'}`;
 }
 async function broadcastWelcome(){
   if(!isAdmin()) return;
@@ -1033,36 +1077,55 @@ function mpSellerCard(p){
 function openProductForm(productId){
   const p=productId?CACHE.products.find(x=>x.id===productId):null;
   window._mpPhoto=p?.photos?.[0]||null;
+  window._mpPhotoFile=null;
   const prevStyle=window._mpPhoto?`background-image:url('${window._mpPhoto}');background-size:cover;background-position:center`:'background:var(--orange-1)';
   openOverlay(`<h2>${p?'Edit product':'Add a product'}</h2>
-    <div class="field"><label>Title</label><input class="fb-field" id="mpTitle" placeholder="e.g. OK Music hoodie" value="${esc(p?.title||'')}" /></div>
-    <div class="field"><label>Description</label><textarea class="fb-field" id="mpDesc" placeholder="Describe your product — material, size, condition…" style="min-height:90px">${esc(p?.description||'')}</textarea></div>
-    <div class="field"><label>Category</label><select class="fb-field" id="mpCat">${MP_CATEGORIES.map(c=>`<option value="${c}" ${(p?.category||'Other')===c?'selected':''}>${c}</option>`).join("")}</select></div>
-    <div class="field"><label>Price (USD)</label><input class="fb-field" id="mpPrice" type="number" min="0.01" step="0.01" placeholder="0.00" value="${p?.price||''}" /></div>
-    <div class="field"><label>Shipping cost (USD)</label><input class="fb-field" id="mpShip" type="number" min="0" step="0.01" placeholder="0.00" value="${p?.shipping||''}" /></div>
+    <div class="field"><label>Title</label><input class="fb-field" id="prodTitle" placeholder="e.g. OK Music hoodie" value="${esc(p?.title||'')}" /></div>
+    <div class="field"><label>Description</label><textarea class="fb-field" id="prodDesc" placeholder="Describe your product — material, size, condition…" style="min-height:90px">${esc(p?.description||'')}</textarea></div>
+    <div class="field"><label>Category</label><select class="fb-field" id="prodCat">${MP_CATEGORIES.map(c=>`<option value="${c}" ${(p?.category||'Other')===c?'selected':''}>${c}</option>`).join("")}</select></div>
+    <div class="field"><label>Price (USD)</label><input class="fb-field" id="prodPrice" type="number" min="0.01" step="0.01" placeholder="0.00" value="${p?.price||''}" /></div>
+    <div class="field"><label>Shipping cost (USD)</label><input class="fb-field" id="prodShip" type="number" min="0" step="0.01" placeholder="0.00" value="${p?.shipping||''}" /></div>
     <div class="field"><label>Product photo</label>
-      <div class="covup"><div class="covprev" id="mpPhotoPrev" style="${prevStyle}">${window._mpPhoto?'':'📦'}</div>
-        <div><input type="file" id="mpPhotoFile" accept="image/*" /><div class="note" style="margin-top:4px">JPG/PNG — max ~600KB</div></div></div></div>
+      <div class="covup"><div class="covprev" id="prodPhotoPrev" style="${prevStyle}">${window._mpPhoto?'':'📦'}</div>
+        <div><input type="file" id="prodPhotoFile" accept="image/*" /><div class="note" style="margin-top:4px">JPG/PNG/WEBP — uploaded to cloud</div></div></div></div>
     <button class="btn primary block" data-action="dosaveproduct" data-id="${productId||''}" style="margin-top:16px">${p?'Save changes':'List product'}</button>`);
 }
 async function doSaveProduct(productId){
-  const title=($("mpTitle").value||"").trim(), description=($("mpDesc").value||"").trim();
-  const price=parseFloat($("mpPrice").value), shipping=parseFloat($("mpShip").value||"0")||0;
-  const category=$("mpCat").value||"Other";
+  const title=($("prodTitle").value||"").trim(), description=($("prodDesc").value||"").trim();
+  const price=parseFloat(($("prodPrice")||{value:""}).value), shipping=parseFloat(($("prodShip")||{value:"0"}).value||"0")||0;
+  const category=($("prodCat")||{value:"Other"}).value||"Other";
   if(!title||!description) return toast("Fill in title and description");
   if(!price||price<=0) return toast("Enter a valid price");
-  if(window._mpPhoto&&window._mpPhoto.length>900000) return toast("Photo too large — use an image under ~600KB");
-  const data={ sellerId:ME.id, title, description, category, price, shipping, photos:window._mpPhoto?[window._mpPhoto]:[], updatedAt:Date.now() };
+  const saveBtn=document.querySelector('[data-action="dosaveproduct"]');
+  let photos=window._mpPhoto?[window._mpPhoto]:[];
+  if(window._mpPhotoFile){
+    try{
+      if(saveBtn){saveBtn.disabled=true;saveBtn.textContent="Uploading photo…";}
+      photos=[await uploadMediaToCloudinary(window._mpPhotoFile)];
+    }catch(e){
+      if(saveBtn){saveBtn.disabled=false;saveBtn.textContent=productId?'Save changes':'List product';}
+      return toast("Photo upload failed: "+(e.message||e));
+    }
+  }
+  const data={ sellerId:ME.id, title, description, category, price, shipping, photos, updatedAt:Date.now() };
   try{
-    if(productId){ await fbDB.collection("products").doc(productId).update(data); toast("Product updated ✓"); }
-    else{ data.createdAt=Date.now(); await fbDB.collection("products").add(data); toast("Product listed! 🎉"); }
-    closeOverlay(); go("mystore");
-  } catch(e){ toast("Couldn't save: "+(e.code||e.message)); }
+    if(productId){ await fbDB.collection("products").doc(productId).update(data); closeOverlay(); toast("Product updated ✓"); }
+    else{ data.createdAt=Date.now(); await fbDB.collection("products").add(data); closeOverlay(); toast("Product listed! 🎉"); }
+    go("mystore");
+  } catch(e){
+    if(saveBtn){saveBtn.disabled=false;saveBtn.textContent=productId?'Save changes':'List product';}
+    toast("Couldn't save: "+(e.code||e.message));
+  }
 }
 function deleteProduct(id){
-  if(!confirm("Delete this product? Cannot be undone.")) return;
-  fbDB.collection("products").doc(id).delete().then(()=>toast("Product deleted")).catch(e=>toast(e.code||e.message));
+  openOverlay(`<h2>🗑️ Delete product?</h2>
+    <p style="margin:10px 0 22px;color:var(--muted);line-height:1.5">This will permanently remove the listing. This cannot be undone.</p>
+    <div style="display:flex;gap:10px">
+      <button class="btn block" data-action="close">Cancel</button>
+      <button class="btn block" data-action="confirmdelprod" data-id="${id}" style="color:#c0392b;border-color:#f5c6c6">Yes, delete</button>
+    </div>`);
 }
+function doDeleteProduct(id){ fbDB.collection("products").doc(id).delete().then(()=>{ closeOverlay(); toast("Product deleted"); go("mystore"); }).catch(e=>toast(e.code||e.message)); }
 
 // ---------- buyer browse ----------
 function renderMarketplace(){
@@ -1117,10 +1180,11 @@ function addToCart(id){
   if(!state.cart) state.cart=[];
   const has=state.cart.includes(id);
   state.cart=has?state.cart.filter(x=>x!==id):[...state.cart,id];
+  persistCart();
   toast(has?"Removed from cart":"Added to cart 🛒");
   closeOverlay(); renderMain();
 }
-function removeFromCart(id){ state.cart=(state.cart||[]).filter(x=>x!==id); renderCart(); }
+function removeFromCart(id){ state.cart=(state.cart||[]).filter(x=>x!==id); persistCart(); renderCart(); }
 function renderCart(){
   if(!state.cart) state.cart=[];
   const items=state.cart.map(id=>CACHE.products.find(p=>p.id===id)).filter(Boolean);
@@ -1185,7 +1249,7 @@ async function doPlaceOrder(){
       items:items.map(p=>({ productId:p.id, title:p.title, price:p.price, shipping:p.shipping||0, sellerId:p.sellerId })),
       subtotal, shipping:shippingTotal, platformFee:fee, total, status:"pending_payment", createdAt:Date.now()
     });
-    state.cart=[];
+    state.cart=[]; persistCart();
     closeOverlay();
     openOverlay(`<div style="text-align:center;padding:8px">
       <div style="font-size:44px;margin-bottom:12px">✅</div>
@@ -1271,9 +1335,10 @@ function renderBuzzing(){
   $("page").innerHTML=`<div class="h-title">🔥 Buzzing right now</div>
     <p class="note" style="margin-bottom:14px">The community's hottest tracks, ranked by plays + likes.</p>
     ${list.map((x,i)=>{ const t=x.t, u=userById(t.userId); const medal=i===0?'🥇':i===1?'🥈':i===2?'🥉':('#'+(i+1));
+      const bzArt=t.coverImg?`background-image:url('${t.coverImg}');background-size:cover;background-position:center`:`background:${grad(t.accent)}`;
       return `<div class="mrow2">
         <div style="width:34px;text-align:center;font-weight:900;color:var(--orange-deep)">${medal}</div>
-        <div class="mart" style="background:${grad(t.accent)};cursor:pointer" data-action="play" data-id="${t.id}">◎</div>
+        <div class="mart" style="${bzArt};cursor:pointer" data-action="play" data-id="${t.id}">${t.coverImg?'':'◎'}</div>
         <div class="minfo"><div class="mt" data-action="play" data-id="${t.id}">${esc(t.title)}</div>
           <div class="ms" data-action="profile" data-uid="${u.id}">${esc(u.name)} · ▶ ${nfmt(playCount(t.id))} · 👍 ${nfmt(likeCount(t.id))}</div></div>
         <button class="btn sm primary" data-action="play" data-id="${t.id}">▶</button></div>`; }).join("")}`;
@@ -1335,15 +1400,19 @@ document.addEventListener("click",e=>{
     startcall:()=>startCall(el.dataset.uid),
     acceptcall:()=>acceptCall(el.dataset.uid),
     mutecall:muteCall,
-    endcall:endCall
+    endcall:endCall,
+    confirmdel:()=>doDeleteTrack(el.dataset.id),
+    confirmdelcmt:()=>doDeleteComment(el.dataset.id),
+    confirmdelprod:()=>doDeleteProduct(el.dataset.id),
+    saveeditcmt:()=>saveEditComment(el.dataset.id)
   };
   if(M[a]) M[a]();
 });
 document.addEventListener("change",e=>{
-  if(e.target.id==="avFile"){ const f=e.target.files[0]; if(!f) return; const r=new FileReader(); r.onload=()=>{ window._avatar=r.result; const p=$("avPrev"); if(p){ p.style.backgroundImage=`url('${r.result}')`; p.textContent=""; } }; r.readAsDataURL(f); }
-  if(e.target.id==="covFile"){ const f=e.target.files[0]; if(!f) return; const r=new FileReader(); r.onload=()=>{ window._trackCover=r.result; const p=$("covPrev"); if(p){ p.style.backgroundImage=`url('${r.result}')`; p.style.backgroundSize="cover"; p.style.backgroundPosition="center"; p.style.background=""; p.textContent=""; } }; r.readAsDataURL(f); }
+  if(e.target.id==="avFile"){ const f=e.target.files[0]; if(!f) return; window._avatarFile=f; window._avatar=null; const p=$("avPrev"); if(p){ p.style.backgroundImage=`url('${URL.createObjectURL(f)}')`; p.textContent=""; } }
+  if(e.target.id==="covFile"){ const f=e.target.files[0]; if(!f) return; window._coverFile=f; window._trackCover=null; const p=$("covPrev"); if(p){ p.style.backgroundImage=`url('${URL.createObjectURL(f)}')`; p.style.backgroundSize="cover"; p.style.backgroundPosition="center"; p.style.background=""; p.textContent=""; } }
   if(e.target.id==="audioFile"){ const f=e.target.files[0]; if(!f) return; window._audioFile=f; const fn=$("audioFilename"); if(fn) fn.textContent="✓ "+f.name+" ("+Math.round(f.size/1024)+" KB)"; }
-  if(e.target.id==="mpPhotoFile"){ const f=e.target.files[0]; if(!f) return; const r=new FileReader(); r.onload=()=>{ window._mpPhoto=r.result; const p=$("mpPhotoPrev"); if(p){ p.style.backgroundImage=`url('${r.result}')`; p.style.backgroundSize="cover"; p.style.backgroundPosition="center"; p.textContent=""; } }; r.readAsDataURL(f); }
+  if(e.target.id==="prodPhotoFile"){ const f=e.target.files[0]; if(!f) return; window._mpPhotoFile=f; window._mpPhoto=null; const p=$("prodPhotoPrev"); if(p){ p.style.backgroundImage=`url('${URL.createObjectURL(f)}')`; p.style.backgroundSize="cover"; p.style.backgroundPosition="center"; p.textContent=""; } }
   if(e.target.id==="bannerFile"){ const f=e.target.files[0]; if(!f) return; window._bannerFile=f; window._clearBanner=false; const p=$("bannerPrev"); if(p){ const url=URL.createObjectURL(f); p.style.backgroundImage=`url('${url}')`; p.style.backgroundSize="cover"; p.style.backgroundPosition="center"; const h=p.querySelector(".cust-hint"); if(h) h.style.opacity="0"; } }
   if(e.target.id==="pageBgFile"){ const f=e.target.files[0]; if(!f) return; window._pageBgFile=f; window._clearPageBg=false; const p=$("pageBgPrev"); if(p){ const url=URL.createObjectURL(f); p.style.backgroundImage=`url('${url}')`; p.style.backgroundSize="cover"; p.style.backgroundPosition="center"; const h=p.querySelector(".cust-hint"); if(h) h.style.opacity="0"; } }
 });
@@ -1652,6 +1721,7 @@ function listenForIncomingCalls(){
       });
     },()=>{});
 }
+let _callsUnsub=null;
 function startListeners(){
   fbDB.collection("users").onSnapshot(s=>{ CACHE.users={}; s.forEach(d=>CACHE.users[d.id]={ id:d.id, ...d.data() }); scheduleRender(); }, e=>console.warn("users",e.code));
   fbDB.collection("tracks").onSnapshot(s=>{ CACHE.tracks=s.docs.map(d=>({ id:d.id, ...d.data() })); scheduleRender(); }, e=>console.warn("tracks",e.code));
@@ -1661,9 +1731,34 @@ function startListeners(){
   fbDB.collection("comments").onSnapshot(s=>{ CACHE.comments=s.docs.map(d=>({ id:d.id, ...d.data() })); scheduleRender(); }, e=>console.warn("comments",e.code));
   fbDB.collection("products").onSnapshot(s=>{ CACHE.products=s.docs.map(d=>({ id:d.id, ...d.data() })).sort((a,b)=>b.createdAt-a.createdAt); scheduleRender(); }, e=>console.warn("products",e.code));
   fbDB.collection("sellers").onSnapshot(s=>{ CACHE.sellers={}; s.forEach(d=>CACHE.sellers[d.id]={ id:d.id, ...d.data() }); scheduleRender(); }, e=>console.warn("sellers",e.code));
+}
+function startAuthListeners(uid){
+  // buyer orders (and admin gets all orders)
+  const ordersQ=fbAuth.currentUser?.email===ADMIN_EMAIL
+    ?fbDB.collection("orders")
+    :fbDB.collection("orders").where("buyerId","==",uid);
+  ordersQ.onSnapshot(s=>{ CACHE.orders=s.docs.map(d=>({ id:d.id, ...d.data() })); scheduleRender(); }, e=>console.warn("orders",e.code));
+  // suggestions (admin only)
   if(fbAuth.currentUser?.email===ADMIN_EMAIL){
-    fbDB.collection("orders").onSnapshot(s=>{ CACHE.orders=s.docs.map(d=>({ id:d.id, ...d.data() })); scheduleRender(); }, e=>console.warn("orders",e.code));
+    fbDB.collection("suggestions").orderBy("time","desc").limit(50).onSnapshot(s=>{ CACHE.suggestions=s.docs.map(d=>({ id:d.id, ...d.data() })); scheduleRender(); }, e=>console.warn("suggestions",e.code));
   }
+}
+
+// ---------- My Orders (buyer) ----------
+function renderMyOrders(){
+  const orders=(CACHE.orders||[]).filter(o=>o.buyerId===ME.id).sort((a,b)=>b.createdAt-a.createdAt);
+  $("page").innerHTML=`<div class="h-title">📦 My Orders</div>
+    ${orders.length?orders.map(o=>{
+      const statusLabel={pending_payment:"⏳ Awaiting payment",paid:"✅ Paid",shipped:"🚚 Shipped",completed:"✓ Completed"}[o.status]||o.status;
+      return`<div class="mrow2" style="flex-wrap:wrap;gap:10px;padding:14px;border-radius:14px;background:#fff;box-shadow:0 2px 8px rgba(180,120,60,.07);margin-bottom:10px">
+        <div class="minfo" style="flex:1;min-width:0">
+          <div class="mt">Order <b>${o.id.slice(0,8).toUpperCase()}</b> · ${timeAgo(o.createdAt)}</div>
+          <div class="ms">${(o.items||[]).map(i=>esc(i.title)).join(", ")}</div>
+          <div class="ms" style="margin-top:4px">${statusLabel} · <b>$${parseFloat(o.total||0).toFixed(2)}</b></div>
+        </div>
+        ${o.status==="pending_payment"?`<div style="font-size:12px;color:var(--muted);max-width:200px">Send $${parseFloat(o.total||0).toFixed(2)} via Payoneer to <b>${PLATFORM_EMAIL}</b> — include order ID <b>${o.id.slice(0,8).toUpperCase()}</b></div>`:''}
+      </div>`;
+    }).join(""):'<div class="empty">No orders yet — browse the Marketplace to start shopping. 🛍️</div>'}`;
 }
 
 // ---------- init: real Firebase auth + live data ----------
@@ -1672,7 +1767,11 @@ startListeners();
 fbAuth.onAuthStateChanged(async (user)=>{
   if(user){
     const prof=await loadProfile(user.uid);
+    startAuthListeners(user.uid);
     if(prof){ ME=prof; syncME(); startMyNotifications(); listenForIncomingCalls(); render(); }
     else { ME={ id:user.uid, name:user.displayName||"" }; render(); }   // no profile yet → onboarding
-  } else { ME=null; syncME(); startMyNotifications(); render(); }
+  } else {
+    if(_callsUnsub){_callsUnsub();_callsUnsub=null;}
+    ME=null; syncME(); startMyNotifications(); render();
+  }
 });
