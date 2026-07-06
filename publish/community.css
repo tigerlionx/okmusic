@@ -102,9 +102,11 @@ body.has-page-bg .topbar{background:rgba(255,221,191,.45)}
 
 /* ============ profile ============ */
 .profile-cover{height:220px;border-radius:18px;background:linear-gradient(135deg,var(--orange-2),var(--orange-3));position:relative;margin-bottom:-60px}
-.cust-banner-prev{height:100px;border-radius:12px;margin-bottom:4px;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,var(--orange-2),var(--orange-3))}
-.cust-bg-prev{height:80px;border-radius:12px;margin-bottom:4px;display:flex;align-items:center;justify-content:center;background:var(--orange-1)}
+.cust-banner-prev{position:relative;height:100px;border-radius:12px;margin-bottom:4px;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,var(--orange-2),var(--orange-3))}
+.cust-bg-prev{position:relative;height:80px;border-radius:12px;margin-bottom:4px;display:flex;align-items:center;justify-content:center;background:var(--orange-1)}
 .cust-hint{font-size:12px;color:rgba(255,255,255,.75);font-style:italic;pointer-events:none;text-align:center;padding:0 8px;transition:opacity .2s}
+.cust-remove-btn{position:absolute;top:7px;right:7px;width:26px;height:26px;border-radius:50%;background:rgba(0,0,0,.55);color:#fff;border:none;font-size:13px;font-weight:700;cursor:pointer;display:grid;place-items:center;line-height:1;transition:background .15s}
+.cust-remove-btn:hover{background:rgba(180,0,0,.75)}
 .bg-mode-row{display:flex;gap:8px;margin-top:6px}
 .bg-mode-btn{flex:1;padding:8px 4px;border-radius:10px;border:2px solid var(--line);background:#fff;font-size:13px;font-weight:700;color:var(--ink);cursor:pointer;transition:border-color .15s,background .15s}
 .bg-mode-btn:hover{border-color:var(--orange);background:#fff7f1}
