@@ -102,11 +102,13 @@ function applyMyBackground(){
     document.body.style.backgroundSize="cover";
     document.body.style.backgroundPosition="center";
     document.body.style.backgroundAttachment="fixed";
+    document.body.classList.add("has-page-bg");
   } else {
     document.body.style.backgroundImage="";
     document.body.style.backgroundSize="";
     document.body.style.backgroundPosition="";
     document.body.style.backgroundAttachment="";
+    document.body.classList.remove("has-page-bg");
   }
 }
 function render(){
@@ -390,7 +392,7 @@ function renderProfile(uid){
   const cover=u.bgImg?`background-image:url('${u.bgImg}');background-size:cover;background-position:center`:themeCSS?`background:${themeCSS}`:u.bgColor?`background:${u.bgColor}`:"";
   // Apply page background: profile owner's if set, otherwise fall back to the logged-in user's own background
   const pageBg=u.pageBgImg||(mine&&ME?.pageBgImg)||"";
-  if(pageBg){ document.body.style.backgroundImage=`url('${pageBg}')`; document.body.style.backgroundSize="cover"; document.body.style.backgroundPosition="center"; document.body.style.backgroundAttachment="fixed"; }
+  if(pageBg){ document.body.style.backgroundImage=`url('${pageBg}')`; document.body.style.backgroundSize="cover"; document.body.style.backgroundPosition="center"; document.body.style.backgroundAttachment="fixed"; document.body.classList.add("has-page-bg"); }
   else applyMyBackground();
   const tracks=tracksByUser(uid,mine); const pls=playlistsByUser(uid); const sts=statusesByUser(uid);
   const headActions=mine
