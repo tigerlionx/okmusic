@@ -645,13 +645,15 @@ async function doPublish(){
     .catch(e=>toast("Couldn't save: "+(e.code||e.message))); }
 
 // ---------- Cloudinary upload helpers ----------
-function uploadMediaToCloudinary(file, type="image"){
+function uploadMediaToCloudinary(file){
+  // Always use video/upload — the okmusic_audio preset is configured for that endpoint
+  // and Cloudinary serves the resulting URL correctly for any file type (image, audio, video)
   return new Promise((resolve,reject)=>{
     const fd=new FormData();
     fd.append("file",file);
     fd.append("upload_preset","okmusic_audio");
     const xhr=new XMLHttpRequest();
-    xhr.open("POST",`https://api.cloudinary.com/v1_1/llka5use/${type}/upload`);
+    xhr.open("POST","https://api.cloudinary.com/v1_1/llka5use/video/upload");
     xhr.onload=()=>{ try{ const r=JSON.parse(xhr.responseText); if(r.secure_url) resolve(r.secure_url); else reject(new Error(r.error?.message||"Upload failed")); }catch(err){ reject(err); } };
     xhr.onerror=()=>reject(new Error("Network error"));
     xhr.send(fd);
@@ -791,11 +793,11 @@ async function saveCustom(){
   if(window._avatar){ if(window._avatar.length>700000){ if(saveBtn){saveBtn.disabled=false;saveBtn.textContent="Save profile";} return toast("Photo too big — paste a link instead."); } upd.avatarImg=window._avatar; }
   else if(url) upd.avatarImg=url;
   if(window._bannerFile){
-    try{ if(saveBtn) saveBtn.textContent="Uploading banner…"; upd.bgImg=await uploadMediaToCloudinary(window._bannerFile,"image"); }
+    try{ if(saveBtn) saveBtn.textContent="Uploading banner…"; upd.bgImg=await uploadMediaToCloudinary(window._bannerFile); }
     catch(e){ if(saveBtn){saveBtn.disabled=false;saveBtn.textContent="Save profile";} return toast("Banner upload failed: "+(e.message||e)); }
   } else { const v=($("bannerUrl")||{value:""}).value.trim(); if(v) upd.bgImg=v; }
   if(window._pageBgFile){
-    try{ if(saveBtn) saveBtn.textContent="Uploading background…"; upd.pageBgImg=await uploadMediaToCloudinary(window._pageBgFile,"image"); }
+    try{ if(saveBtn) saveBtn.textContent="Uploading background…"; upd.pageBgImg=await uploadMediaToCloudinary(window._pageBgFile); }
     catch(e){ if(saveBtn){saveBtn.disabled=false;saveBtn.textContent="Save profile";} return toast("Background upload failed: "+(e.message||e)); }
   } else { const v=($("pageBgUrl")||{value:""}).value.trim(); if(v) upd.pageBgImg=v; }
   fbDB.collection("users").doc(ME.id).set(upd,{merge:true})
