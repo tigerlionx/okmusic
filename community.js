@@ -333,7 +333,8 @@ function renderApp(){
   setTimeout(()=>{ const s=$("search"); if(s) s.oninput=e=>{ state.query=e.target.value; if(state.view!=="discover") state.view="discover"; renderMain(); }; },0);
 }
 function renderMain(){
-  if(state.view!=="profile") _clearBg();
+  if(ME && ME.pageBgImg){ _setBgStyle(ME.pageBgImg, ME.pageBgMode||"stretch", ME.pageBgFilter||{}); }
+  else _clearBg();
   if(state.view==="profile") return renderProfile(state.profileId);
   if(state.view==="mymusic") return renderMyMusic();
   if(state.view==="fans") return renderFans();
@@ -393,11 +394,7 @@ function renderProfile(uid){
   const me=currentUser(); const mine=me&&me.id===uid;
   const themeCSS=u.bgTheme?(THEMES.find(t=>t.id===u.bgTheme)||{}).css:"";
   const cover=u.bgImg?`background-image:url('${u.bgImg}');background-size:cover;background-position:center`:themeCSS?`background:${themeCSS}`:u.bgColor?`background:${u.bgColor}`:"";
-  // Each profile shows only its own background — no cross-user leaking
-  const pageBg=u.pageBgImg||"";
-  const bgMode=u.pageBgMode||"stretch";
-  if(pageBg){ _setBgStyle(pageBg,bgMode,u.pageBgFilter||{}); }
-  else _clearBg();
+
   const tracks=tracksByUser(uid,mine); const pls=playlistsByUser(uid); const sts=statusesByUser(uid);
   const headActions=mine
     ? `<button class="btn primary" data-action="customize">🎨 Edit profile</button><button class="btn" data-action="invite">✉️ Invite</button>`
