@@ -62,7 +62,18 @@ function userById(id){ if(ME&&ME.id===id) return ME; return allUsers().find(u=>u
 function seedAt(h){ return Date.now()-(h||0)*3600000; }
 function allTracks(){ const s=SEED_TRACKS.map(t=>({ ...t, createdAt:seedAt(t.ageHrs), visibility:"public", share:true })); return CACHE.tracks.map(t=>({ ...t })).concat(s); }
 function tracksByUser(uid,owner){ return allTracks().filter(t=>t.userId===uid&&(owner||t.visibility!=="private")).sort((a,b)=>b.createdAt-a.createdAt); }
-function playlistsByUser(uid){ return db().playlists.filter(p=>p.userId===uid).sort((a,b)=>b.createdAt-a.createdAt); }
+function playlistsByUser(uid){
+  const local=db().playlists.filter(p=>p.userId===uid).sort((a,b)=>b.createdAt-a.createdAt);
+  const localIds=new Set(local.map(p=>p.id));
+  // Build cloud playlists from Firestore tracks (shows on all devices)
+  const cloudMap={};
+  allTracks().filter(t=>t.userId===uid&&t.playlistId&&!localIds.has(t.playlistId)).forEach(t=>{
+    if(!cloudMap[t.playlistId]) cloudMap[t.playlistId]={id:t.playlistId,userId:uid,name:t.playlistName||"Playlist",files:[],createdAt:t.createdAt,_cloud:true};
+    cloudMap[t.playlistId].files.push(t.title);
+    if(t.createdAt<cloudMap[t.playlistId].createdAt) cloudMap[t.playlistId].createdAt=t.createdAt;
+  });
+  return [...local,...Object.values(cloudMap).sort((a,b)=>b.createdAt-a.createdAt)];
+}
 function allStatuses(){ const s=SEED_STATUSES.map(x=>({ ...x, time:seedAt(x.ageHrs) })); return CACHE.statuses.map(x=>({ ...x })).concat(s); }
 function statusesByUser(uid){ return allStatuses().filter(s=>s.userId===uid).sort((a,b)=>b.time-a.time); }
 function currentUser(){ return ME; }
@@ -96,6 +107,7 @@ let state={ view:"discover", profileId:null, query:"", cart:JSON.parse(localStor
 function persistCart(){ try{ localStorage.setItem("okmusic_cart",JSON.stringify(state.cart||[])); }catch(e){} }
 let playMode="continuous"; // "continuous" | "repeat" | "shuffle"
 let nowPlayingId=null;
+let nowPlayingContext=null; // {uid} restricts queue to one user; null = global
 function go(v,x={}){ state={ ...state, view:v, ...x }; render(); window.scrollTo(0,0); }
 function _getBgLayer(){
   let el=document.getElementById("page-bg-layer");
@@ -400,6 +412,8 @@ function renderProfile(uid){
   const cover=u.bgImg?`background-image:url('${u.bgImg}');background-size:cover;background-position:center`:themeCSS?`background:${themeCSS}`:u.bgColor?`background:${u.bgColor}`:"";
 
   const tracks=tracksByUser(uid,mine); const pls=playlistsByUser(uid); const sts=statusesByUser(uid);
+  const plIds=new Set(pls.map(p=>p.id));
+  const standaloneTracks=tracks.filter(t=>!t.playlistId||!plIds.has(t.playlistId));
   const headActions=mine
     ? `<button class="btn primary" data-action="customize">🎨 Edit profile</button><button class="btn" data-action="invite">✉️ Invite</button>`
     : `<button class="btn ${isFollowing(uid)?'':'primary'}" data-action="follow" data-uid="${uid}">${isFollowing(uid)?'Following ✓':'Follow'}</button>
@@ -408,7 +422,7 @@ function renderProfile(uid){
   let music="";
   if(mine) music+=`<div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap"><button class="btn sm primary" data-action="sharefolder">📁 Share folder</button><button class="btn sm" data-action="upload">＋ Single track</button></div>`;
   if(pls.length) music+=pls.map(p=>playlistBlock(p,mine)).join("");
-  if(tracks.length) music+=tracks.map(musicRow).join("");
+  if(standaloneTracks.length) music+=standaloneTracks.map(musicRow).join("");
   if(!pls.length&&!tracks.length) music+=`<div class="empty" style="padding:24px">No tracks yet.</div>`;
   // WALL column
   let wall = mine?composer():"";
@@ -417,7 +431,7 @@ function renderProfile(uid){
     <div class="profile-cover" style="${cover}"></div>
     <div class="profile-head"><div class="profile-avatar" style="${avatarStyle(u,104)};cursor:pointer" data-action="viewavatar" data-uid="${uid}">${u.avatarImg?'':initials(u.name)}</div>
       <div class="profile-info"><div class="profile-name">${esc(u.name)} ${u.founder?'<span class="badge-founder">FOUNDER</span>':''}</div><div class="profile-handle">@${esc(u.handle)}</div></div></div>
-    <div class="profile-stats"><div><b>${tracks.length+pls.reduce((n,p)=>n+p.files.length,0)}</b> <span>tracks</span></div>
+    <div class="profile-stats"><div><b>${standaloneTracks.length+pls.reduce((n,p)=>n+p.files.length,0)}</b> <span>tracks</span></div>
       <div><b>${nfmt(followerCount(uid))}</b> <span>fans</span></div><div><b>${nfmt(followingCount(uid))}</b> <span>following</span></div></div>
     <div class="profile-bio">${esc(u.bio||"")}</div>
     <div class="profile-actions" style="margin-top:14px">${headActions}</div>
@@ -513,12 +527,19 @@ function toggleDislike(id){ if(!ME) return openEmailAuth(); const F=firebase.fir
 function playlistBlock(p,owner){
   if(!state.openPlaylists) state.openPlaylists=new Set();
   const open=state.openPlaylists.has(p.id);
-  const rows=p.files.map((f,i)=>`<div class="trow" data-action="playfile" data-pl="${p.id}" data-file="${esc(f)}"><div class="tn" id="tn_${p.id}_${i}">${i+1}</div><div class="ttitle">${esc(f.replace(/\.[^.]+$/,''))}</div><span class="tplay">▶</span></div>`).join("");
-  const acts=owner?`<div class="pl-actions"><button class="btn sm" data-action="setthumbs" data-pl="${p.id}">${p.thumbs?'covers ✓':'＋ covers'}</button><button class="btn sm" data-action="relink" data-pl="${p.id}">re-link</button></div>`:"";
+  let rows;
+  if(p._cloud){
+    // Cloud playlist: play directly from Firestore tracks (works on all devices)
+    const plTracks=allTracks().filter(t=>t.playlistId===p.id&&t.userId===p.userId).sort((a,b)=>a.createdAt-b.createdAt);
+    rows=plTracks.map((t,i)=>`<div class="trow" data-action="play" data-id="${t.id}"><div class="tn">${i+1}</div><div class="ttitle">${esc(t.title)}</div><span class="tplay">▶</span></div>`).join("");
+  } else {
+    rows=p.files.map((f,i)=>`<div class="trow" data-action="playfile" data-pl="${p.id}" data-file="${esc(f)}"><div class="tn" id="tn_${p.id}_${i}">${i+1}</div><div class="ttitle">${esc(f.replace(/\.[^.]+$/,''))}</div><span class="tplay">▶</span></div>`).join("");
+  }
+  const acts=(owner&&!p._cloud)?`<div class="pl-actions"><button class="btn sm" data-action="setthumbs" data-pl="${p.id}">${p.thumbs?'covers ✓':'＋ covers'}</button><button class="btn sm" data-action="relink" data-pl="${p.id}">re-link</button></div>`:"";
   return `<div class="playlist">
     <div class="playlist-head" data-action="togglepl" data-pl="${p.id}">
       <div class="pl-ic">📁</div>
-      <div style="flex:1"><div class="pl-name">${esc(p.name)}</div><div class="pl-sub">${p.files.length} tracks · folder</div></div>
+      <div style="flex:1"><div class="pl-name">${esc(p.name)}</div><div class="pl-sub">${p.files.length} tracks · ${p._cloud?'☁️ cloud':'folder'}</div></div>
       ${acts}<span class="pl-toggle">${open?'−':'+'}</span>
     </div>
     ${open?`<div class="tracklist">${rows}</div>`:''}
@@ -598,11 +619,23 @@ async function relinkFolder(plId){ if(!window.showDirectoryPicker) return toast(
 async function playFolderTrack(plId,file){
   const cacheKey=plId+"/"+file;
   const title=file.replace(/\.[^.]+$/,"");
-  const artist=userById(db().playlists.find(x=>x.id===plId)?.userId)?.name||currentUser()?.name||"";
+  // Determine owner: prefer Firestore cloud playlist track, then local playlist record
+  const cloudTrack=allTracks().find(t=>t.playlistId===plId&&(t.title===title||t.title===file));
+  const plOwner=db().playlists.find(x=>x.id===plId);
+  const ownerId=cloudTrack?.userId||plOwner?.userId;
+  const artist=userById(ownerId)?.name||currentUser()?.name||"";
+  // Set queue context to the playlist owner so continuous play stays on their profile
+  if(ownerId){
+    if(state.view==="profile"&&state.profileId===ownerId) nowPlayingContext={uid:ownerId};
+    else if(state.view==="mymusic"&&currentUser()?.id===ownerId) nowPlayingContext={uid:ownerId};
+    else if(!nowPlayingContext) nowPlayingContext={uid:ownerId};
+  }
   // 1 — serve from offline cache if available
   const cached=await audioGet(cacheKey);
   if(cached){ showPlayer(title,artist,"#FB7A28",URL.createObjectURL(cached)); return; }
-  // 2 — read from folder (cloud drive or local), then cache for offline
+  // 2 — serve from Cloudinary if this track was uploaded (works cross-device)
+  if(cloudTrack&&cloudTrack.src&&!cloudTrack.src.startsWith("local:")){ showPlayer(title,artist,cloudTrack.accent||"#FB7A28",cloudTrack.src); return; }
+  // 3 — read from folder (cloud drive or local), then cache for offline
   let c=dirCache[plId]; if(!c||!c.music){ const h=await fsGet(plId+"_music"); if(h&&await ensurePerm(h)){ c=dirCache[plId]=dirCache[plId]||{}; c.music=h; } }
   if(!c||!c.music){ const p=db().playlists.find(x=>x.id===plId); return toast(`Re-link "${p?p.name:'folder'}" to play. (Tip: play tracks once while online to cache them for offline.)`); }
   try{
@@ -743,8 +776,10 @@ async function migrateAllLocal(){
 // ---------- my music ----------
 function renderMyMusic(){
   const u=currentUser(); const tracks=tracksByUser(u.id,true); const pls=playlistsByUser(u.id);
-  const localCount=tracks.filter(t=>t.src&&t.src.startsWith("local:")).length;
-  const rows=tracks.map(t=>{
+  const plIds=new Set(pls.map(p=>p.id));
+  const standaloneTracks=tracks.filter(t=>!t.playlistId||!plIds.has(t.playlistId));
+  const localCount=standaloneTracks.filter(t=>t.src&&t.src.startsWith("local:")).length;
+  const rows=standaloneTracks.map(t=>{
     const isLocal=t.src&&t.src.startsWith("local:");
     const artStyle2=t.coverImg?`background-image:url('${t.coverImg}');background-size:cover;background-position:center`:`background:${grad(t.accent)}`;
     return `<div class="mrow"><div class="mart" style="${artStyle2}" data-action="play" data-id="${t.id}">${t.coverImg?'':'◎'}</div>
@@ -760,8 +795,8 @@ function renderMyMusic(){
       <div class="folder-note">☁️ <b>Cloud drive tip (desktop):</b> Make sure your cloud drive is set to <b>sync files locally</b> (not "stream-only"). In Google Drive: Preferences → open files online only → off. In Dropbox: right-click folder → Make available offline.</div>
     <div style="display:flex;gap:8px;margin-bottom:18px;flex-wrap:wrap"><button class="btn primary" data-action="sharefolder">📁 Add a folder</button><button class="btn" data-action="upload">＋ Add single track</button></div>
     ${pls.length?`<div class="section-title">Playlists (folders)</div>${pls.map(p=>playlistBlock(p,true)).join("")}`:""}
-    ${tracks.length?`<div class="section-title">Single tracks</div>${rows}`:""}
-    ${(!pls.length&&!tracks.length)?'<div class="empty">No music yet — share a folder to begin.</div>':""}`;
+    ${standaloneTracks.length?`<div class="section-title">Single tracks</div>${rows}`:""}
+    ${(!pls.length&&!standaloneTracks.length)?'<div class="empty">No music yet — share a folder to begin.</div>':""}`;
   pls.forEach(loadCovers);
 }
 function setVisibility(id,v){ fbDB.collection("tracks").doc(id).update({ visibility:v }).then(()=>toast(v==="public"?"Published 🎉 (now public)":"Hidden — set to private 🔒")).catch(e=>toast(e.code||e.message)); }
@@ -923,6 +958,10 @@ function showPlayer(title,artist,accent,src){ $("miniplayer").classList.add("sho
   if(src){ hasSrc=true; audio.src=src; audio.play().then(()=>setPlaying(true)).catch(()=>setPlaying(false)); } else { hasSrc=false; setPlaying(true); } }
 async function playTrack(id){ const t=allTracks().find(x=>x.id===id); if(!t) return; const u=userById(t.userId); const d=db(); d.plays[id]=(d.plays[id]||0)+1; commit(d);
   nowPlayingId=id;
+  // Lock queue to the viewed profile or My Music — prevents bleed across users
+  if(state.view==="profile"&&state.profileId) nowPlayingContext={uid:state.profileId};
+  else if(state.view==="mymusic") nowPlayingContext={uid:currentUser().id};
+  else nowPlayingContext=null;
   if(t.src&&t.src.startsWith("local:")){
     const blob=await audioGet(t.src.slice(6));
     if(blob){ showPlayer(t.title,u.name,t.accent,URL.createObjectURL(blob)); }
@@ -933,7 +972,8 @@ async function playTrack(id){ const t=allTracks().find(x=>x.id===id); if(!t) ret
   showPlayer(t.title,u.name,t.accent,t.src); if(!t.src) toast("Demo track — no audio linked yet. Reactions still work!"); }
 function setPlaying(p){ $("mpPlay").textContent=p?"⏸":"▶"; }
 function playQueue(direction){
-  const queue=allTracks().filter(t=>t.src&&!t.src.startsWith("local:")&&t.visibility!=="private");
+  let queue=allTracks().filter(t=>t.src&&!t.src.startsWith("local:")&&t.visibility!=="private");
+  if(nowPlayingContext&&nowPlayingContext.uid) queue=queue.filter(t=>t.userId===nowPlayingContext.uid);
   if(!queue.length) return;
   if(playMode==="shuffle"){ playTrack(queue[Math.floor(Math.random()*queue.length)].id); return; }
   const idx=queue.findIndex(t=>t.id===nowPlayingId);
