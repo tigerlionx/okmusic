@@ -384,7 +384,7 @@ function card(t){
 
 // ---------- home feed (status timeline) ----------
 function renderHome(){
-  const u=currentUser(); const f=db().follows[u.id]||[];
+  const u=currentUser(); const f=CACHE.follows[u.id]||[];
   const list=allStatuses().filter(s=>s.userId===u.id||f.includes(s.userId)).sort((a,b)=>b.time-a.time);
   $("page").innerHTML=`<div class="h-title">My Feed</div>
     ${composer()}
@@ -1711,7 +1711,8 @@ async function endCall(){
 
 function listenForIncomingCalls(){
   if(!ME||!ME.handle)return;
-  fbDB.collection("calls").where("calleeId","==",ME.id).where("status","==","ringing")
+  if(_callsUnsub){_callsUnsub();_callsUnsub=null;}
+  _callsUnsub=fbDB.collection("calls").where("calleeId","==",ME.id).where("status","==","ringing")
     .onSnapshot(snap=>{
       snap.docChanges().forEach(ch=>{
         if(ch.type==="added"&&!activePc){
