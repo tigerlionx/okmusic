@@ -1431,6 +1431,8 @@ document.addEventListener("click",e=>{
     broadcastwelcome:broadcastWelcome,
     showguide:()=>showWelcomeGuide(ME?.name||"there"),
     openchat:()=>{ state.chatUid=el.dataset.uid; state.view="chat"; renderApp(); },
+    attachfile:()=>{ const fi=$("chatFileInput");if(fi)fi.click(); },
+    clearpendingfile:clearPendingFile,
     sendmsg:()=>sendMsg(el.dataset.uid),
     editmsg:()=>editMsg(el.dataset.msgid,el.dataset.cid,el.dataset.text),
     saveeditmsg:()=>saveEditMsg(el.dataset.msgid,el.dataset.cid),
@@ -1605,7 +1607,7 @@ function playMsgSound(){
     if(navigator.vibrate) navigator.vibrate(40);
   }catch(e){}
 }
-let msgUnsub=null,convUnsub=null;
+let msgUnsub=null,convUnsub=null,_pendingFile=null,_pendingPreviewUrl=null;
 function convId(a,b){return[a,b].sort().join("_");}
 
 function msgUnreadTotal(){
@@ -1639,6 +1641,29 @@ function renderMessages(){
 }
 
 // ---- open a chat thread ----
+function clearPendingFile(){
+  if(_pendingPreviewUrl){URL.revokeObjectURL(_pendingPreviewUrl);_pendingPreviewUrl=null;}
+  _pendingFile=null;
+  const p=$("chatFilePreview");if(p){p.innerHTML="";p.style.display="none";}
+}
+
+function renderMsgContent(m){
+  const edited=m.edited?'<span class="msg-edited"> · edited</span>':'';
+  if(!m.fileUrl) return`<div class="msg-text">${esc(m.text||"")}${edited}</div>`;
+  let fileEl;
+  if(m.fileType&&m.fileType.startsWith("image/")){
+    fileEl=`<a href="${m.fileUrl}" target="_blank" rel="noopener"><img class="msg-img" src="${m.fileUrl}" loading="lazy"/></a>`;
+  } else if(m.fileType&&m.fileType.startsWith("audio/")){
+    fileEl=`<audio class="msg-audio" src="${m.fileUrl}" controls preload="none"></audio>`;
+  } else if(m.fileType&&m.fileType.startsWith("video/")){
+    fileEl=`<video class="msg-video" src="${m.fileUrl}" controls preload="none"></video>`;
+  } else {
+    fileEl=`<a class="msg-file-link" href="${m.fileUrl}" target="_blank" rel="noopener noreferrer">📎 ${esc(m.fileName||"File")}</a>`;
+  }
+  const caption=m.text?`<div class="msg-caption">${esc(m.text)}${edited}</div>`:"";
+  return`<div class="msg-media">${fileEl}${caption}</div>`;
+}
+
 function openChat(uid){
   const other=userById(uid);if(!other)return toast("User not found");
   const cid=convId(ME.id,uid);
@@ -1653,8 +1678,13 @@ function openChat(uid){
     </div>
     <div class="chat-msgs" id="chatMsgs"></div>
     <div class="chat-input-row">
-      <input class="chat-input" id="chatInput" placeholder="Type a message…" maxlength="1000"/>
-      <button class="btn primary" data-action="sendmsg" data-uid="${uid}">Send</button>
+      <button class="chat-attach-btn" data-action="attachfile" title="Attach file">📎</button>
+      <input type="file" id="chatFileInput" accept="image/*,audio/*,video/*,.pdf,.doc,.docx,.txt,.zip" style="display:none"/>
+      <div class="chat-input-wrap">
+        <div class="chat-file-preview" id="chatFilePreview"></div>
+        <input class="chat-input" id="chatInput" placeholder="Type a message…" maxlength="1000"/>
+      </div>
+      <button class="btn primary" data-action="sendmsg" data-uid="${uid}" id="chatSendBtn">Send</button>
     </div>`;
   fbDB.collection("messages").doc(cid).set({participants:[ME.id,uid],unread:{[ME.id]:0}},{merge:true}).catch(()=>{});
   let _prevMsgCount=0;
@@ -1674,11 +1704,11 @@ function openChat(uid){
             <div class="msg-text"><em>🗑️ Message deleted</em></div>
             <div class="msg-time">${timeAgo(m.time)}</div></div>`;
           return`<div class="msg-bubble ${mine?'mine':'theirs'}">
-            <div class="msg-text">${esc(m.text)}${m.edited?'<span class="msg-edited"> · edited</span>':''}</div>
+            ${renderMsgContent(m)}
             <div class="msg-meta">
               <span class="msg-time">${timeAgo(m.time)}</span>
               ${mine?`<span class="msg-actions">
-                <button class="msg-act" data-action="editmsg" data-msgid="${d.id}" data-cid="${cid}" data-text="${esc(m.text)}" title="Edit">✏️</button>
+                <button class="msg-act" data-action="editmsg" data-msgid="${d.id}" data-cid="${cid}" data-text="${esc(m.text||'')}" title="Edit">✏️</button>
                 <button class="msg-act" data-action="deletemsgmenu" data-msgid="${d.id}" data-cid="${cid}" title="Delete">🗑️</button>
               </span>`:''}
             </div></div>`;
@@ -1688,20 +1718,58 @@ function openChat(uid){
   setTimeout(()=>{
     const inp=$("chatInput");
     if(inp) inp.addEventListener("keydown",e=>{if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();sendMsg(uid);}});
+    const fi=$("chatFileInput");
+    if(fi) fi.addEventListener("change",()=>{
+      const f=fi.files[0];if(!f)return;
+      clearPendingFile();
+      _pendingFile=f;
+      const preview=$("chatFilePreview");if(!preview)return;
+      if(f.type.startsWith("image/")){
+        _pendingPreviewUrl=URL.createObjectURL(f);
+        preview.innerHTML=`<img class="attach-preview-img" src="${_pendingPreviewUrl}"/><span class="attach-preview-name">${esc(f.name)}</span><button class="attach-clear" data-action="clearpendingfile" title="Remove">✕</button>`;
+      } else {
+        preview.innerHTML=`<span class="attach-preview-icon">${f.type.startsWith("audio/")?"🎵":f.type.startsWith("video/")?"🎬":"📎"}</span><span class="attach-preview-name">${esc(f.name)}</span><button class="attach-clear" data-action="clearpendingfile" title="Remove">✕</button>`;
+      }
+      preview.style.display="flex";
+      fi.value="";
+    });
   },100);
 }
 
 async function sendMsg(uid){
   const inp=$("chatInput");if(!inp)return;
-  const text=inp.value.trim();if(!text)return;
+  const text=inp.value.trim();
+  if(!text&&!_pendingFile)return;
   inp.value="";playMsgSound();
   const cid=convId(ME.id,uid);const time=Date.now();
-  await fbDB.collection("messages").doc(cid).collection("msgs").add({senderId:ME.id,text,time,read:false});
+  const msgData={senderId:ME.id,text:text||"",time,read:false};
+  if(_pendingFile){
+    const file=_pendingFile;
+    clearPendingFile();
+    const btn=$("chatSendBtn");if(btn){btn.disabled=true;btn.textContent="Uploading…";}
+    try{
+      const url=await uploadToCloudinary(file,pct=>{if(btn)btn.textContent=`${pct}%`;});
+      msgData.fileUrl=url;
+      msgData.fileType=file.type||"application/octet-stream";
+      msgData.fileName=file.name||"file";
+    }catch(e){
+      if(btn){btn.disabled=false;btn.textContent="Send";}
+      return toast("Upload failed: "+(e.message||e));
+    }
+    if(btn){btn.disabled=false;btn.textContent="Send";}
+  }
+  await fbDB.collection("messages").doc(cid).collection("msgs").add(msgData);
+  const preview=msgData.fileUrl
+    ?(msgData.fileType.startsWith("image/")?"📷 Photo"
+      :msgData.fileType.startsWith("audio/")?"🎵 Audio"
+      :msgData.fileType.startsWith("video/")?"🎬 Video"
+      :`📎 ${msgData.fileName}`)
+    :text;
   await fbDB.collection("messages").doc(cid).set({
-    participants:[ME.id,uid],lastMsg:text,lastTime:time,
+    participants:[ME.id,uid],lastMsg:preview,lastTime:time,
     unread:{[ME.id]:0,[uid]:firebase.firestore.FieldValue.increment(1)}
   },{merge:true});
-  if(!String(uid).startsWith("u_")) fbDB.collection("notifications").add({forUid:uid,type:"message",fromUid:ME.id,fromName:ME.name,text:`💬 ${ME.name}: ${text.slice(0,60)}`,time,read:false}).catch(()=>{});
+  if(!String(uid).startsWith("u_")) fbDB.collection("notifications").add({forUid:uid,type:"message",fromUid:ME.id,fromName:ME.name,text:`💬 ${ME.name}: ${preview.slice(0,60)}`,time,read:false}).catch(()=>{});
 }
 
 function editMsg(msgId,cid,currentText){
