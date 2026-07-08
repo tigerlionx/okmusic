@@ -353,9 +353,15 @@ function renderApp(){
 function renderMain(){
   if(state.view!=="chat" && msgUnsub){ msgUnsub(); msgUnsub=null; }
   const _visU=state.view==="profile"?userById(state.profileId):null;
-  const _bgSrc=(_visU&&_visU.pageBgImg)?_visU:((ME&&ME.pageBgImg)?ME:null);
-  if(_bgSrc) _setBgStyle(_bgSrc.pageBgImg,_bgSrc.pageBgMode||"stretch",_bgSrc.pageBgFilter||{});
-  else _clearBg();
+  if(_visU){
+    // Viewing someone's profile — show only their background, never the viewer's
+    if(_visU.pageBgImg) _setBgStyle(_visU.pageBgImg,_visU.pageBgMode||"stretch",_visU.pageBgFilter||{});
+    else _clearBg();
+  } else {
+    // Own pages (feed, my music, etc.) — show own background
+    if(ME&&ME.pageBgImg) _setBgStyle(ME.pageBgImg,ME.pageBgMode||"stretch",ME.pageBgFilter||{});
+    else _clearBg();
+  }
   if(state.view==="profile") return renderProfile(state.profileId);
   if(state.view==="mymusic") return renderMyMusic();
   if(state.view==="fans") return renderFans();
