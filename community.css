@@ -397,6 +397,7 @@ body.has-page-bg .topbar{background:rgba(255,221,191,.45)}
 .mine .msg-file-link{background:var(--orange);color:#fff;border-bottom-right-radius:4px}
 .theirs .msg-file-link{background:#fff;color:var(--ink);border-bottom-left-radius:4px;box-shadow:0 2px 6px rgba(180,120,60,.12)}
 .msg-caption{font-size:12px;padding:2px 6px;color:var(--muted);font-style:italic}
+.msg-file-expired{font-size:12px;color:var(--muted);font-style:italic;padding:8px 12px;background:rgba(0,0,0,.04);border-radius:10px;border:1px dashed var(--line)}
 /* in-message links */
 .msg-link{text-decoration:underline;word-break:break-all}
 .mine .msg-link{color:rgba(255,255,255,.9)}

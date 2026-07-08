@@ -788,6 +788,22 @@ function uploadToCloudinary(blob, onProgress){
     xhr.send(fd);
   });
 }
+// Chat file upload: images use image/upload so Cloudinary serves the correct content-type.
+// Audio/video/other keep video/upload (same preset, different resource namespace).
+function uploadChatFile(file, onProgress){
+  const endpoint=file.type.startsWith("image/")?"image/upload":"video/upload";
+  return new Promise((resolve,reject)=>{
+    const fd=new FormData();
+    fd.append("file",file);
+    fd.append("upload_preset","okmusic_audio");
+    const xhr=new XMLHttpRequest();
+    xhr.open("POST",`https://api.cloudinary.com/v1_1/llka5use/${endpoint}`);
+    if(onProgress) xhr.upload.onprogress=e=>{ if(e.lengthComputable) onProgress(Math.round(e.loaded/e.total*100)); };
+    xhr.onload=()=>{ try{ const r=JSON.parse(xhr.responseText); if(r.secure_url) resolve(r.secure_url); else reject(new Error(r.error?.message||"Upload failed")); }catch(err){ reject(err); } };
+    xhr.onerror=()=>reject(new Error("Network error — check your connection"));
+    xhr.send(fd);
+  });
+}
 
 async function migrateTrack(trackId){
   const t=allTracks().find(x=>x.id===trackId); if(!t) return;
@@ -1712,13 +1728,19 @@ function renderMsgContent(m){
     const{html:mH,firstUrl:mU}=linkifyText(m.text||'');
     return`<div class="msg-text">${mH}${edited}</div>${lpTag(mU)}`;
   }
+  // 3-day expiry check
+  if(m.fileExpiry&&Date.now()>m.fileExpiry){
+    const{html:cH}=m.text?linkifyText(m.text):{html:''};
+    const caption=m.text?`<div class="msg-caption">${cH}${edited}</div>`:"";
+    return`<div class="msg-media"><div class="msg-file-expired">⏳ File expired — no longer available</div>${caption}</div>`;
+  }
   let fileEl;
   if(m.fileType&&m.fileType.startsWith("image/")){
-    fileEl=`<a href="${m.fileUrl}" target="_blank" rel="noopener"><img class="msg-img" src="${m.fileUrl}" loading="lazy"/></a>`;
+    fileEl=`<a href="${m.fileUrl}" target="_blank" rel="noopener"><img class="msg-img" src="${m.fileUrl}" loading="lazy" onerror="this.closest('.msg-media').innerHTML='<div class=\\'msg-file-expired\\'>⚠️ Image could not be loaded</div>'"/></a>`;
   } else if(m.fileType&&m.fileType.startsWith("audio/")){
     fileEl=`<audio class="msg-audio" src="${m.fileUrl}" controls preload="none"></audio>`;
   } else if(m.fileType&&m.fileType.startsWith("video/")){
-    fileEl=`<video class="msg-video" src="${m.fileUrl}" controls preload="none"></video>`;
+    fileEl=`<video class="msg-video" src="${m.fileUrl}" controls preload="none" onerror="this.closest('.msg-media').innerHTML='<div class=\\'msg-file-expired\\'>⚠️ Video could not be loaded</div>'"></video>`;
   } else {
     fileEl=`<a class="msg-file-link" href="${m.fileUrl}" target="_blank" rel="noopener noreferrer">📎 ${esc(m.fileName||"File")}</a>`;
   }
@@ -1813,10 +1835,11 @@ async function sendMsg(uid){
     clearPendingFile();
     const btn=$("chatSendBtn");if(btn){btn.disabled=true;btn.textContent="Uploading…";}
     try{
-      const url=await uploadToCloudinary(file,pct=>{if(btn)btn.textContent=`${pct}%`;});
+      const url=await uploadChatFile(file,pct=>{if(btn)btn.textContent=`${pct}%`;});
       msgData.fileUrl=url;
       msgData.fileType=file.type||"application/octet-stream";
       msgData.fileName=file.name||"file";
+      msgData.fileExpiry=Date.now()+(3*24*60*60*1000); // 3 days
     }catch(e){
       if(btn){btn.disabled=false;btn.textContent="Send";}
       return toast("Upload failed: "+(e.message||e));
