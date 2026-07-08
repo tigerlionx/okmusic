@@ -1721,6 +1721,7 @@ function openChat(uid){
     const fi=$("chatFileInput");
     if(fi) fi.addEventListener("change",()=>{
       const f=fi.files[0];if(!f)return;
+      if(f.size>27*1024*1024){toast("File is too large — max 27 MB.");fi.value="";return;}
       clearPendingFile();
       _pendingFile=f;
       const preview=$("chatFilePreview");if(!preview)return;
