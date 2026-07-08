@@ -194,6 +194,7 @@ body.has-page-bg .topbar{background:rgba(255,221,191,.45)}
 .authcard{background:#fff;border-radius:18px;box-shadow:var(--shadow);padding:24px;text-align:left}
 .authcard .fb-field{margin-bottom:0;margin-top:4px}
 .authfoot{margin-top:18px;font-size:13px;color:var(--muted);text-align:center}
+.landing-copyright{margin-top:20px;font-size:11px;color:#a07850;text-align:center;opacity:.75;letter-spacing:.2px}
 
 /* ===== avatar lightbox ===== */
 .avatar-lightbox{text-align:center;padding:8px 0 4px}
