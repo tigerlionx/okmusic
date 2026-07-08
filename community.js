@@ -1931,15 +1931,19 @@ async function endCall(){
 function listenForIncomingCalls(){
   if(!ME||!ME.handle)return;
   if(_callsUnsub){_callsUnsub();_callsUnsub=null;}
-  _callsUnsub=fbDB.collection("calls").where("calleeId","==",ME.id).where("status","==","ringing")
+  // Single-field query — no composite index needed.
+  // Two-field query (calleeId + status) silently fails without a composite index,
+  // so we filter status and recency in JavaScript instead.
+  _callsUnsub=fbDB.collection("calls").where("calleeId","==",ME.id)
     .onSnapshot(snap=>{
       snap.docChanges().forEach(ch=>{
         if(ch.type==="added"&&!activePc){
           const d=ch.doc.data();
-          openCallUI(d.callerId,"incoming");
+          const fresh=Date.now()-d.time<120000; // ignore calls older than 2 min
+          if(d.status==="ringing"&&fresh) openCallUI(d.callerId,"incoming");
         }
       });
-    },()=>{});
+    },e=>console.warn("calls listener:",e.code||e.message));
 }
 let _callsUnsub=null;
 function startListeners(){
