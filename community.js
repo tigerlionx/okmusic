@@ -788,10 +788,12 @@ function uploadToCloudinary(blob, onProgress){
     xhr.send(fd);
   });
 }
-// Chat file upload: images use image/upload so Cloudinary serves the correct content-type.
-// Audio/video/other keep video/upload (same preset, different resource namespace).
+// Chat file upload: use the correct Cloudinary resource namespace per file type.
 function uploadChatFile(file, onProgress){
-  const endpoint=file.type.startsWith("image/")?"image/upload":"video/upload";
+  let endpoint;
+  if(file.type.startsWith("image/")) endpoint="image/upload";
+  else if(file.type.startsWith("audio/")||file.type.startsWith("video/")) endpoint="video/upload";
+  else endpoint="raw/upload";
   return new Promise((resolve,reject)=>{
     const fd=new FormData();
     fd.append("file",file);
@@ -1201,7 +1203,7 @@ function openProductForm(productId){
     <div class="field"><label>Shipping cost (USD)</label><input class="fb-field" id="prodShip" type="number" min="0" step="0.01" placeholder="0.00" value="${p?.shipping||''}" /></div>
     <div class="field"><label>Product photo</label>
       <div class="covup"><div class="covprev" id="prodPhotoPrev" style="${prevStyle}">${window._mpPhoto?'':'📦'}</div>
-        <div><input type="file" id="prodPhotoFile" accept="image/*" /><div class="note" style="margin-top:4px">JPG/PNG/WEBP — uploaded to cloud</div></div></div></div>
+        <div><input type="file" id="prodPhotoFile" accept="image/*,.heic,.heif,.avif,.webp,.tiff,.bmp,.svg" /><div class="note" style="margin-top:4px">All photo formats supported (JPG, PNG, WEBP, HEIC, RAW…)</div></div></div></div>
     <button class="btn primary block" data-action="dosaveproduct" data-id="${productId||''}" style="margin-top:16px">${p?'Save changes':'List product'}</button>`);
 }
 async function doSaveProduct(productId){
@@ -1764,7 +1766,7 @@ function openChat(uid){
     <div class="chat-msgs" id="chatMsgs"></div>
     <div class="chat-input-row">
       <button class="chat-attach-btn" data-action="attachfile" title="Attach file">📎</button>
-      <input type="file" id="chatFileInput" accept="image/*,audio/*,video/*,.pdf,.doc,.docx,.txt,.zip" style="display:none"/>
+      <input type="file" id="chatFileInput" style="display:none"/>
       <div class="chat-input-wrap">
         <div class="chat-file-preview" id="chatFilePreview"></div>
         <input class="chat-input" id="chatInput" placeholder="Type a message…" maxlength="1000"/>
