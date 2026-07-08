@@ -1553,9 +1553,10 @@ async function testMic(){
 }
 
 // ---- Sound feedback (Web Audio API — no external files needed) ----
-let _ringCtx=null;
+let _ringCtx=null,_ringOscs=[];
 function playRing(){
   stopRing();
+  _ringOscs=[];
   try{
     const ctx=new(window.AudioContext||window.webkitAudioContext)();
     _ringCtx=ctx;
@@ -1571,13 +1572,21 @@ function playRing(){
         const o=ctx.createOscillator();
         o.type="sine";o.frequency.value=freq;
         o.connect(g);o.start(t);o.stop(t+2.0);
+        _ringOscs.push(o);
       });
     }
     if(navigator.vibrate) navigator.vibrate([2000,4000,2000,4000,2000,4000,2000,4000,2000,4000]);
   }catch(e){}
 }
 function stopRing(){
-  if(_ringCtx){try{_ringCtx.close();}catch(e){}_ringCtx=null;}
+  // Stop each oscillator immediately — close() alone is async and too slow on Safari/iOS
+  _ringOscs.forEach(o=>{try{o.stop(0);}catch(e){}});
+  _ringOscs=[];
+  if(_ringCtx){
+    try{_ringCtx.suspend();}catch(e){} // hardware-level mute, instant
+    try{_ringCtx.close();}catch(e){}
+    _ringCtx=null;
+  }
   if(navigator.vibrate) navigator.vibrate(0);
 }
 function playMsgSound(){
