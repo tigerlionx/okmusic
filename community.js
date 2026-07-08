@@ -1551,7 +1551,7 @@ const ICE=[
   {urls:"turn:freestun.net:3479",username:"free",credential:"free"},
   {urls:"turns:freestun.net:5350",username:"free",credential:"free"},
 ];
-let activePc=null,activeStream=null,activeCallId=null,callUnsub=null,callInterval=null,muted=false;
+let activePc=null,activeStream=null,activeCallId=null,callUnsub=null,callInterval=null,muted=false,_iceTimeout=null;
 let _vizAnimId=null,_vizCtx=null,_localAn=null,_remoteAn=null,_localData=null,_remoteData=null,_testMicStream=null;
 
 function _makeAn(stream){
@@ -1937,8 +1937,25 @@ async function initiateCall(uid){
     };
 
     pc.oniceconnectionstatechange=()=>{
-      if(pc.iceConnectionState==="connected"||pc.iceConnectionState==="completed"){startCallTimer();const s=$("callStatus");if(s)s.textContent="Connected ✓";}
-      else if(pc.iceConnectionState==="failed"){const s=$("callStatus");if(s)s.textContent="Connection failed — check mic permissions.";}
+      const st=pc.iceConnectionState;
+      if(st==="checking"){
+        clearTimeout(_iceTimeout);
+        _iceTimeout=setTimeout(()=>{
+          if(activePc&&activePc.iceConnectionState==="checking"){
+            const s=$("callStatus");if(s)s.textContent="Could not connect — check your network and try again.";
+            setTimeout(endCall,2500);
+          }
+        },30000);
+      } else if(st==="connected"||st==="completed"){
+        clearTimeout(_iceTimeout);_iceTimeout=null;
+        startCallTimer();const s=$("callStatus");if(s)s.textContent="Connected ✓";
+      } else if(st==="failed"){
+        clearTimeout(_iceTimeout);_iceTimeout=null;
+        const s=$("callStatus");if(s)s.textContent="Connection failed — check mic & network.";
+        setTimeout(endCall,2500);
+      } else if(st==="disconnected"){
+        const s=$("callStatus");if(s)s.textContent="Connection lost — reconnecting…";
+      }
     };
 
     const buf=[];let docReady=false;
@@ -2010,8 +2027,25 @@ async function acceptCall(uid){
     };
 
     pc.oniceconnectionstatechange=()=>{
-      if(pc.iceConnectionState==="connected"||pc.iceConnectionState==="completed"){startCallTimer();const st=$("callStatus");if(st)st.textContent="Connected ✓";}
-      else if(pc.iceConnectionState==="failed"){const st=$("callStatus");if(st)st.textContent="Connection failed — check mic permissions.";}
+      const ist=pc.iceConnectionState;
+      if(ist==="checking"){
+        clearTimeout(_iceTimeout);
+        _iceTimeout=setTimeout(()=>{
+          if(activePc&&activePc.iceConnectionState==="checking"){
+            const s=$("callStatus");if(s)s.textContent="Could not connect — check your network and try again.";
+            setTimeout(endCall,2500);
+          }
+        },30000);
+      } else if(ist==="connected"||ist==="completed"){
+        clearTimeout(_iceTimeout);_iceTimeout=null;
+        startCallTimer();const st=$("callStatus");if(st)st.textContent="Connected ✓";
+      } else if(ist==="failed"){
+        clearTimeout(_iceTimeout);_iceTimeout=null;
+        const st=$("callStatus");if(st)st.textContent="Connection failed — check mic & network.";
+        setTimeout(endCall,2500);
+      } else if(ist==="disconnected"){
+        const st=$("callStatus");if(st)st.textContent="Connection lost — reconnecting…";
+      }
     };
 
     // CRITICAL: set onicecandidate BEFORE setLocalDescription
@@ -2065,6 +2099,7 @@ function muteCall(){
 }
 async function endCall(){
   stopRing();stopVoiceViz();
+  clearTimeout(_iceTimeout);_iceTimeout=null;
   audio.volume=_preMusicVol;
   clearInterval(callInterval);callInterval=null;
   if(callUnsub){callUnsub();callUnsub=null;}
