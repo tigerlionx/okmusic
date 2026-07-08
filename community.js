@@ -149,7 +149,8 @@ function renderLanding(){
       <button class="btn primary block" data-action="authemail" style="margin-top:10px">Continue with email</button>
     </div>
     <div class="authfoot">No account needed to listen — sign in to share & follow.</div>
-  </div></div>`;
+  </div></div>
+  <div class="landing-copyright">Copyright OK Music&#x2122; Company &mdash; Contact: trendai509@gmail.com &mdash; Jul 2026</div>`;
 }
 function signInGoogle(){
   const provider=new firebase.auth.GoogleAuthProvider();
