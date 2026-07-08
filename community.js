@@ -9,6 +9,8 @@
 // ============================================================
 const $ = (id) => document.getElementById(id);
 const audio = $("audio");
+let _linkCache = {};
+let _preMusicVol = 1;
 
 // Seed data (incl. 100 demo creators) now lives in community-data.js:
 // SEED_USERS, SEED_TRACKS, SEED_STATUSES, SEED_STATS, SEED_FOLLOWERS, SEED_ST_STATS.
@@ -349,7 +351,9 @@ function renderApp(){
 }
 function renderMain(){
   if(state.view!=="chat" && msgUnsub){ msgUnsub(); msgUnsub=null; }
-  if(ME && ME.pageBgImg){ _setBgStyle(ME.pageBgImg, ME.pageBgMode||"stretch", ME.pageBgFilter||{}); }
+  const _visU=state.view==="profile"?userById(state.profileId):null;
+  const _bgSrc=(_visU&&_visU.pageBgImg)?_visU:((ME&&ME.pageBgImg)?ME:null);
+  if(_bgSrc) _setBgStyle(_bgSrc.pageBgImg,_bgSrc.pageBgMode||"stretch",_bgSrc.pageBgFilter||{});
   else _clearBg();
   if(state.view==="profile") return renderProfile(state.profileId);
   if(state.view==="mymusic") return renderMyMusic();
@@ -462,14 +466,55 @@ function composer(){
     <div style="text-align:right"><button class="btn primary sm" data-action="poststatus">Post status</button></div></div>`;
 }
 function bindComposer(){ /* nothing extra; handled via delegation */ }
+// ---- link preview helpers ----
+const _URL_RE=/https?:\/\/[^\s<>"']+/g;
+function linkifyText(raw){
+  if(!raw)return{html:'',firstUrl:''};
+  const urls=raw.match(_URL_RE)||[];
+  const parts=raw.split(_URL_RE);
+  let html='';
+  parts.forEach((p,i)=>{
+    html+=esc(p);
+    if(urls[i]) html+=`<a href="${esc(urls[i])}" target="_blank" rel="noopener noreferrer" class="msg-link">${esc(urls[i])}</a>`;
+  });
+  return{html,firstUrl:urls[0]||''};
+}
+function lpTag(url){
+  if(!url)return'';
+  return`<div class="lp-pending" data-url="${esc(url)}"></div>`;
+}
+async function fetchLinkPreviews(){
+  document.querySelectorAll('.lp-pending').forEach(async el=>{
+    el.classList.remove('lp-pending');
+    const url=el.dataset.url;if(!url)return;
+    if(_linkCache[url]===null)return;
+    if(_linkCache[url]){el.innerHTML=_lpCard(_linkCache[url],url);return;}
+    try{
+      const r=await fetch(`https://api.microlink.io/?url=${encodeURIComponent(url)}`);
+      const j=await r.json();
+      if(j.status==='success'&&j.data){_linkCache[url]=j.data;el.innerHTML=_lpCard(j.data,url);}
+      else _linkCache[url]=null;
+    }catch(e){_linkCache[url]=null;}
+  });
+}
+function _lpCard(data,url){
+  const img=data.image?.url||data.logo?.url||'';
+  const title=(data.title||'').slice(0,80);
+  const desc=(data.description||'').slice(0,120);
+  let domain='';try{domain=new URL(url).hostname.replace(/^www\./,'');}catch(e){domain=url.slice(0,30);}
+  if(!title&&!img)return'';
+  return`<a class="link-preview-card" href="${esc(url)}" target="_blank" rel="noopener noreferrer">${img?`<div class="lp-img" style="background-image:url('${esc(img)}')"></div>`:''}<div class="lp-info"><div class="lp-domain">${esc(domain)}</div>${title?`<div class="lp-title">${esc(title)}</div>`:''}${desc?`<div class="lp-desc">${esc(desc)}</div>`:''}</div></a>`;
+}
+
 function statusCard(s){
   const u=userById(s.userId); const cs=stComments(s.id);
-  const cmts=cs.map(c=>{ const mine=ME&&c.uid===ME.id; return `<div class="scmt"><div class="sc-av" style="${avatarStyle(userById(c.uid)||{color:'#bbb'},28)}">${(userById(c.uid)?.avatarImg)?'':initials(c.name)}</div>
-      <div class="sc-b"><b>${esc(c.name)}</b> · <span style="color:var(--muted);font-size:11px">${timeAgo(c.time)}${c.edited?' · edited':''}</span><div>${esc(c.text)}</div>${mine?`<div class="cmt-edit"><span data-action="editcmt" data-id="${c.id}">Edit</span> · <span data-action="delcmt" data-id="${c.id}">Delete</span></div>`:''}</div></div>`; }).join("");
+  const {html:stHtml,firstUrl:stUrl}=linkifyText(s.text||'');
+  const cmts=cs.map(c=>{ const mine=ME&&c.uid===ME.id; const {html:cHtml,firstUrl:cUrl}=linkifyText(c.text||''); return `<div class="scmt"><div class="sc-av" style="${avatarStyle(userById(c.uid)||{color:'#bbb'},28)}">${(userById(c.uid)?.avatarImg)?'':initials(c.name)}</div>
+      <div class="sc-b"><b>${esc(c.name)}</b> · <span style="color:var(--muted);font-size:11px">${timeAgo(c.time)}${c.edited?' · edited':''}</span><div>${cHtml}</div>${lpTag(cUrl)}${mine?`<div class="cmt-edit"><span data-action="editcmt" data-id="${c.id}">Edit</span> · <span data-action="delcmt" data-id="${c.id}">Delete</span></div>`:''}</div></div>`; }).join("");
   return `<div class="status-card">
     <div class="status-top"><div class="avatar" style="${avatarStyle(u,38)};cursor:pointer" data-action="viewavatar" data-uid="${u.id}">${u.avatarImg?'':initials(u.name)}</div>
       <div><div class="sname" data-action="profile" data-uid="${u.id}">${esc(u.name)}</div><div class="stime">${timeAgo(s.time)}</div></div></div>
-    <div class="status-text">${esc(s.text)}</div>
+    <div class="status-text">${stHtml}</div>${lpTag(stUrl)}
     <div class="status-actions ld">
       <button class="${stHasLiked(s.id)?'on':''}" data-action="slike" data-id="${s.id}">👍 ${nfmt(stLikeCount(s.id))}</button>
       <button class="${stHasDisliked(s.id)?'ondown':''}" data-action="sdislike" data-id="${s.id}">👎 ${nfmt(stDislikeCount(s.id))}</button></div>
@@ -1474,7 +1519,7 @@ document.addEventListener("input",e=>{
 
 // ---------- live Firestore listeners (shared data) ----------
 let _rt=null;
-function scheduleRender(){ clearTimeout(_rt); _rt=setTimeout(()=>{ const a=document.activeElement; if(a && /INPUT|TEXTAREA/.test(a.tagName)) return; render(); }, 80); }
+function scheduleRender(){ clearTimeout(_rt); _rt=setTimeout(()=>{ const a=document.activeElement; if(a && /INPUT|TEXTAREA/.test(a.tagName)) return; render(); setTimeout(fetchLinkPreviews,120); }, 80); }
 
 // ============ PRIVATE MESSENGER ============
 const ICE=[
@@ -1650,7 +1695,10 @@ function clearPendingFile(){
 
 function renderMsgContent(m){
   const edited=m.edited?'<span class="msg-edited"> · edited</span>':'';
-  if(!m.fileUrl) return`<div class="msg-text">${esc(m.text||"")}${edited}</div>`;
+  if(!m.fileUrl){
+    const{html:mH,firstUrl:mU}=linkifyText(m.text||'');
+    return`<div class="msg-text">${mH}${edited}</div>${lpTag(mU)}`;
+  }
   let fileEl;
   if(m.fileType&&m.fileType.startsWith("image/")){
     fileEl=`<a href="${m.fileUrl}" target="_blank" rel="noopener"><img class="msg-img" src="${m.fileUrl}" loading="lazy"/></a>`;
@@ -1661,7 +1709,8 @@ function renderMsgContent(m){
   } else {
     fileEl=`<a class="msg-file-link" href="${m.fileUrl}" target="_blank" rel="noopener noreferrer">📎 ${esc(m.fileName||"File")}</a>`;
   }
-  const caption=m.text?`<div class="msg-caption">${esc(m.text)}${edited}</div>`:"";
+  const{html:cH,firstUrl:cU}=m.text?linkifyText(m.text):{html:'',firstUrl:''};
+  const caption=m.text?`<div class="msg-caption">${cH}${edited}</div>${lpTag(cU)}`:"";
   return`<div class="msg-media">${fileEl}${caption}</div>`;
 }
 
@@ -1715,6 +1764,7 @@ function openChat(uid){
             </div></div>`;
         }).join('');
       el.scrollTop=el.scrollHeight;
+      setTimeout(fetchLinkPreviews,0);
     },e=>console.warn("msgs",e));
   setTimeout(()=>{
     const inp=$("chatInput");
@@ -1848,6 +1898,7 @@ function openCallUI(uid,mode){
   // Do NOT call ra.play() here — no source yet, and a failed play() can corrupt
   // the element's internal state before the real stream arrives in ontrack.
   try{const _ac=new(window.AudioContext||window.webkitAudioContext)();_ac.resume().catch(()=>{});}catch(e){}
+  _preMusicVol=audio.volume||1; audio.volume=0.12;
   if(mode==="incoming") playRing();
   if(mode==="outgoing") initiateCall(uid);
 }
@@ -1999,6 +2050,7 @@ function muteCall(){
 }
 async function endCall(){
   stopRing();stopVoiceViz();
+  audio.volume=_preMusicVol;
   clearInterval(callInterval);callInterval=null;
   if(callUnsub){callUnsub();callUnsub=null;}
   if(activePc){activePc.close();activePc=null;}
