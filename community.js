@@ -950,7 +950,7 @@ function viewAvatar(uid){
 
 // ---------- overlay ----------
 function openOverlay(h){ $("overlayBody").innerHTML=`<div class="modal"><button class="modal-x" data-action="close">✕</button>${h}</div>`; $("overlay").hidden=false; }
-function closeOverlay(){ $("overlay").hidden=true; $("overlayBody").innerHTML=""; }
+function closeOverlay(){ if(activePc){endCall();return;} $("overlay").hidden=true; $("overlayBody").innerHTML=""; }
 
 // ---------- player ----------
 let hasSrc=false;
@@ -1437,7 +1437,7 @@ document.addEventListener("click",e=>{
     deletemsgmenu:()=>deleteMsgMenu(el.dataset.msgid,el.dataset.cid),
     deletemsgall:()=>deleteMsgForAll(el.dataset.msgid,el.dataset.cid),
     deletemsgme:()=>deleteMsgForMe(el.dataset.msgid,el.dataset.cid),
-    startcall:()=>startCall(el.dataset.uid),
+    startcall:()=>startCall(el.dataset.uid), testmic:testMic,
     acceptcall:()=>acceptCall(el.dataset.uid),
     mutecall:muteCall,
     endcall:endCall,
@@ -1474,8 +1474,83 @@ let _rt=null;
 function scheduleRender(){ clearTimeout(_rt); _rt=setTimeout(()=>{ const a=document.activeElement; if(a && /INPUT|TEXTAREA/.test(a.tagName)) return; render(); }, 80); }
 
 // ============ PRIVATE MESSENGER ============
-const ICE=[{urls:"stun:stun.l.google.com:19302"},{urls:"stun:stun1.l.google.com:19302"}];
+const ICE=[
+  {urls:"stun:stun.l.google.com:19302"},
+  {urls:"stun:stun1.l.google.com:19302"},
+  {urls:"stun:stun2.l.google.com:19302"},
+  {urls:"stun:stun3.l.google.com:19302"},
+  // OpenRelay free TURN (multiple regions + transports for best chance)
+  {urls:"turn:openrelay.metered.ca:80",username:"openrelayproject",credential:"openrelayproject"},
+  {urls:"turn:openrelay.metered.ca:443",username:"openrelayproject",credential:"openrelayproject"},
+  {urls:"turn:openrelay.metered.ca:443?transport=tcp",username:"openrelayproject",credential:"openrelayproject"},
+  {urls:"turn:openrelay.metered.ca:80?transport=udp",username:"openrelayproject",credential:"openrelayproject"},
+  // FreeSun public TURN
+  {urls:"turn:freestun.net:3479",username:"free",credential:"free"},
+  {urls:"turns:freestun.net:5350",username:"free",credential:"free"},
+];
 let activePc=null,activeStream=null,activeCallId=null,callUnsub=null,callInterval=null,muted=false;
+let _vizAnimId=null,_vizCtx=null,_localAn=null,_remoteAn=null,_localData=null,_remoteData=null,_testMicStream=null;
+
+function _makeAn(stream){
+  const src=_vizCtx.createMediaStreamSource(stream);
+  const an=_vizCtx.createAnalyser();
+  an.fftSize=64;an.smoothingTimeConstant=0.8;
+  src.connect(an);
+  return an;
+}
+
+function _drawBars(id,an,data){
+  const wrap=$(id);if(!wrap||!an)return;
+  an.getByteFrequencyData(data);
+  const bars=wrap.querySelectorAll(".vv-bar");
+  const n=bars.length;const sl=Math.max(1,Math.floor(data.length*0.55/n));
+  bars.forEach((b,i)=>{
+    const v=data[Math.min(i*sl+1,data.length-1)]||0;
+    b.style.height=Math.max(3,Math.round((v/255)*42))+"px";
+    b.classList.toggle("lit",v>8);
+  });
+}
+
+function startVoiceViz(localStream){
+  stopVoiceViz();
+  try{
+    _vizCtx=new(window.AudioContext||window.webkitAudioContext)();
+    _vizCtx.resume();
+    _localAn=_makeAn(localStream);
+    _localData=new Uint8Array(_localAn.frequencyBinCount);
+    function tick(){
+      _vizAnimId=requestAnimationFrame(tick);
+      _drawBars("localBars",_localAn,_localData);
+      if(_remoteAn&&_remoteData)_drawBars("remoteBars",_remoteAn,_remoteData);
+    }
+    tick();
+  }catch(e){}
+}
+
+function addRemoteViz(stream){
+  if(!_vizCtx||!stream)return;
+  try{_remoteAn=_makeAn(stream);_remoteData=new Uint8Array(_remoteAn.frequencyBinCount);}catch(e){}
+}
+
+function stopVoiceViz(){
+  if(_vizAnimId){cancelAnimationFrame(_vizAnimId);_vizAnimId=null;}
+  if(_vizCtx){_vizCtx.close().catch(()=>{});_vizCtx=null;}
+  _localAn=null;_remoteAn=null;_localData=null;_remoteData=null;
+  if(_testMicStream){_testMicStream.getTracks().forEach(t=>t.stop());_testMicStream=null;}
+}
+
+async function testMic(){
+  if(_testMicStream)return;
+  const btn=$("micTestBtn");if(btn)btn.style.display="none";
+  try{
+    const stream=await navigator.mediaDevices.getUserMedia({audio:true});
+    _testMicStream=stream;
+    startVoiceViz(stream);
+  }catch(e){
+    toast(e.name==="NotAllowedError"?"Microphone blocked — allow access in your browser settings.":"Mic error: "+(e.message||e));
+    const btn2=$("micTestBtn");if(btn2)btn2.style.display="flex";
+  }
+}
 
 // ---- Sound feedback (Web Audio API — no external files needed) ----
 let _ringCtx=null;
@@ -1662,17 +1737,38 @@ function startCall(uid){
 
 function openCallUI(uid,mode){
   const other=userById(uid)||{name:"Someone",color:"#888"};
+  const pulse=mode==="incoming"||mode==="outgoing";
   openOverlay(`<div class="call-ui">
-    <div class="call-avatar"><div class="avatar" style="${avatarStyle(other,80)};margin:0 auto">${other.avatarImg?'':initials(other.name)}</div></div>
+    <div class="call-avatar-wrap">
+      ${pulse?'<div class="call-pulse"></div><div class="call-pulse d2"></div>':''}
+      <div class="avatar" style="${avatarStyle(other,108)}">${other.avatarImg?'':initials(other.name)}</div>
+    </div>
     <div class="call-name">${esc(other.name)}</div>
     <div class="call-status" id="callStatus">${mode==="outgoing"?"Calling…":"Incoming call…"}</div>
-    <div class="call-timer" id="callTimer">0:00</div>
     <audio id="remoteAudio" autoplay playsinline></audio>
+    <div class="call-timer" id="callTimer" style="display:none">0:00</div>
+    <div class="voice-viz" id="voiceViz">
+      <div class="vv-col">
+        <div class="vv-bars" id="localBars">${'<div class="vv-bar"></div>'.repeat(10)}</div>
+        <span class="vv-lbl">🎙️ You</span>
+      </div>
+      <div class="vv-mid">〰</div>
+      <div class="vv-col">
+        <div class="vv-bars" id="remoteBars">${'<div class="vv-bar vv-r"></div>'.repeat(10)}</div>
+        <span class="vv-lbl">🔊 Them</span>
+      </div>
+    </div>
+    ${mode==="incoming"?`<button class="mic-test-btn" id="micTestBtn" data-action="testmic">🎙️ Test your mic before answering</button>`:''}
     <div class="call-btns">
-      ${mode==="incoming"?`<button class="call-btn-accept" data-action="acceptcall" data-uid="${uid}">✅ Accept</button>`:''}
-      <button class="call-btn-mute" id="muteBtn" data-action="mutecall">🎙️ Mute</button>
-      <button class="call-btn-end" data-action="endcall" data-uid="${uid}">${mode==="incoming"?"❌ Decline":"📵 End"}</button>
-    </div></div>`);
+      ${mode==="incoming"?`<button class="call-btn-accept" data-action="acceptcall" data-uid="${uid}" title="Accept">📞</button>`:''}
+      <button class="call-btn-mute" id="muteBtn" data-action="mutecall" title="Mute">🎙️</button>
+      <button class="call-btn-end" data-action="endcall" title="${mode==="incoming"?"Decline":"End call"}">📵</button>
+    </div>
+  </div>`);
+  // Unlock Web Audio API during this user-gesture frame (required for iOS/Safari).
+  // Do NOT call ra.play() here — no source yet, and a failed play() can corrupt
+  // the element's internal state before the real stream arrives in ontrack.
+  try{const _ac=new(window.AudioContext||window.webkitAudioContext)();_ac.resume().catch(()=>{});}catch(e){}
   if(mode==="incoming") playRing();
   if(mode==="outgoing") initiateCall(uid);
 }
@@ -1682,51 +1778,134 @@ async function initiateCall(uid){
   try{
     const stream=await navigator.mediaDevices.getUserMedia({audio:true});
     activeStream=stream;
+    startVoiceViz(stream); // local bars start animating immediately so caller can verify mic
     const pc=new RTCPeerConnection({iceServers:ICE});activePc=pc;
     stream.getTracks().forEach(t=>pc.addTrack(t,stream));
-    pc.ontrack=e=>{const ra=$("remoteAudio");if(ra)ra.srcObject=e.streams[0];};
-    const offer=await pc.createOffer();await pc.setLocalDescription(offer);
-    await fbDB.collection("calls").doc(cid).set({callerId:ME.id,calleeId:uid,offer:{type:offer.type,sdp:offer.sdp},callerCandidates:[],calleeCandidates:[],status:"ringing",time:Date.now()});
-    pc.onicecandidate=async e=>{if(e.candidate) await fbDB.collection("calls").doc(cid).update({callerCandidates:firebase.firestore.FieldValue.arrayUnion(e.candidate.toJSON())}).catch(()=>{});};
-    fbDB.collection("notifications").add({forUid:uid,type:"call",fromUid:ME.id,fromName:ME.name,text:`📞 ${ME.name} is calling you — open the app to answer.`,time:Date.now(),read:false}).catch(()=>{});
+
+    pc.ontrack=e=>{
+      const ra=$("remoteAudio");if(!ra)return;
+      const ms=(e.streams&&e.streams.length&&e.streams[0])||new MediaStream([e.track]);
+      ra.srcObject=ms;ra.muted=false;ra.volume=1.0;
+      ra.play().catch(()=>{});
+      e.track.onunmute=()=>{if(ra.paused)ra.play().catch(()=>{});};
+      addRemoteViz(ms); // remote bars start animating when their audio arrives
+    };
+
+    pc.oniceconnectionstatechange=()=>{
+      if(pc.iceConnectionState==="connected"||pc.iceConnectionState==="completed"){startCallTimer();const s=$("callStatus");if(s)s.textContent="Connected ✓";}
+      else if(pc.iceConnectionState==="failed"){const s=$("callStatus");if(s)s.textContent="Connection failed — check mic permissions.";}
+    };
+
+    const buf=[];let docReady=false;
+    pc.onicecandidate=e=>{
+      if(!e.candidate)return;
+      const j=e.candidate.toJSON();
+      if(docReady) fbDB.collection("calls").doc(cid).update({callerCandidates:firebase.firestore.FieldValue.arrayUnion(j)}).catch(()=>{});
+      else buf.push(j);
+    };
+
+    const offer=await pc.createOffer();
+    await pc.setLocalDescription(offer); // <-- gathering starts here
+
+    await fbDB.collection("calls").doc(cid).set({
+      callerId:ME.id,calleeId:uid,
+      offer:{type:offer.type,sdp:offer.sdp},
+      callerCandidates:[],calleeCandidates:[],
+      status:"ringing",time:Date.now()
+    });
+    docReady=true;
+    if(buf.length) fbDB.collection("calls").doc(cid).update({callerCandidates:firebase.firestore.FieldValue.arrayUnion(...buf)}).catch(()=>{});
+
+    fbDB.collection("notifications").add({forUid:uid,type:"call",fromUid:ME.id,fromName:ME.name,text:`📞 ${ME.name} is calling you`,time:Date.now(),read:false}).catch(()=>{});
+
+    let addedCallee=0;
     callUnsub=fbDB.collection("calls").doc(cid).onSnapshot(async snap=>{
-      const d=snap.data();if(!d)return;
+      const d=snap.data();if(!d||!activePc)return;
       if(d.status==="ended"){endCall();return;}
       if(d.answer&&!pc.currentRemoteDescription){
         await pc.setRemoteDescription(new RTCSessionDescription(d.answer)).catch(()=>{});
-        const s=$("callStatus");if(s)s.textContent="Connected ✓";
-        startCallTimer();
+        const s=$("callStatus");if(s&&s.textContent==="Calling…")s.textContent="Connecting…";
       }
-      if(d.calleeCandidates?.length){for(const c of d.calleeCandidates)await pc.addIceCandidate(new RTCIceCandidate(c)).catch(()=>{});}
+      if(pc.currentRemoteDescription&&(d.calleeCandidates||[]).length>addedCallee){
+        const fresh=d.calleeCandidates.slice(addedCallee);
+        for(const c of fresh)await pc.addIceCandidate(new RTCIceCandidate(c)).catch(()=>{});
+        addedCallee=d.calleeCandidates.length;
+      }
     });
-  }catch(e){toast("Mic error: "+(e.message||e));endCall();}
+  }catch(e){
+    toast(e.name==="NotAllowedError"?"Microphone blocked — allow mic access in your browser settings and try again.":`Mic error: ${e.message||e}`);
+    endCall();
+  }
 }
 
 async function acceptCall(uid){
   stopRing();
   const s=$("callStatus");if(s)s.textContent="Connecting…";
-  const snap=await fbDB.collection("calls").where("callerId","==",uid).where("calleeId","==",ME.id).where("status","==","ringing").orderBy("time","desc").limit(1).get().catch(()=>null);
-  if(!snap||snap.empty){toast("Call expired.");closeOverlay();return;}
+  const snap=await fbDB.collection("calls")
+    .where("callerId","==",uid).where("calleeId","==",ME.id).where("status","==","ringing")
+    .orderBy("time","desc").limit(1).get().catch(()=>null);
+  if(!snap||snap.empty){toast("Call already ended.");$("overlay").hidden=true;$("overlayBody").innerHTML="";return;}
   const doc=snap.docs[0];const d=doc.data();const cid=doc.id;activeCallId=cid;
   try{
+    // Stop any test-mic stream before getting a fresh one for the actual call
+    if(_testMicStream){_testMicStream.getTracks().forEach(t=>t.stop());_testMicStream=null;}
     const stream=await navigator.mediaDevices.getUserMedia({audio:true});
     activeStream=stream;
+    startVoiceViz(stream); // local bars start animating immediately so callee can verify mic
     const pc=new RTCPeerConnection({iceServers:ICE});activePc=pc;
     stream.getTracks().forEach(t=>pc.addTrack(t,stream));
-    pc.ontrack=e=>{const ra=$("remoteAudio");if(ra)ra.srcObject=e.streams[0];};
+
+    pc.ontrack=e=>{
+      const ra=$("remoteAudio");if(!ra)return;
+      const ms=(e.streams&&e.streams.length&&e.streams[0])||new MediaStream([e.track]);
+      ra.srcObject=ms;ra.muted=false;ra.volume=1.0;
+      ra.play().catch(()=>{});
+      e.track.onunmute=()=>{if(ra.paused)ra.play().catch(()=>{});};
+      addRemoteViz(ms); // remote bars start animating when their audio arrives
+    };
+
+    pc.oniceconnectionstatechange=()=>{
+      if(pc.iceConnectionState==="connected"||pc.iceConnectionState==="completed"){startCallTimer();const st=$("callStatus");if(st)st.textContent="Connected ✓";}
+      else if(pc.iceConnectionState==="failed"){const st=$("callStatus");if(st)st.textContent="Connection failed — check mic permissions.";}
+    };
+
+    // CRITICAL: set onicecandidate BEFORE setLocalDescription
+    const buf=[];let docReady=false;
+    pc.onicecandidate=e=>{
+      if(!e.candidate)return;
+      const j=e.candidate.toJSON();
+      if(docReady) fbDB.collection("calls").doc(cid).update({calleeCandidates:firebase.firestore.FieldValue.arrayUnion(j)}).catch(()=>{});
+      else buf.push(j);
+    };
+
     await pc.setRemoteDescription(new RTCSessionDescription(d.offer));
-    const answer=await pc.createAnswer();await pc.setLocalDescription(answer);
+    const answer=await pc.createAnswer();
+    await pc.setLocalDescription(answer); // <-- gathering starts here
+
     await fbDB.collection("calls").doc(cid).update({answer:{type:answer.type,sdp:answer.sdp},status:"active"});
-    pc.onicecandidate=async e=>{if(e.candidate) await fbDB.collection("calls").doc(cid).update({calleeCandidates:firebase.firestore.FieldValue.arrayUnion(e.candidate.toJSON())}).catch(()=>{});};
-    if(d.callerCandidates?.length){for(const c of d.callerCandidates)await pc.addIceCandidate(new RTCIceCandidate(c)).catch(()=>{});}
+    docReady=true;
+    if(buf.length) fbDB.collection("calls").doc(cid).update({calleeCandidates:firebase.firestore.FieldValue.arrayUnion(...buf)}).catch(()=>{});
+
+    // Add caller's candidates that arrived before we accepted
+    let addedCaller=0;
+    if((d.callerCandidates||[]).length){
+      for(const c of d.callerCandidates)await pc.addIceCandidate(new RTCIceCandidate(c)).catch(()=>{});
+      addedCaller=d.callerCandidates.length;
+    }
+
     callUnsub=fbDB.collection("calls").doc(cid).onSnapshot(async snap2=>{
-      const d2=snap2.data();if(!d2)return;
+      const d2=snap2.data();if(!d2||!activePc)return;
       if(d2.status==="ended"){endCall();return;}
-      if(d2.callerCandidates?.length){for(const c of d2.callerCandidates)await pc.addIceCandidate(new RTCIceCandidate(c)).catch(()=>{});}
+      if((d2.callerCandidates||[]).length>addedCaller){
+        const fresh=d2.callerCandidates.slice(addedCaller);
+        for(const c of fresh)await pc.addIceCandidate(new RTCIceCandidate(c)).catch(()=>{});
+        addedCaller=d2.callerCandidates.length;
+      }
     });
-    if(s)s.textContent="Connected ✓";
-    startCallTimer();
-  }catch(e){toast("Mic error: "+(e.message||e));endCall();}
+  }catch(e){
+    toast(e.name==="NotAllowedError"?"Microphone blocked — allow mic access in your browser settings and try again.":`Mic error: ${e.message||e}`);
+    endCall();
+  }
 }
 
 function startCallTimer(){
@@ -1740,7 +1919,7 @@ function muteCall(){
   const b=$("muteBtn");if(b)b.textContent=muted?"🔇 Unmute":"🎙️ Mute";
 }
 async function endCall(){
-  stopRing();
+  stopRing();stopVoiceViz();
   clearInterval(callInterval);callInterval=null;
   if(callUnsub){callUnsub();callUnsub=null;}
   if(activePc){activePc.close();activePc=null;}
