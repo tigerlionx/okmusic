@@ -1437,7 +1437,7 @@ document.addEventListener("click",e=>{
     deletemsgmenu:()=>deleteMsgMenu(el.dataset.msgid,el.dataset.cid),
     deletemsgall:()=>deleteMsgForAll(el.dataset.msgid,el.dataset.cid),
     deletemsgme:()=>deleteMsgForMe(el.dataset.msgid,el.dataset.cid),
-    startcall:()=>startCall(el.dataset.uid),
+    startcall:()=>startCall(el.dataset.uid), testmic:testMic,
     acceptcall:()=>acceptCall(el.dataset.uid),
     mutecall:muteCall,
     endcall:endCall,
@@ -1489,6 +1489,68 @@ const ICE=[
   {urls:"turns:freestun.net:5350",username:"free",credential:"free"},
 ];
 let activePc=null,activeStream=null,activeCallId=null,callUnsub=null,callInterval=null,muted=false;
+let _vizAnimId=null,_vizCtx=null,_localAn=null,_remoteAn=null,_localData=null,_remoteData=null,_testMicStream=null;
+
+function _makeAn(stream){
+  const src=_vizCtx.createMediaStreamSource(stream);
+  const an=_vizCtx.createAnalyser();
+  an.fftSize=64;an.smoothingTimeConstant=0.8;
+  src.connect(an);
+  return an;
+}
+
+function _drawBars(id,an,data){
+  const wrap=$(id);if(!wrap||!an)return;
+  an.getByteFrequencyData(data);
+  const bars=wrap.querySelectorAll(".vv-bar");
+  const n=bars.length;const sl=Math.max(1,Math.floor(data.length*0.55/n));
+  bars.forEach((b,i)=>{
+    const v=data[Math.min(i*sl+1,data.length-1)]||0;
+    b.style.height=Math.max(3,Math.round((v/255)*42))+"px";
+    b.classList.toggle("lit",v>8);
+  });
+}
+
+function startVoiceViz(localStream){
+  stopVoiceViz();
+  try{
+    _vizCtx=new(window.AudioContext||window.webkitAudioContext)();
+    _vizCtx.resume();
+    _localAn=_makeAn(localStream);
+    _localData=new Uint8Array(_localAn.frequencyBinCount);
+    function tick(){
+      _vizAnimId=requestAnimationFrame(tick);
+      _drawBars("localBars",_localAn,_localData);
+      if(_remoteAn&&_remoteData)_drawBars("remoteBars",_remoteAn,_remoteData);
+    }
+    tick();
+  }catch(e){}
+}
+
+function addRemoteViz(stream){
+  if(!_vizCtx||!stream)return;
+  try{_remoteAn=_makeAn(stream);_remoteData=new Uint8Array(_remoteAn.frequencyBinCount);}catch(e){}
+}
+
+function stopVoiceViz(){
+  if(_vizAnimId){cancelAnimationFrame(_vizAnimId);_vizAnimId=null;}
+  if(_vizCtx){_vizCtx.close().catch(()=>{});_vizCtx=null;}
+  _localAn=null;_remoteAn=null;_localData=null;_remoteData=null;
+  if(_testMicStream){_testMicStream.getTracks().forEach(t=>t.stop());_testMicStream=null;}
+}
+
+async function testMic(){
+  if(_testMicStream)return;
+  const btn=$("micTestBtn");if(btn)btn.style.display="none";
+  try{
+    const stream=await navigator.mediaDevices.getUserMedia({audio:true});
+    _testMicStream=stream;
+    startVoiceViz(stream);
+  }catch(e){
+    toast(e.name==="NotAllowedError"?"Microphone blocked — allow access in your browser settings.":"Mic error: "+(e.message||e));
+    const btn2=$("micTestBtn");if(btn2)btn2.style.display="flex";
+  }
+}
 
 // ---- Sound feedback (Web Audio API — no external files needed) ----
 let _ringCtx=null;
@@ -1685,6 +1747,18 @@ function openCallUI(uid,mode){
     <div class="call-status" id="callStatus">${mode==="outgoing"?"Calling…":"Incoming call…"}</div>
     <audio id="remoteAudio" autoplay playsinline></audio>
     <div class="call-timer" id="callTimer" style="display:none">0:00</div>
+    <div class="voice-viz" id="voiceViz">
+      <div class="vv-col">
+        <div class="vv-bars" id="localBars">${'<div class="vv-bar"></div>'.repeat(10)}</div>
+        <span class="vv-lbl">🎙️ You</span>
+      </div>
+      <div class="vv-mid">〰</div>
+      <div class="vv-col">
+        <div class="vv-bars" id="remoteBars">${'<div class="vv-bar vv-r"></div>'.repeat(10)}</div>
+        <span class="vv-lbl">🔊 Them</span>
+      </div>
+    </div>
+    ${mode==="incoming"?`<button class="mic-test-btn" id="micTestBtn" data-action="testmic">🎙️ Test your mic before answering</button>`:''}
     <div class="call-btns">
       ${mode==="incoming"?`<button class="call-btn-accept" data-action="acceptcall" data-uid="${uid}" title="Accept">📞</button>`:''}
       <button class="call-btn-mute" id="muteBtn" data-action="mutecall" title="Mute">🎙️</button>
@@ -1704,28 +1778,24 @@ async function initiateCall(uid){
   try{
     const stream=await navigator.mediaDevices.getUserMedia({audio:true});
     activeStream=stream;
+    startVoiceViz(stream); // local bars start animating immediately so caller can verify mic
     const pc=new RTCPeerConnection({iceServers:ICE});activePc=pc;
     stream.getTracks().forEach(t=>pc.addTrack(t,stream));
 
     pc.ontrack=e=>{
       const ra=$("remoteAudio");if(!ra)return;
-      // e.streams[0] can be undefined on Firefox — fall back to building stream from e.track
       const ms=(e.streams&&e.streams.length&&e.streams[0])||new MediaStream([e.track]);
       ra.srcObject=ms;ra.muted=false;ra.volume=1.0;
       ra.play().catch(()=>{});
-      // Some browsers deliver the track initially muted then unmute it
       e.track.onunmute=()=>{if(ra.paused)ra.play().catch(()=>{});};
+      addRemoteViz(ms); // remote bars start animating when their audio arrives
     };
 
-    // oniceconnectionstatechange has broader browser support than onconnectionstatechange
     pc.oniceconnectionstatechange=()=>{
       if(pc.iceConnectionState==="connected"||pc.iceConnectionState==="completed"){startCallTimer();const s=$("callStatus");if(s)s.textContent="Connected ✓";}
       else if(pc.iceConnectionState==="failed"){const s=$("callStatus");if(s)s.textContent="Connection failed — check mic permissions.";}
     };
 
-    // CRITICAL: set onicecandidate BEFORE setLocalDescription.
-    // ICE gathering starts the moment setLocalDescription is called —
-    // candidates that fire before the handler is registered are lost forever.
     const buf=[];let docReady=false;
     pc.onicecandidate=e=>{
       if(!e.candidate)return;
@@ -1777,19 +1847,21 @@ async function acceptCall(uid){
   if(!snap||snap.empty){toast("Call already ended.");$("overlay").hidden=true;$("overlayBody").innerHTML="";return;}
   const doc=snap.docs[0];const d=doc.data();const cid=doc.id;activeCallId=cid;
   try{
+    // Stop any test-mic stream before getting a fresh one for the actual call
+    if(_testMicStream){_testMicStream.getTracks().forEach(t=>t.stop());_testMicStream=null;}
     const stream=await navigator.mediaDevices.getUserMedia({audio:true});
     activeStream=stream;
+    startVoiceViz(stream); // local bars start animating immediately so callee can verify mic
     const pc=new RTCPeerConnection({iceServers:ICE});activePc=pc;
     stream.getTracks().forEach(t=>pc.addTrack(t,stream));
 
     pc.ontrack=e=>{
       const ra=$("remoteAudio");if(!ra)return;
-      // e.streams[0] can be undefined on Firefox — fall back to building stream from e.track
       const ms=(e.streams&&e.streams.length&&e.streams[0])||new MediaStream([e.track]);
       ra.srcObject=ms;ra.muted=false;ra.volume=1.0;
       ra.play().catch(()=>{});
-      // Some browsers deliver the track initially muted then unmute it
       e.track.onunmute=()=>{if(ra.paused)ra.play().catch(()=>{});};
+      addRemoteViz(ms); // remote bars start animating when their audio arrives
     };
 
     pc.oniceconnectionstatechange=()=>{
@@ -1847,7 +1919,7 @@ function muteCall(){
   const b=$("muteBtn");if(b)b.textContent=muted?"🔇 Unmute":"🎙️ Mute";
 }
 async function endCall(){
-  stopRing();
+  stopRing();stopVoiceViz();
   clearInterval(callInterval);callInterval=null;
   if(callUnsub){callUnsub();callUnsub=null;}
   if(activePc){activePc.close();activePc=null;}

@@ -381,3 +381,13 @@ body.has-page-bg .topbar{background:rgba(255,221,191,.45)}
 .call-btn-accept{background:#27ae60;color:#fff;border:none;border-radius:50%;width:68px;height:68px;font-size:26px;cursor:pointer;box-shadow:0 4px 20px rgba(39,174,96,.45);display:flex;align-items:center;justify-content:center}
 .call-btn-mute{background:rgba(255,255,255,.15);color:#fff;border:none;border-radius:50%;width:58px;height:58px;font-size:20px;cursor:pointer;display:flex;align-items:center;justify-content:center}
 .call-btn-end{background:#e74c3c;color:#fff;border:none;border-radius:50%;width:68px;height:68px;font-size:26px;cursor:pointer;box-shadow:0 4px 20px rgba(231,76,60,.45);display:flex;align-items:center;justify-content:center}
+.voice-viz{display:flex;align-items:stretch;gap:10px;width:100%;max-width:300px;background:rgba(255,255,255,.05);border-radius:14px;padding:14px 16px;margin:2px 0 14px}
+.vv-col{flex:1;display:flex;flex-direction:column;align-items:center;gap:6px}
+.vv-bars{display:flex;align-items:flex-end;gap:3px;height:44px;width:100%;justify-content:center}
+.vv-bar{width:7px;height:3px;background:rgba(39,174,96,.2);border-radius:3px 3px 0 0;transition:height .07s ease}
+.vv-bar.lit{background:#27ae60}
+.vv-bar.vv-r{background:rgba(52,152,219,.2)}
+.vv-bar.vv-r.lit{background:#3498db}
+.vv-lbl{font-size:11px;color:rgba(255,255,255,.35);letter-spacing:.3px}
+.vv-mid{display:flex;align-items:center;padding-bottom:22px;color:rgba(255,255,255,.1);font-size:18px}
+.mic-test-btn{background:rgba(255,255,255,.1);color:rgba(255,255,255,.75);border:1px solid rgba(255,255,255,.2);border-radius:20px;padding:7px 18px;font-size:13px;cursor:pointer;margin-bottom:12px;display:flex;align-items:center;gap:6px}
