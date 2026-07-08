@@ -110,6 +110,7 @@ function persistCart(){ try{ localStorage.setItem("okmusic_cart",JSON.stringify(
 let playMode="continuous"; // "continuous" | "repeat" | "shuffle"
 let nowPlayingId=null;
 let nowPlayingContext=null; // {uid} restricts queue to one user; null = global
+let myTracksOnlyMode=false;
 function go(v,x={}){ state={ ...state, view:v, ...x }; render(); window.scrollTo(0,0); }
 function _getBgLayer(){
   let el=document.getElementById("page-bg-layer");
@@ -1001,6 +1002,7 @@ function closeOverlay(){ if(activePc){endCall();return;} $("overlay").hidden=tru
 // ---------- player ----------
 let hasSrc=false;
 function showPlayer(title,artist,accent,src){ $("miniplayer").classList.add("show"); $("mpArt").style.background=grad(accent); $("mpArt").textContent="◎"; $("mpTitle").textContent=title; $("mpArtist").textContent=artist;
+  syncMyTracksToggle();
   if(src){ hasSrc=true; audio.src=src; audio.play().then(()=>setPlaying(true)).catch(()=>setPlaying(false)); } else { hasSrc=false; setPlaying(true); } }
 async function playTrack(id){ const t=allTracks().find(x=>x.id===id); if(!t) return; const u=userById(t.userId); const d=db(); d.plays[id]=(d.plays[id]||0)+1; commit(d);
   nowPlayingId=id;
@@ -1017,9 +1019,17 @@ async function playTrack(id){ const t=allTracks().find(x=>x.id===id); if(!t) ret
   }
   showPlayer(t.title,u.name,t.accent,t.src); if(!t.src) toast("Demo track — no audio linked yet. Reactions still work!"); }
 function setPlaying(p){ $("mpPlay").textContent=p?"⏸":"▶"; }
+function syncMyTracksToggle(){
+  const wrap=$("mpMyTracks");const chk=$("mpMyTracksChk");if(!wrap||!chk)return;
+  const visible=!!(ME&&$("miniplayer").classList.contains("show"));
+  wrap.hidden=!visible;
+  chk.checked=myTracksOnlyMode;
+  wrap.classList.toggle("active",myTracksOnlyMode);
+}
 function playQueue(direction){
   let queue=allTracks().filter(t=>t.src&&!t.src.startsWith("local:")&&t.visibility!=="private");
-  if(nowPlayingContext&&nowPlayingContext.uid) queue=queue.filter(t=>t.userId===nowPlayingContext.uid);
+  const filterUid=myTracksOnlyMode&&ME?ME.id:(nowPlayingContext&&nowPlayingContext.uid?nowPlayingContext.uid:null);
+  if(filterUid) queue=queue.filter(t=>t.userId===filterUid);
   if(!queue.length) return;
   if(playMode==="shuffle"){ playTrack(queue[Math.floor(Math.random()*queue.length)].id); return; }
   const idx=queue.findIndex(t=>t.id===nowPlayingId);
@@ -1030,6 +1040,11 @@ function cyclePlayMode(){ const m=["continuous","repeat","shuffle"]; playMode=m[
 function updateModeBtn(){ const el=$("mpMode"); if(!el)return; const icons={continuous:"🔁",repeat:"🔂",shuffle:"🔀"}; el.textContent=icons[playMode]; el.classList.toggle("mode-on",playMode!=="continuous"); }
 $("mpPlay").addEventListener("click",()=>{ if(!hasSrc)return; if(!audio.paused){audio.pause();setPlaying(false);}else{audio.play();setPlaying(true);} });
 document.getElementById("mpMode").addEventListener("click",cyclePlayMode);
+document.getElementById("mpMyTracksChk").addEventListener("change",e=>{
+  myTracksOnlyMode=e.target.checked;
+  syncMyTracksToggle();
+  toast(myTracksOnlyMode?"🎵 Playing your tracks only":"🌐 Playing all website tracks");
+});
 audio.addEventListener("ended",()=>{
   if(playMode==="repeat"){ audio.currentTime=0; audio.play().then(()=>setPlaying(true)).catch(()=>{}); return; }
   playQueue(1);

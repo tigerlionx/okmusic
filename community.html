@@ -4,12 +4,20 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>OK Music — AI Music Community</title>
-  <link rel="stylesheet" href="community.css?v=35" />
+  <link rel="stylesheet" href="community.css?v=36" />
   <script async src="https://www.googletagmanager.com/gtag/js?id=G-F81VPETLRZ"></script>
   <script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-F81VPETLRZ');</script>
 </head>
 <body>
   <div id="root"></div>
+
+  <div class="mp-mytracks" id="mpMyTracks" hidden>
+    <label class="mp-mytracks-label" for="mpMyTracksChk">
+      <input type="checkbox" id="mpMyTracksChk" />
+      <span>My tracks only</span>
+    </label>
+    <span class="mp-mytracks-tip">Only your shared music plays — uncheck to hear everyone</span>
+  </div>
 
   <div class="miniplayer" id="miniplayer">
     <div class="mp-art" id="mpArt">◎</div>
@@ -34,6 +42,6 @@
   <script src="firebase-init.js?v=12"></script>
 
   <script src="community-data.js?v=12"></script>
-  <script src="community.js?v=35"></script>
+  <script src="community.js?v=36"></script>
 </body>
 </html>
