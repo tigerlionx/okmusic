@@ -837,6 +837,10 @@ function renderMyMusic(){
   }).join("");
   const migrateBanner=localCount?`<div class="migrate-banner">📵 <b>${localCount} track${localCount!==1?"s":""} stored locally</b> — only you can hear them on this device. Move them to the cloud so your fans can listen everywhere.<button class="btn sm primary" data-action="migratealltracks" style="margin-left:12px">☁️ Move all to cloud</button></div>`:"";
   $("page").innerHTML=`<div class="h-title">My Music</div>
+    <div class="mytracks-row">
+      <label class="mytracks-label"><input type="checkbox" id="myTracksOnlyChk"${myTracksOnlyMode?' checked':''}/> 🎵 My tracks only</label>
+      <span class="mytracks-tip">When checked, the player plays only your music — uncheck to hear everyone on OK Music</span>
+    </div>
     ${migrateBanner}
     <div class="folder-banner">📁 <b>Share your music — works on mobile and desktop.</b> On <b>mobile</b>: tap "Add a folder" to pick music files directly from your phone, iCloud, or Google Drive. On <b>desktop</b> (Chrome/Edge): pick an entire folder from your computer or cloud drive. All tracks are cached after selection so they play even when offline.
       <div class="folder-note">☁️ <b>Cloud drive tip (desktop):</b> Make sure your cloud drive is set to <b>sync files locally</b> (not "stream-only"). In Google Drive: Preferences → open files online only → off. In Dropbox: right-click folder → Make available offline.</div>
@@ -1002,7 +1006,6 @@ function closeOverlay(){ if(activePc){endCall();return;} $("overlay").hidden=tru
 // ---------- player ----------
 let hasSrc=false;
 function showPlayer(title,artist,accent,src){ $("miniplayer").classList.add("show"); $("mpArt").style.background=grad(accent); $("mpArt").textContent="◎"; $("mpTitle").textContent=title; $("mpArtist").textContent=artist;
-  syncMyTracksToggle();
   if(src){ hasSrc=true; audio.src=src; audio.play().then(()=>setPlaying(true)).catch(()=>setPlaying(false)); } else { hasSrc=false; setPlaying(true); } }
 async function playTrack(id){ const t=allTracks().find(x=>x.id===id); if(!t) return; const u=userById(t.userId); const d=db(); d.plays[id]=(d.plays[id]||0)+1; commit(d);
   nowPlayingId=id;
@@ -1019,13 +1022,6 @@ async function playTrack(id){ const t=allTracks().find(x=>x.id===id); if(!t) ret
   }
   showPlayer(t.title,u.name,t.accent,t.src); if(!t.src) toast("Demo track — no audio linked yet. Reactions still work!"); }
 function setPlaying(p){ $("mpPlay").textContent=p?"⏸":"▶"; }
-function syncMyTracksToggle(){
-  const wrap=$("mpMyTracks");const chk=$("mpMyTracksChk");if(!wrap||!chk)return;
-  const visible=!!(ME&&$("miniplayer").classList.contains("show"));
-  wrap.hidden=!visible;
-  chk.checked=myTracksOnlyMode;
-  wrap.classList.toggle("active",myTracksOnlyMode);
-}
 function playQueue(direction){
   let queue=allTracks().filter(t=>t.src&&!t.src.startsWith("local:")&&t.visibility!=="private");
   const filterUid=myTracksOnlyMode&&ME?ME.id:(nowPlayingContext&&nowPlayingContext.uid?nowPlayingContext.uid:null);
@@ -1040,11 +1036,6 @@ function cyclePlayMode(){ const m=["continuous","repeat","shuffle"]; playMode=m[
 function updateModeBtn(){ const el=$("mpMode"); if(!el)return; const icons={continuous:"🔁",repeat:"🔂",shuffle:"🔀"}; el.textContent=icons[playMode]; el.classList.toggle("mode-on",playMode!=="continuous"); }
 $("mpPlay").addEventListener("click",()=>{ if(!hasSrc)return; if(!audio.paused){audio.pause();setPlaying(false);}else{audio.play();setPlaying(true);} });
 document.getElementById("mpMode").addEventListener("click",cyclePlayMode);
-document.getElementById("mpMyTracksChk").addEventListener("change",e=>{
-  myTracksOnlyMode=e.target.checked;
-  syncMyTracksToggle();
-  toast(myTracksOnlyMode?"🎵 Playing your tracks only":"🌐 Playing all website tracks");
-});
 audio.addEventListener("ended",()=>{
   if(playMode==="repeat"){ audio.currentTime=0; audio.play().then(()=>setPlaying(true)).catch(()=>{}); return; }
   playQueue(1);
@@ -1512,6 +1503,7 @@ document.addEventListener("click",e=>{
   if(M[a]) M[a]();
 });
 document.addEventListener("change",e=>{
+  if(e.target.id==="myTracksOnlyChk"){ myTracksOnlyMode=e.target.checked; toast(myTracksOnlyMode?"🎵 Playing your tracks only":"🌐 Playing all website tracks"); }
   if(e.target.id==="avFile"){ const f=e.target.files[0]; if(!f) return; window._avatarFile=f; window._avatar=null; const p=$("avPrev"); if(p){ p.style.backgroundImage=`url('${URL.createObjectURL(f)}')`; p.textContent=""; } }
   if(e.target.id==="covFile"){ const f=e.target.files[0]; if(!f) return; window._coverFile=f; window._trackCover=null; const p=$("covPrev"); if(p){ p.style.backgroundImage=`url('${URL.createObjectURL(f)}')`; p.style.backgroundSize="cover"; p.style.backgroundPosition="center"; p.style.background=""; p.textContent=""; } }
   if(e.target.id==="audioFile"){ const f=e.target.files[0]; if(!f) return; window._audioFile=f; const fn=$("audioFilename"); if(fn) fn.textContent="✓ "+f.name+" ("+Math.round(f.size/1024)+" KB)"; }
