@@ -1553,20 +1553,14 @@ let _rt=null;
 function scheduleRender(){ clearTimeout(_rt); _rt=setTimeout(()=>{ const a=document.activeElement; if(a && /INPUT|TEXTAREA/.test(a.tagName)) return; render(); setTimeout(fetchLinkPreviews,120); }, 80); }
 
 // ============ PRIVATE MESSENGER ============
-const ICE=[
-  {urls:"stun:stun.l.google.com:19302"},
-  {urls:"stun:stun1.l.google.com:19302"},
-  {urls:"stun:stun2.l.google.com:19302"},
-  {urls:"stun:stun3.l.google.com:19302"},
-  // OpenRelay free TURN (multiple regions + transports for best chance)
-  {urls:"turn:openrelay.metered.ca:80",username:"openrelayproject",credential:"openrelayproject"},
-  {urls:"turn:openrelay.metered.ca:443",username:"openrelayproject",credential:"openrelayproject"},
-  {urls:"turn:openrelay.metered.ca:443?transport=tcp",username:"openrelayproject",credential:"openrelayproject"},
-  {urls:"turn:openrelay.metered.ca:80?transport=udp",username:"openrelayproject",credential:"openrelayproject"},
-  // FreeSun public TURN
-  {urls:"turn:freestun.net:3479",username:"free",credential:"free"},
-  {urls:"turns:freestun.net:5350",username:"free",credential:"free"},
-];
+async function getICE(){
+  try{
+    const r=await fetch("https://ok-music.metered.live/api/v1/turn/credentials?apiKey=6a4f497eafeedfd890d5183d");
+    if(r.ok){const servers=await r.json();if(Array.isArray(servers)&&servers.length)return servers;}
+  }catch(e){}
+  // Fallback to Google STUN if Metered is unreachable
+  return[{urls:"stun:stun.l.google.com:19302"},{urls:"stun:stun1.l.google.com:19302"}];
+}
 let activePc=null,activeStream=null,activeCallId=null,callUnsub=null,callInterval=null,muted=false,_iceTimeout=null;
 let _vizAnimId=null,_vizCtx=null,_localAn=null,_remoteAn=null,_localData=null,_remoteData=null,_testMicStream=null;
 
@@ -1947,7 +1941,8 @@ async function initiateCall(uid){
     const stream=await navigator.mediaDevices.getUserMedia({audio:true});
     activeStream=stream;
     startVoiceViz(stream); // local bars start animating immediately so caller can verify mic
-    const pc=new RTCPeerConnection({iceServers:ICE});activePc=pc;
+    const iceServers=await getICE();
+    const pc=new RTCPeerConnection({iceServers});activePc=pc;
     stream.getTracks().forEach(t=>pc.addTrack(t,stream));
 
     pc.ontrack=e=>{
@@ -2037,7 +2032,8 @@ async function acceptCall(uid){
     const stream=await navigator.mediaDevices.getUserMedia({audio:true});
     activeStream=stream;
     startVoiceViz(stream); // local bars start animating immediately so callee can verify mic
-    const pc=new RTCPeerConnection({iceServers:ICE});activePc=pc;
+    const iceServers=await getICE();
+    const pc=new RTCPeerConnection({iceServers});activePc=pc;
     stream.getTracks().forEach(t=>pc.addTrack(t,stream));
 
     pc.ontrack=e=>{
