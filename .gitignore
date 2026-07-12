@@ -3,3 +3,13 @@
 
 # deploy artifact (regenerated when packaging for upload)
 okmusic.zip
+
+# dependencies
+node_modules/
+
+# Firebase local cache
+.firebase/
+
+# large media files
+*.mp3
+*.mp4

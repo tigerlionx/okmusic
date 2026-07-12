@@ -1,0 +1,12 @@
+{
+  "name": "OK Music",
+  "short_name": "OK Music",
+  "description": "AI music community — stream, discover, create & share",
+  "start_url": "/community.html",
+  "display": "standalone",
+  "background_color": "#fff",
+  "theme_color": "#FB7A28",
+  "icons": [
+    { "src": "favicon.ico", "sizes": "48x48", "type": "image/x-icon" }
+  ]
+}

@@ -7,6 +7,16 @@ service cloud.firestore {
     match /users/{uid} {
       allow read: if true;
       allow write: if signedIn() && request.auth.uid == uid;
+
+      match /sessions/{sessionId} {
+        allow read, write: if signedIn() && request.auth.uid == uid;
+      }
+
+      match /activityLog/{logId} {
+        allow read: if signedIn() && request.auth.uid == uid;
+        allow create: if signedIn() && request.auth.uid == uid;
+        allow update, delete: if false;
+      }
     }
 
     match /follows/{uid} {
@@ -48,11 +58,18 @@ service cloud.firestore {
 
     match /suggestions/{id} {
       allow create: if signedIn();
-      allow read, update, delete: if false;
+      allow read: if request.auth != null && request.auth.token.email == "trendai509@gmail.com";
+      allow update, delete: if false;
+    }
+
+    match /reports/{id} {
+      allow create: if signedIn() && request.resource.data.reporterUid == request.auth.uid;
+      allow read: if request.auth != null && request.auth.token.email == "trendai509@gmail.com";
+      allow update, delete: if false;
     }
 
     match /sellers/{uid} {
-      allow read: if signedIn();
+      allow read: if true;
       allow write: if signedIn() && request.auth.uid == uid;
     }
 

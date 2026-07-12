@@ -1,0 +1,23 @@
+{
+  "name": "ok-music",
+  "version": "1.0.0",
+  "description": "A single page where visitors **play & share your music** on one side and **scroll your Printify store** on the other, then check out without leaving the page. No login required to listen or browse.",
+  "main": "app.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/tigerlionx/okmusic.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/tigerlionx/okmusic/issues"
+  },
+  "homepage": "https://github.com/tigerlionx/okmusic#readme",
+  "dependencies": {
+    "playwright": "^1.61.1"
+  }
+}

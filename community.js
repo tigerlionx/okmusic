@@ -9,6 +9,8 @@
 // ============================================================
 const $ = (id) => document.getElementById(id);
 const audio = $("audio");
+let _linkCache = {};
+let _preMusicVol = 1;
 
 // Seed data (incl. 100 demo creators) now lives in community-data.js:
 // SEED_USERS, SEED_TRACKS, SEED_STATUSES, SEED_STATS, SEED_FOLLOWERS, SEED_ST_STATS.
@@ -62,7 +64,18 @@ function userById(id){ if(ME&&ME.id===id) return ME; return allUsers().find(u=>u
 function seedAt(h){ return Date.now()-(h||0)*3600000; }
 function allTracks(){ const s=SEED_TRACKS.map(t=>({ ...t, createdAt:seedAt(t.ageHrs), visibility:"public", share:true })); return CACHE.tracks.map(t=>({ ...t })).concat(s); }
 function tracksByUser(uid,owner){ return allTracks().filter(t=>t.userId===uid&&(owner||t.visibility!=="private")).sort((a,b)=>b.createdAt-a.createdAt); }
-function playlistsByUser(uid){ return db().playlists.filter(p=>p.userId===uid).sort((a,b)=>b.createdAt-a.createdAt); }
+function playlistsByUser(uid){
+  const local=db().playlists.filter(p=>p.userId===uid).sort((a,b)=>b.createdAt-a.createdAt);
+  const localIds=new Set(local.map(p=>p.id));
+  // Build cloud playlists from Firestore tracks (shows on all devices)
+  const cloudMap={};
+  allTracks().filter(t=>t.userId===uid&&t.playlistId&&!localIds.has(t.playlistId)).forEach(t=>{
+    if(!cloudMap[t.playlistId]) cloudMap[t.playlistId]={id:t.playlistId,userId:uid,name:t.playlistName||"Playlist",files:[],createdAt:t.createdAt,_cloud:true};
+    cloudMap[t.playlistId].files.push(t.title);
+    if(t.createdAt<cloudMap[t.playlistId].createdAt) cloudMap[t.playlistId].createdAt=t.createdAt;
+  });
+  return [...local,...Object.values(cloudMap).sort((a,b)=>b.createdAt-a.createdAt)];
+}
 function allStatuses(){ const s=SEED_STATUSES.map(x=>({ ...x, time:seedAt(x.ageHrs) })); return CACHE.statuses.map(x=>({ ...x })).concat(s); }
 function statusesByUser(uid){ return allStatuses().filter(s=>s.userId===uid).sort((a,b)=>b.time-a.time); }
 function currentUser(){ return ME; }
@@ -91,11 +104,33 @@ let toastTimer; function toast(m){ const e=$("toast"); e.textContent=m; e.hidden
 // ---------- state ----------
 let ME=null;                                   // the signed-in user's profile (Firebase)
 // live shared data, kept in sync by Firestore listeners
-const CACHE={ users:{}, tracks:[], statuses:[], follows:{}, reactions:{}, comments:[], notifications:[], products:[], sellers:{}, orders:[], convos:{} };
-let state={ view:"discover", profileId:null, query:"" };
+const CACHE={ users:{}, tracks:[], statuses:[], follows:{}, reactions:{}, comments:[], notifications:[], products:[], sellers:{}, orders:[], convos:{}, suggestions:[] };
+let state={ view:"discover", profileId:null, query:"", cart:JSON.parse(localStorage.getItem("okmusic_cart")||"[]") };
+function persistCart(){ try{ localStorage.setItem("okmusic_cart",JSON.stringify(state.cart||[])); }catch(e){} }
 let playMode="continuous"; // "continuous" | "repeat" | "shuffle"
 let nowPlayingId=null;
+let nowPlayingContext=null; // {uid} restricts queue to one user; null = global
+let myTracksOnlyMode=false;
 function go(v,x={}){ state={ ...state, view:v, ...x }; render(); window.scrollTo(0,0); }
+function _getBgLayer(){
+  let el=document.getElementById("page-bg-layer");
+  if(!el){ el=document.createElement("div"); el.id="page-bg-layer"; el.style.cssText="display:none;position:fixed;inset:0;z-index:-1;background-attachment:fixed;pointer-events:none;"; document.body.prepend(el); }
+  return el;
+}
+function _setBgStyle(img, mode, f){
+  const el=_getBgLayer();
+  el.style.backgroundImage=`url('${img}')`;
+  if(mode==="tile"){ el.style.backgroundSize="auto"; el.style.backgroundRepeat="repeat"; el.style.backgroundPosition="top left"; }
+  else if(mode==="center"){ el.style.backgroundSize="auto"; el.style.backgroundRepeat="no-repeat"; el.style.backgroundPosition="center center"; }
+  else { el.style.backgroundSize="cover"; el.style.backgroundRepeat="no-repeat"; el.style.backgroundPosition="center"; }
+  const bf=f||{}; const br=(bf.brightness!=null?bf.brightness:100)/100; const co=(bf.contrast!=null?bf.contrast:100)/100; const sa=(bf.saturate!=null?bf.saturate:100)/100;
+  el.style.filter=`brightness(${br}) contrast(${co}) saturate(${sa})`; el.style.opacity=(bf.opacity!=null?bf.opacity:100)/100;
+  el.style.display="block"; document.body.style.backgroundImage=""; document.body.classList.add("has-page-bg");
+}
+function _clearBg(){
+  const el=document.getElementById("page-bg-layer"); if(el) el.style.display="none";
+  document.body.style.backgroundImage=""; document.body.classList.remove("has-page-bg");
+}
 function render(){
   if(!ME){ renderLanding(); return; }
   if(!ME.handle){ renderLanding(); openOnboard(); return; }   // signed in but no profile yet
@@ -117,7 +152,8 @@ function renderLanding(){
       <button class="btn primary block" data-action="authemail" style="margin-top:10px">Continue with email</button>
     </div>
     <div class="authfoot">No account needed to listen — sign in to share & follow.</div>
-  </div></div>`;
+  </div></div>
+  <div class="landing-copyright">Copyright OK Music&#x2122; Company &mdash; Contact: trendai509@gmail.com &mdash; Jul 2026</div>`;
 }
 function signInGoogle(){
   const provider=new firebase.auth.GoogleAuthProvider();
@@ -150,7 +186,7 @@ function emailGo(mode){
   });
 }
 async function loadProfile(uid){ try{ const s=await fbDB.collection("users").doc(uid).get(); return s.exists?{ id:uid, ...s.data() }:null; }catch(e){ console.warn(e); return null; } }
-function syncME(){ const d=db(); if(ME){ d.session=ME.id; d.usersById[ME.id]={ id:ME.id, name:ME.name, handle:ME.handle, bio:ME.bio, color:ME.color, avatarImg:ME.avatarImg, bgColor:ME.bgColor, bgImg:ME.bgImg }; } else d.session=null; commit(d); }
+function syncME(){ const d=db(); if(ME){ d.session=ME.id; d.usersById[ME.id]={ id:ME.id, name:ME.name, handle:ME.handle, bio:ME.bio, color:ME.color, avatarImg:ME.avatarImg, bgColor:ME.bgColor, bgImg:ME.bgImg, pageBgImg:ME.pageBgImg||"", pageBgMode:ME.pageBgMode||"stretch", pageBgFilter:ME.pageBgFilter||{} }; } else d.session=null; commit(d); }
 function openOnboard(){
   openOverlay(`<h2>Welcome to OK Music 👋</h2><p class="sub">Pick a name and handle to set up your creator profile.</p>
     <div class="field"><label>Display name</label><input class="fb-field" id="obName" placeholder="e.g. Emmanuel Leveille" value="${esc((ME&&ME.name)||'')}" /></div>
@@ -170,7 +206,7 @@ async function finishOnboard(){
     await fbDB.collection("users").doc(uid).set(prof);
     ME={ id:uid, ...prof }; syncME(); closeOverlay();
     // Send welcome notification
-    fbDB.collection("notifications").add({ forUid:uid, type:"welcome", fromUid:"platform", fromName:"OK Music", text:"👋 Welcome to OK Music! Tap here to read your getting-started guide.", time:Date.now(), read:false }).catch(()=>{});
+    fbDB.collection("notifications").add({ forUid:uid, type:"welcome", fromUid:"platform", fromName:"OK Music", text:"👋 Welcome to OK Music! Tap here for your complete guide — music, chat, calls, marketplace & more.", time:Date.now(), read:false }).catch(()=>{});
     showWelcomeGuide(name);
   }catch(e){ toast("Couldn't save profile: "+(e.code||e.message)); }
 }
@@ -180,56 +216,96 @@ function showWelcomeGuide(name){
     <div class="wg-header">
       <div style="font-size:36px">🎵</div>
       <h2>Welcome to OK Music, ${esc(name)}!</h2>
-      <p class="sub">Everything you need to know to get started.</p>
+      <p class="sub">Your complete guide — everything you need to enjoy the platform.</p>
     </div>
 
     <div class="wg-section">
       <div class="wg-icon">🎵</div>
       <div><b>Share a single track</b><br>
-      Tap <b>"Add single track"</b> in the sidebar. Upload an audio file directly from your phone or computer, or paste a public link (SoundCloud, Google Drive, etc.). Add a cover photo, pick a genre, and choose Public or Private. Your track appears on your profile instantly.</div>
+      Tap <b>"Add single track"</b> in the sidebar. Upload an audio file (MP3, M4A, WAV, FLAC…) from your phone or computer — it uploads to the cloud automatically so fans on <em>any</em> device can play it. Or paste a public streaming link (SoundCloud, Google Drive, Dropbox, etc.). Add a cover photo, pick a genre, set Public or Private, then publish.</div>
     </div>
 
     <div class="wg-section">
       <div class="wg-icon">📁</div>
-      <div><b>Share folders (playlists &amp; albums)</b><br>
-      Tap <b>"Add a folder"</b> to share an entire music folder at once. On <b>mobile</b>: select multiple audio files — they become a playlist. On <b>desktop</b> (Chrome/Edge): pick a whole folder from your computer, Google Drive, Dropbox, or iCloud. Tracks are cached after the first play and work offline.</div>
+      <div><b>Share a folder / album / playlist</b><br>
+      Tap <b>"Add a folder"</b> to upload a whole set of tracks at once. On <b>mobile</b>: select multiple audio files and give them a playlist name. On <b>desktop</b> (Chrome / Edge): pick an entire folder from your computer, Google Drive, Dropbox, or iCloud. Every track uploads to the cloud so it plays on all devices — for you and your fans.</div>
     </div>
 
     <div class="wg-section">
-      <div class="wg-icon">👥</div>
-      <div><b>Build your fanbase</b><br>
-      Go to <b>Discover</b> to find and follow other artists. Post <b>statuses</b> on your Wall to talk to your fans. Share your <b>invite link</b> (Invite Friends) on social media to grow your audience. Fans can like, dislike, and comment on your music and posts.</div>
+      <div class="wg-icon">☁️</div>
+      <div><b>Cloud storage — always in sync</b><br>
+      All uploaded audio is stored securely in the cloud. Your music plays on your phone, your laptop, your tablet — and on any fan's device — without re-uploading. If you have old tracks that say <b>"Local only"</b>, tap <b>"☁️ Move to cloud"</b> next to the track in <b>My Music</b> to migrate them.</div>
+    </div>
+
+    <div class="wg-section">
+      <div class="wg-icon">▶️</div>
+      <div><b>Playback &amp; mini-player</b><br>
+      Tap any track art or title to play. The <b>mini-player</b> stays at the bottom of the screen while you browse. Use the <b>🔁 mode button</b> to switch between:<br>
+      &nbsp;• <b>Continuous</b> — plays the whole playlist in order<br>
+      &nbsp;• <b>🔀 Shuffle</b> — random order<br>
+      &nbsp;• <b>🔂 Repeat one</b> — loops the current track<br>
+      Tap the progress bar to seek. Tracks are cached after the first play for offline listening.</div>
     </div>
 
     <div class="wg-section">
       <div class="wg-icon">🎨</div>
-      <div><b>Personalise your profile</b><br>
-      Go to <b>"Edit profile"</b> to upload a profile photo, write your bio, and choose a background theme, colour, or banner image. Make your page unique so fans remember you.</div>
+      <div><b>Personalise your page</b><br>
+      Go to <b>"Edit profile"</b> (sidebar or your page) to:<br>
+      &nbsp;• Upload a <b>profile photo</b> or paste a photo link<br>
+      &nbsp;• Write your <b>bio</b><br>
+      &nbsp;• Set a <b>banner image</b> at the top of your page — concert photo, album art, anything wide and bold<br>
+      &nbsp;• Set a <b>page background image</b> that fills the whole page for every visitor<br>
+      &nbsp;• Choose a <b>colour theme</b> or a solid colour for the banner if you prefer<br>
+      All changes are saved to the cloud and visible to every fan on every device instantly.</div>
+    </div>
+
+    <div class="wg-section">
+      <div class="wg-icon">👥</div>
+      <div><b>Discover, follow &amp; grow your fanbase</b><br>
+      Go to <b>Discover</b> to browse all artists and tracks. Use the search bar to find someone by name. Click <b>Follow</b> on any profile to become a fan — they'll get a notification. Post <b>statuses</b> on your Wall to talk directly to your followers. Share your <b>invite link</b> (Invite Friends in the sidebar) on social media to bring more fans in. Fans can <b>like, dislike, and comment</b> on your tracks and posts.</div>
+    </div>
+
+    <div class="wg-section">
+      <div class="wg-icon">🔥</div>
+      <div><b>Buzzing &amp; My Feed</b><br>
+      <b>🔥 Buzzing</b> shows the hottest tracks on the platform right now, ranked by plays and likes — great for discovering new music.<br>
+      <b>🏠 My Feed</b> shows the latest posts and statuses from artists you follow, so you never miss an update from your favourite creators.</div>
+    </div>
+
+    <div class="wg-section">
+      <div class="wg-icon">💬</div>
+      <div><b>Private Messenger</b><br>
+      Go to any artist's profile and tap <b>💬 Message</b> to open a private chat. All your conversations are in the <b>💬 Messages</b> tab — new messages show an unread badge.<br><br>
+      Inside a chat you can:<br>
+      &nbsp;• <b>Edit</b> a message you sent (tap ✏️)<br>
+      &nbsp;• <b>Delete for me</b> — removes it from your view only<br>
+      &nbsp;• <b>Delete for everyone</b> — removes it for both sides<br>
+      You hear a <b>ping sound</b> when a new message arrives.</div>
+    </div>
+
+    <div class="wg-section">
+      <div class="wg-icon">📞</div>
+      <div><b>Free voice calls</b><br>
+      Inside any chat, tap <b>📞 Call</b> to start a free real-time voice call. The other person hears a <b>ring tone</b> and sees an incoming call screen — they can tap <b>✅ Accept</b> or <b>❌ Decline</b>. During the call you can <b>mute</b> yourself and see a live call timer. Calls work peer-to-peer over the internet — completely free.</div>
     </div>
 
     <div class="wg-section wg-market">
       <div class="wg-icon">🛍️</div>
       <div><b>Marketplace — buy &amp; sell</b><br>
-      Click <b>MARKETPLACE</b> in the sidebar. You have two options:<br><br>
-      <b>🏪 Sell:</b> Open your store by entering your store name, location, and Payoneer email. List products with photos, a description, and your price. You set your own <b>shipping &amp; handling costs</b> — delivery is entirely your responsibility. You receive <b>97% of each sale</b> (3% platform fee) paid to your Payoneer account within 1–2 business days after payment clears.<br><br>
-      <b>🛒 Buy:</b> Browse all products, search by name or seller, click any photo to zoom and read the full description, add items to your cart. At checkout you provide your shipping address. Payment is made via <b>Payoneer</b> to the platform, which forwards your order to the seller.</div>
-    </div>
-
-    <div class="wg-section wg-market">
-      <div class="wg-icon">💬</div>
-      <div><b>Private Messenger &amp; Voice Calls</b><br>
-      You can message any member of the community privately. Go to any artist's profile and tap <b>💬 Message</b> to open a direct chat. Your conversations appear in the <b>💬 Messages</b> tab in the sidebar — new messages show an unread badge so you never miss one.<br><br>
-      <b>📞 Voice calls:</b> Inside any chat, tap <b>📞 Call</b> to start a free voice call with that person in real time. If someone calls you, an incoming call overlay appears on screen — tap <b>✅ Accept</b> to connect or <b>❌ Decline</b> to ignore. You can mute yourself during a call and see how long you've been talking.</div>
+      Click <b>MARKETPLACE</b> in the sidebar.<br><br>
+      <b>🏪 Sell:</b> Open your store — enter a store name, location, and Payoneer email. List products with photos, description, and price. You set your own shipping &amp; handling costs. You receive <b>97% of every sale</b> (3% platform fee) paid to your Payoneer account within 1–2 business days.<br><br>
+      <b>🛒 Buy:</b> Browse all products, search by name or seller, tap any photo to zoom, add to cart. At checkout provide your shipping address. Payment goes via <b>Payoneer</b> and your order is forwarded to the seller.</div>
     </div>
 
     <div class="wg-section">
       <div class="wg-icon">💡</div>
       <div><b>Good to know</b><br>
-      • Click any profile photo to view it full size<br>
-      • <b>Buzzing</b> shows the hottest tracks ranked by plays &amp; likes<br>
-      • <b>My Feed</b> shows posts from artists you follow<br>
-      • Use <b>Suggest a Feature</b> to send us your ideas — we read every one<br>
-      • Your music and playlists are yours — only you can delete them</div>
+      • Tap any profile photo to view it full size<br>
+      • Your music is yours — only you can edit or delete your tracks<br>
+      • <b>🔒 Private</b> tracks are visible only to you<br>
+      • Add a streaming link to any existing track: go to <b>My Music</b>, tap the track menu, choose <b>🔗 Add streaming link</b><br>
+      • Use <b>💡 Suggest a Feature</b> in the sidebar to send us ideas — we read every one<br>
+      • Log in with Google or email on any device to access your full profile and music</div>
     </div>
 
     <button class="btn primary block" data-action="close" style="margin-top:20px;font-size:16px;padding:14px">Let's go! 🚀</button>
@@ -264,16 +340,42 @@ function renderApp(){
         <div class="side-item" data-action="invite"><span class="ic">✉️</span>Invite friends</div>
         <div class="side-item" data-action="suggest"><span class="ic">💡</span>Suggest a feature</div>
         <div class="side-item ${state.view==='marketplace'||state.view==='mystore'||state.view==='cart'?'active':''}" data-action="openmarketplace"><span class="ic">🛍️</span>MARKETPLACE</div>
+        ${(()=>{const myOrders=(CACHE.orders||[]).filter(o=>o.buyerId===ME?.id);return myOrders.length?`<div class="side-item ${state.view==='myorders'?'active':''}" data-action="nav" data-view="myorders"><span class="ic">📦</span>My Orders (${myOrders.length})</div>`:'';})()}
         ${isAdmin()?`<div class="side-item ${state.view==='admin'?'active':''}" data-action="nav" data-view="admin"><span class="ic">📊</span>Admin Stats</div>`:''}
         <div class="side-sep"></div>
         <div class="side-item" data-action="logout"><span class="ic">↩️</span>Log out</div>
       </nav>
       <main class="main"><div class="page" id="page"></div></main>
-    </div>`;
+    </div>
+    ${(()=>{
+      const unMsgs=Object.values(CACHE.convos||{}).reduce((s,c)=>s+((c.unread||{})[ME?.id]||0),0);
+      const unNotifs=(CACHE.notifications||[]).filter(x=>!x.read).length;
+      const isChat=state.view==='msgs'||state.view==='chat';
+      const isProfile=state.view==='profile'&&state.profileId===u.id;
+      const nb=(n)=>n?`<span class="mobnav-badge">${n>9?'9+':n}</span>`:'';
+      return`<nav class="mobnav" id="mobnav">
+        <div class="mobnav-item ${state.view==='discover'?'active':''}" data-action="nav" data-view="discover"><span class="mn-ic">🧭</span>Discover</div>
+        <div class="mobnav-item ${state.view==='home'?'active':''}" data-action="nav" data-view="home"><span class="mn-ic">🏠</span>Feed</div>
+        <div class="mobnav-item ${isChat?'active':''}" data-action="nav" data-view="msgs">${nb(unMsgs)}<span class="mn-ic">💬</span>Chat</div>
+        <div class="mobnav-item ${state.view==='notifs'?'active':''}" data-action="nav" data-view="notifs">${nb(unNotifs)}<span class="mn-ic">🔔</span>Alerts</div>
+        <div class="mobnav-item ${isProfile?'active':''}" data-action="profile" data-uid="${u.id}"><span class="mn-ic">😊</span>Me</div>
+      </nav>`;
+    })()}`;
   renderMain();
   setTimeout(()=>{ const s=$("search"); if(s) s.oninput=e=>{ state.query=e.target.value; if(state.view!=="discover") state.view="discover"; renderMain(); }; },0);
 }
 function renderMain(){
+  if(state.view!=="chat" && msgUnsub){ msgUnsub(); msgUnsub=null; }
+  const _visU=state.view==="profile"?userById(state.profileId):null;
+  if(_visU){
+    // Viewing someone's profile — show only their background, never the viewer's
+    if(_visU.pageBgImg) _setBgStyle(_visU.pageBgImg,_visU.pageBgMode||"stretch",_visU.pageBgFilter||{});
+    else _clearBg();
+  } else {
+    // Own pages (feed, my music, etc.) — show own background
+    if(ME&&ME.pageBgImg) _setBgStyle(ME.pageBgImg,ME.pageBgMode||"stretch",ME.pageBgFilter||{});
+    else _clearBg();
+  }
   if(state.view==="profile") return renderProfile(state.profileId);
   if(state.view==="mymusic") return renderMyMusic();
   if(state.view==="fans") return renderFans();
@@ -285,6 +387,7 @@ function renderMain(){
   if(state.view==="marketplace") return renderMarketplace();
   if(state.view==="mystore") return renderSellerStore();
   if(state.view==="cart") return renderCart();
+  if(state.view==="myorders") return renderMyOrders();
   if(state.view==="admin"&&isAdmin()) return renderAdmin();
   renderDiscover();
 }
@@ -292,13 +395,14 @@ function renderMain(){
 // ---------- discover (browse music) ----------
 function renderDiscover(){
   const q=state.query.trim().toLowerCase(); const g=state.genre||"";
-  let list=allTracks().filter(t=>t.visibility==="public");
+  const blockedList=ME?.blockedUsers||[];
+  let list=allTracks().filter(t=>t.visibility==="public"&&!blockedList.includes(t.userId)&&!getPrivacy(userById(t.userId)).hideFromDiscover);
   if(g) list=list.filter(t=>(t.genre||"Other")===g);
   if(q) list=list.filter(t=>t.title.toLowerCase().includes(q)||(t.genre||"").toLowerCase().includes(q)||userById(t.userId)?.name.toLowerCase().includes(q));
   list.sort((a,b)=>b.createdAt-a.createdAt);
   // artists matching the search (so any artist is findable, online or not)
   let artists=[];
-  if(q) artists=allUsers().filter(u=>u&&(u.name.toLowerCase().includes(q)||(u.handle||"").toLowerCase().includes(q))).slice(0,12);
+  if(q) artists=allUsers().filter(u=>u&&!blockedList.includes(u.id)&&!getPrivacy(u).hideFromDiscover&&(u.name.toLowerCase().includes(q)||(u.handle||"").toLowerCase().includes(q))).slice(0,12);
   const chips=`<div class="genre-chips"><button class="chip ${g===''?'on':''}" data-action="genre" data-g="">All genres</button>${GENRES.map(x=>`<button class="chip ${g===x?'on':''}" data-action="genre" data-g="${x}">${x}</button>`).join("")}</div>`;
   const artistSec=artists.length?`<div class="section-title">Artists</div><div style="margin-bottom:20px">${artists.map(userCard).join("")}</div>`:"";
   $("page").innerHTML=`<div class="h-title">Discover</div>${chips}${artistSec}
@@ -319,7 +423,7 @@ function card(t){
 
 // ---------- home feed (status timeline) ----------
 function renderHome(){
-  const u=currentUser(); const f=db().follows[u.id]||[];
+  const u=currentUser(); const f=CACHE.follows[u.id]||[];
   const list=allStatuses().filter(s=>s.userId===u.id||f.includes(s.userId)).sort((a,b)=>b.time-a.time);
   $("page").innerHTML=`<div class="h-title">My Feed</div>
     ${composer()}
@@ -333,16 +437,32 @@ function renderProfile(uid){
   const me=currentUser(); const mine=me&&me.id===uid;
   const themeCSS=u.bgTheme?(THEMES.find(t=>t.id===u.bgTheme)||{}).css:"";
   const cover=u.bgImg?`background-image:url('${u.bgImg}');background-size:cover;background-position:center`:themeCSS?`background:${themeCSS}`:u.bgColor?`background:${u.bgColor}`:"";
+
   const tracks=tracksByUser(uid,mine); const pls=playlistsByUser(uid); const sts=statusesByUser(uid);
+  const plIds=new Set(pls.map(p=>p.id));
+  const standaloneTracks=tracks.filter(t=>!t.playlistId||!plIds.has(t.playlistId));
+  const blocked=hasBlocked(uid);
   const headActions=mine
-    ? `<button class="btn primary" data-action="customize">🎨 Edit profile</button><button class="btn" data-action="invite">✉️ Invite</button>`
+    ? `<button class="btn primary" data-action="customize">🎨 Edit profile</button><button class="btn" data-action="invite">✉️ Invite</button><button class="btn" data-action="settings">⚙️ Settings</button>`
     : `<button class="btn ${isFollowing(uid)?'':'primary'}" data-action="follow" data-uid="${uid}">${isFollowing(uid)?'Following ✓':'Follow'}</button>
-       <button class="btn" data-action="openchat" data-uid="${uid}">💬 Message</button>`;
+       ${!blocked&&canMessage(uid)?`<button class="btn" data-action="openchat" data-uid="${uid}">💬 Message</button>`:''}
+       <button class="btn" data-action="blockuser" data-uid="${uid}" style="${blocked?'background:#e2554f;color:#fff;border-color:#e2554f':''}">${blocked?'🚫 Blocked':'🚫 Block'}</button>
+       <button class="btn" data-action="reportuser" data-uid="${uid}">⚑ Report</button>`;
+  // Private profile gate
+  if(!mine && isProfilePrivate(uid)){
+    $("page").innerHTML=`
+      <div class="profile-cover" style="${cover}"></div>
+      <div class="profile-head"><div class="profile-avatar" style="${avatarStyle(u,104)}">${u.avatarImg?'':initials(u.name)}</div>
+        <div class="profile-info"><div class="profile-name">${esc(u.name)}</div><div class="profile-handle">@${esc(u.handle)}</div></div></div>
+      <div class="profile-actions" style="margin-top:14px">${headActions}</div>
+      <div class="private-gate">🔒<div>This profile is private</div><div style="font-size:13px;color:var(--muted);margin-top:4px">Follow ${esc(u.name)} to see their tracks and posts.</div></div>`;
+    return;
+  }
   // MUSIC column
   let music="";
   if(mine) music+=`<div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap"><button class="btn sm primary" data-action="sharefolder">📁 Share folder</button><button class="btn sm" data-action="upload">＋ Single track</button></div>`;
   if(pls.length) music+=pls.map(p=>playlistBlock(p,mine)).join("");
-  if(tracks.length) music+=tracks.map(musicRow).join("");
+  if(standaloneTracks.length) music+=standaloneTracks.map(musicRow).join("");
   if(!pls.length&&!tracks.length) music+=`<div class="empty" style="padding:24px">No tracks yet.</div>`;
   // WALL column
   let wall = mine?composer():"";
@@ -351,7 +471,7 @@ function renderProfile(uid){
     <div class="profile-cover" style="${cover}"></div>
     <div class="profile-head"><div class="profile-avatar" style="${avatarStyle(u,104)};cursor:pointer" data-action="viewavatar" data-uid="${uid}">${u.avatarImg?'':initials(u.name)}</div>
       <div class="profile-info"><div class="profile-name">${esc(u.name)} ${u.founder?'<span class="badge-founder">FOUNDER</span>':''}</div><div class="profile-handle">@${esc(u.handle)}</div></div></div>
-    <div class="profile-stats"><div><b>${tracks.length+pls.reduce((n,p)=>n+p.files.length,0)}</b> <span>tracks</span></div>
+    <div class="profile-stats"><div><b>${standaloneTracks.length+pls.reduce((n,p)=>n+p.files.length,0)}</b> <span>tracks</span></div>
       <div><b>${nfmt(followerCount(uid))}</b> <span>fans</span></div><div><b>${nfmt(followingCount(uid))}</b> <span>following</span></div></div>
     <div class="profile-bio">${esc(u.bio||"")}</div>
     <div class="profile-actions" style="margin-top:14px">${headActions}</div>
@@ -381,14 +501,55 @@ function composer(){
     <div style="text-align:right"><button class="btn primary sm" data-action="poststatus">Post status</button></div></div>`;
 }
 function bindComposer(){ /* nothing extra; handled via delegation */ }
+// ---- link preview helpers ----
+const _URL_RE=/https?:\/\/[^\s<>"']+/g;
+function linkifyText(raw){
+  if(!raw)return{html:'',firstUrl:''};
+  const urls=raw.match(_URL_RE)||[];
+  const parts=raw.split(_URL_RE);
+  let html='';
+  parts.forEach((p,i)=>{
+    html+=esc(p);
+    if(urls[i]) html+=`<a href="${esc(urls[i])}" target="_blank" rel="noopener noreferrer" class="msg-link">${esc(urls[i])}</a>`;
+  });
+  return{html,firstUrl:urls[0]||''};
+}
+function lpTag(url){
+  if(!url)return'';
+  return`<div class="lp-pending" data-url="${esc(url)}"></div>`;
+}
+async function fetchLinkPreviews(){
+  document.querySelectorAll('.lp-pending').forEach(async el=>{
+    el.classList.remove('lp-pending');
+    const url=el.dataset.url;if(!url)return;
+    if(_linkCache[url]===null)return;
+    if(_linkCache[url]){el.innerHTML=_lpCard(_linkCache[url],url);return;}
+    try{
+      const r=await fetch(`https://api.microlink.io/?url=${encodeURIComponent(url)}`);
+      const j=await r.json();
+      if(j.status==='success'&&j.data){_linkCache[url]=j.data;el.innerHTML=_lpCard(j.data,url);}
+      else _linkCache[url]=null;
+    }catch(e){_linkCache[url]=null;}
+  });
+}
+function _lpCard(data,url){
+  const img=data.image?.url||data.logo?.url||'';
+  const title=(data.title||'').slice(0,80);
+  const desc=(data.description||'').slice(0,120);
+  let domain='';try{domain=new URL(url).hostname.replace(/^www\./,'');}catch(e){domain=url.slice(0,30);}
+  if(!title&&!img)return'';
+  return`<a class="link-preview-card" href="${esc(url)}" target="_blank" rel="noopener noreferrer">${img?`<div class="lp-img" style="background-image:url('${esc(img)}')"></div>`:''}<div class="lp-info"><div class="lp-domain">${esc(domain)}</div>${title?`<div class="lp-title">${esc(title)}</div>`:''}${desc?`<div class="lp-desc">${esc(desc)}</div>`:''}</div></a>`;
+}
+
 function statusCard(s){
   const u=userById(s.userId); const cs=stComments(s.id);
-  const cmts=cs.map(c=>{ const mine=ME&&c.uid===ME.id; return `<div class="scmt"><div class="sc-av" style="${avatarStyle(userById(c.uid)||{color:'#bbb'},28)}">${(userById(c.uid)?.avatarImg)?'':initials(c.name)}</div>
-      <div class="sc-b"><b>${esc(c.name)}</b> · <span style="color:var(--muted);font-size:11px">${timeAgo(c.time)}${c.edited?' · edited':''}</span><div>${esc(c.text)}</div>${mine?`<div class="cmt-edit"><span data-action="editcmt" data-id="${c.id}">Edit</span> · <span data-action="delcmt" data-id="${c.id}">Delete</span></div>`:''}</div></div>`; }).join("");
+  const {html:stHtml,firstUrl:stUrl}=linkifyText(s.text||'');
+  const cmts=cs.map(c=>{ const mine=ME&&c.uid===ME.id; const {html:cHtml,firstUrl:cUrl}=linkifyText(c.text||''); return `<div class="scmt"><div class="sc-av" style="${avatarStyle(userById(c.uid)||{color:'#bbb'},28)}">${(userById(c.uid)?.avatarImg)?'':initials(c.name)}</div>
+      <div class="sc-b"><b>${esc(c.name)}</b> · <span style="color:var(--muted);font-size:11px">${timeAgo(c.time)}${c.edited?' · edited':''}</span><div>${cHtml}</div>${lpTag(cUrl)}${mine?`<div class="cmt-edit"><span data-action="editcmt" data-id="${c.id}">Edit</span> · <span data-action="delcmt" data-id="${c.id}">Delete</span></div>`:''}</div></div>`; }).join("");
   return `<div class="status-card">
     <div class="status-top"><div class="avatar" style="${avatarStyle(u,38)};cursor:pointer" data-action="viewavatar" data-uid="${u.id}">${u.avatarImg?'':initials(u.name)}</div>
       <div><div class="sname" data-action="profile" data-uid="${u.id}">${esc(u.name)}</div><div class="stime">${timeAgo(s.time)}</div></div></div>
-    <div class="status-text">${esc(s.text)}</div>
+    <div class="status-text">${stHtml}</div>${lpTag(stUrl)}
     <div class="status-actions ld">
       <button class="${stHasLiked(s.id)?'on':''}" data-action="slike" data-id="${s.id}">👍 ${nfmt(stLikeCount(s.id))}</button>
       <button class="${stHasDisliked(s.id)?'ondown':''}" data-action="sdislike" data-id="${s.id}">👎 ${nfmt(stDislikeCount(s.id))}</button></div>
@@ -409,11 +570,32 @@ function stComment(id){ const el=$("sc_"+id); const t=(el?.value||"").trim(); if
   if(!ME) return openEmailAuth();
   fbDB.collection("comments").add({ statusId:id, uid:ME.id, name:ME.name, text:t, time:Date.now() }).catch(e=>toast(e.code||e.message));
   const s=allStatuses().find(x=>x.id===id); if(s) notify(s.userId,"comment",`${ME.name} commented: "${t.slice(0,50)}"`); }
-function editComment(cid){ const c=CACHE.comments.find(x=>x.id===cid); if(!c) return; if(!ME||c.uid!==ME.id) return;
-  const t=prompt("Edit your comment:", c.text); if(t==null) return; const v=t.trim(); if(!v) return toast("Comment can't be empty");
-  fbDB.collection("comments").doc(cid).update({ text:v, edited:true }).then(()=>toast("Comment updated")).catch(e=>toast(e.code||e.message)); }
-function deleteComment(cid){ const c=CACHE.comments.find(x=>x.id===cid); if(!ME||!c||c.uid!==ME.id) return; if(!confirm("Delete this comment?")) return;
-  fbDB.collection("comments").doc(cid).delete().then(()=>toast("Comment deleted")).catch(e=>toast(e.code||e.message)); }
+function editComment(cid){
+  const c=CACHE.comments.find(x=>x.id===cid); if(!c) return; if(!ME||c.uid!==ME.id) return;
+  openOverlay(`<h2>✏️ Edit comment</h2>
+    <div class="field"><textarea id="editCmtText" style="min-height:80px;width:100%">${esc(c.text)}</textarea></div>
+    <div style="display:flex;gap:8px;margin-top:4px">
+      <button class="btn primary" data-action="saveeditcmt" data-id="${cid}">Save</button>
+      <button class="btn" data-action="close">Cancel</button>
+    </div>`);
+  setTimeout(()=>{const t=$("editCmtText");if(t){t.focus();t.setSelectionRange(t.value.length,t.value.length);}},50);
+}
+async function saveEditComment(cid){
+  const text=($("editCmtText")||{value:""}).value.trim();
+  if(!text) return toast("Comment can't be empty.");
+  try{ await fbDB.collection("comments").doc(cid).update({text,edited:true}); closeOverlay(); toast("Comment updated"); }
+  catch(e){ toast("Couldn't edit: "+(e.code||e.message)); }
+}
+function deleteComment(cid){
+  const c=CACHE.comments.find(x=>x.id===cid); if(!ME||!c||c.uid!==ME.id) return;
+  openOverlay(`<h2>🗑️ Delete comment?</h2>
+    <p style="margin:10px 0 22px;color:var(--muted)">This cannot be undone.</p>
+    <div style="display:flex;gap:10px">
+      <button class="btn block" data-action="close">Cancel</button>
+      <button class="btn block" data-action="confirmdelcmt" data-id="${cid}" style="color:#c0392b;border-color:#f5c6c6">Yes, delete</button>
+    </div>`);
+}
+function doDeleteComment(cid){ fbDB.collection("comments").doc(cid).delete().then(()=>{ closeOverlay(); toast("Comment deleted"); }).catch(e=>toast(e.code||e.message)); }
 
 // ---------- track like/dislike (music = reactions only) ----------
 function toggleLike(id){ if(!ME) return openEmailAuth(); const F=firebase.firestore.FieldValue; const has=(CACHE.reactions["t_"+id]?.likes||[]).includes(ME.id);
@@ -426,12 +608,19 @@ function toggleDislike(id){ if(!ME) return openEmailAuth(); const F=firebase.fir
 function playlistBlock(p,owner){
   if(!state.openPlaylists) state.openPlaylists=new Set();
   const open=state.openPlaylists.has(p.id);
-  const rows=p.files.map((f,i)=>`<div class="trow" data-action="playfile" data-pl="${p.id}" data-file="${esc(f)}"><div class="tn" id="tn_${p.id}_${i}">${i+1}</div><div class="ttitle">${esc(f.replace(/\.[^.]+$/,''))}</div><span class="tplay">▶</span></div>`).join("");
-  const acts=owner?`<div class="pl-actions"><button class="btn sm" data-action="setthumbs" data-pl="${p.id}">${p.thumbs?'covers ✓':'＋ covers'}</button><button class="btn sm" data-action="relink" data-pl="${p.id}">re-link</button></div>`:"";
+  let rows;
+  if(p._cloud){
+    // Cloud playlist: play directly from Firestore tracks (works on all devices)
+    const plTracks=allTracks().filter(t=>t.playlistId===p.id&&t.userId===p.userId).sort((a,b)=>a.createdAt-b.createdAt);
+    rows=plTracks.map((t,i)=>`<div class="trow" data-action="play" data-id="${t.id}"><div class="tn">${i+1}</div><div class="ttitle">${esc(t.title)}</div><span class="tplay">▶</span></div>`).join("");
+  } else {
+    rows=p.files.map((f,i)=>`<div class="trow" data-action="playfile" data-pl="${p.id}" data-file="${esc(f)}"><div class="tn" id="tn_${p.id}_${i}">${i+1}</div><div class="ttitle">${esc(f.replace(/\.[^.]+$/,''))}</div><span class="tplay">▶</span></div>`).join("");
+  }
+  const acts=(owner&&!p._cloud)?`<div class="pl-actions"><button class="btn sm" data-action="setthumbs" data-pl="${p.id}">${p.thumbs?'covers ✓':'＋ covers'}</button><button class="btn sm" data-action="relink" data-pl="${p.id}">re-link</button></div>`:"";
   return `<div class="playlist">
     <div class="playlist-head" data-action="togglepl" data-pl="${p.id}">
       <div class="pl-ic">📁</div>
-      <div style="flex:1"><div class="pl-name">${esc(p.name)}</div><div class="pl-sub">${p.files.length} tracks · folder</div></div>
+      <div style="flex:1"><div class="pl-name">${esc(p.name)}</div><div class="pl-sub">${p.files.length} tracks · ${p._cloud?'☁️ cloud':'folder'}</div></div>
       ${acts}<span class="pl-toggle">${open?'−':'+'}</span>
     </div>
     ${open?`<div class="tracklist">${rows}</div>`:''}
@@ -511,11 +700,23 @@ async function relinkFolder(plId){ if(!window.showDirectoryPicker) return toast(
 async function playFolderTrack(plId,file){
   const cacheKey=plId+"/"+file;
   const title=file.replace(/\.[^.]+$/,"");
-  const artist=userById(db().playlists.find(x=>x.id===plId)?.userId)?.name||currentUser()?.name||"";
+  // Determine owner: prefer Firestore cloud playlist track, then local playlist record
+  const cloudTrack=allTracks().find(t=>t.playlistId===plId&&(t.title===title||t.title===file));
+  const plOwner=db().playlists.find(x=>x.id===plId);
+  const ownerId=cloudTrack?.userId||plOwner?.userId;
+  const artist=userById(ownerId)?.name||currentUser()?.name||"";
+  // Set queue context to the playlist owner so continuous play stays on their profile
+  if(ownerId){
+    if(state.view==="profile"&&state.profileId===ownerId) nowPlayingContext={uid:ownerId};
+    else if(state.view==="mymusic"&&currentUser()?.id===ownerId) nowPlayingContext={uid:ownerId};
+    else if(!nowPlayingContext) nowPlayingContext={uid:ownerId};
+  }
   // 1 — serve from offline cache if available
   const cached=await audioGet(cacheKey);
   if(cached){ showPlayer(title,artist,"#FB7A28",URL.createObjectURL(cached)); return; }
-  // 2 — read from folder (cloud drive or local), then cache for offline
+  // 2 — serve from Cloudinary if this track was uploaded (works cross-device)
+  if(cloudTrack&&cloudTrack.src&&!cloudTrack.src.startsWith("local:")){ showPlayer(title,artist,cloudTrack.accent||"#FB7A28",cloudTrack.src); return; }
+  // 3 — read from folder (cloud drive or local), then cache for offline
   let c=dirCache[plId]; if(!c||!c.music){ const h=await fsGet(plId+"_music"); if(h&&await ensurePerm(h)){ c=dirCache[plId]=dirCache[plId]||{}; c.music=h; } }
   if(!c||!c.music){ const p=db().playlists.find(x=>x.id===plId); return toast(`Re-link "${p?p.name:'folder'}" to play. (Tip: play tracks once while online to cache them for offline.)`); }
   try{
@@ -544,7 +745,7 @@ function openUpload(){
     <div class="field"><label>Visibility</label><div class="radio-row" id="visRow"><div class="radio-card sel" data-action="vis" data-v="public"><b>Public</b>Everyone can play it</div><div class="radio-card" data-action="vis" data-v="private"><b>Private</b>Only you, until you publish</div></div></div>
     <label class="check"><input type="checkbox" id="upShare" checked> Allow fans to share this track</label>
     <button class="btn primary block" data-action="dopublish">Add to my music</button>`);
-  window._upColor=COLORS[0]; window._upVis="public"; window._trackCover=null; window._audioFile=null;
+  window._upColor=COLORS[0]; window._upVis="public"; window._trackCover=null; window._coverFile=null; window._audioFile=null;
 }
 function fileToArrayBuffer(file){
   if(file.arrayBuffer) return file.arrayBuffer();
@@ -552,8 +753,12 @@ function fileToArrayBuffer(file){
 }
 async function doPublish(){
   const title=($("upTitle").value||"").trim(); if(!title) return toast("Give it a title"); if(!ME) return openEmailAuth();
-  const coverImg=window._trackCover||"";
-  if(coverImg&&coverImg.length>900000) return toast("Cover photo is too large — use a smaller image (under ~600KB).");
+  let coverImg="";
+  if(window._coverFile){
+    const pubBtn=document.querySelector('[data-action="dopublish"]');
+    try{ if(pubBtn){pubBtn.disabled=true;pubBtn.textContent="Uploading cover…";} coverImg=await uploadMediaToCloudinary(window._coverFile); }
+    catch(e){ if(pubBtn){pubBtn.disabled=false;pubBtn.textContent="Add to my music";} return toast("Cover upload failed: "+(e.message||e)); }
+  } else if(window._trackCover&&window._trackCover.startsWith("http")){ coverImg=window._trackCover; }
   let src=($("upSrc").value||"").trim();
   if(src.startsWith("blob:")){ return toast("Blob URLs can't be shared — please use the 'Choose audio file' button to upload your file directly."); }
   if(src.startsWith("file://")){ return toast("Local file paths can't be shared — please use the 'Choose audio file' button to upload your file directly."); }
@@ -579,11 +784,34 @@ async function doPublish(){
       return toast("Upload failed: "+(e.message||e)+". Check your connection and try again.");
     }
   }
+  const isPublic=(window._upVis||"public")==="public";
   fbDB.collection("tracks").add({ userId:ME.id, title, src, genre:($("upGenre")&&$("upGenre").value)||"Other", accent:window._upColor||COLORS[0], coverImg, visibility:window._upVis||"public", share:!!($("upShare")&&$("upShare").checked), createdAt:Date.now() })
-    .then(()=>{ closeOverlay(); window._trackCover=null; window._audioFile=null; toast(window._upVis==="private"?"Saved private 🔒":"Published! 🎵"); go("mymusic"); })
+    .then(()=>{
+      closeOverlay(); window._trackCover=null; window._audioFile=null;
+      toast(isPublic?"Published! 🎵":"Saved private 🔒"); go("mymusic");
+      // Notify all followers about the new public track
+      if(isPublic){
+        const fans=followersOf(ME.id).filter(uid=>!String(uid).startsWith("u_"));
+        fans.forEach(uid=>{ fbDB.collection("notifications").add({ forUid:uid, type:"new_track", fromUid:ME.id, fromName:ME.name, text:`🎵 ${ME.name} posted a new track: ${title}`, time:Date.now(), read:false }).catch(()=>{}); });
+      }
+    })
     .catch(e=>toast("Couldn't save: "+(e.code||e.message))); }
 
-// ---------- Cloudinary upload helper ----------
+// ---------- Cloudinary upload helpers ----------
+function uploadMediaToCloudinary(file){
+  // Always use video/upload — the okmusic_audio preset is configured for that endpoint
+  // and Cloudinary serves the resulting URL correctly for any file type (image, audio, video)
+  return new Promise((resolve,reject)=>{
+    const fd=new FormData();
+    fd.append("file",file);
+    fd.append("upload_preset","okmusic_audio");
+    const xhr=new XMLHttpRequest();
+    xhr.open("POST","https://api.cloudinary.com/v1_1/llka5use/video/upload");
+    xhr.onload=()=>{ try{ const r=JSON.parse(xhr.responseText); if(r.secure_url) resolve(r.secure_url); else reject(new Error(r.error?.message||"Upload failed")); }catch(err){ reject(err); } };
+    xhr.onerror=()=>reject(new Error("Network error"));
+    xhr.send(fd);
+  });
+}
 function uploadToCloudinary(blob, onProgress){
   return new Promise((resolve,reject)=>{
     const fd=new FormData();
@@ -591,6 +819,24 @@ function uploadToCloudinary(blob, onProgress){
     fd.append("upload_preset","okmusic_audio");
     const xhr=new XMLHttpRequest();
     xhr.open("POST","https://api.cloudinary.com/v1_1/llka5use/video/upload");
+    if(onProgress) xhr.upload.onprogress=e=>{ if(e.lengthComputable) onProgress(Math.round(e.loaded/e.total*100)); };
+    xhr.onload=()=>{ try{ const r=JSON.parse(xhr.responseText); if(r.secure_url) resolve(r.secure_url); else reject(new Error(r.error?.message||"Upload failed")); }catch(err){ reject(err); } };
+    xhr.onerror=()=>reject(new Error("Network error — check your connection"));
+    xhr.send(fd);
+  });
+}
+// Chat file upload: use the correct Cloudinary resource namespace per file type.
+function uploadChatFile(file, onProgress){
+  let endpoint;
+  if(file.type.startsWith("image/")) endpoint="image/upload";
+  else if(file.type.startsWith("audio/")||file.type.startsWith("video/")) endpoint="video/upload";
+  else endpoint="raw/upload";
+  return new Promise((resolve,reject)=>{
+    const fd=new FormData();
+    fd.append("file",file);
+    fd.append("upload_preset","okmusic_audio");
+    const xhr=new XMLHttpRequest();
+    xhr.open("POST",`https://api.cloudinary.com/v1_1/llka5use/${endpoint}`);
     if(onProgress) xhr.upload.onprogress=e=>{ if(e.lengthComputable) onProgress(Math.round(e.loaded/e.total*100)); };
     xhr.onload=()=>{ try{ const r=JSON.parse(xhr.responseText); if(r.secure_url) resolve(r.secure_url); else reject(new Error(r.error?.message||"Upload failed")); }catch(err){ reject(err); } };
     xhr.onerror=()=>reject(new Error("Network error — check your connection"));
@@ -638,10 +884,13 @@ async function migrateAllLocal(){
 // ---------- my music ----------
 function renderMyMusic(){
   const u=currentUser(); const tracks=tracksByUser(u.id,true); const pls=playlistsByUser(u.id);
-  const localCount=tracks.filter(t=>t.src&&t.src.startsWith("local:")).length;
-  const rows=tracks.map(t=>{
+  const plIds=new Set(pls.map(p=>p.id));
+  const standaloneTracks=tracks.filter(t=>!t.playlistId||!plIds.has(t.playlistId));
+  const localCount=standaloneTracks.filter(t=>t.src&&t.src.startsWith("local:")).length;
+  const rows=standaloneTracks.map(t=>{
     const isLocal=t.src&&t.src.startsWith("local:");
-    return `<div class="mrow"><div class="mart" style="background:${grad(t.accent)}">◎</div>
+    const artStyle2=t.coverImg?`background-image:url('${t.coverImg}');background-size:cover;background-position:center`:`background:${grad(t.accent)}`;
+    return `<div class="mrow"><div class="mart" style="${artStyle2}" data-action="play" data-id="${t.id}">${t.coverImg?'':'◎'}</div>
     <div class="minfo"><div class="mt">${esc(t.title)}${isLocal?'<span class="local-badge">📵 Local only</span>':''}</div><div class="ms">▶ ${nfmt(playCount(t.id))} · 👍 ${nfmt(likeCount(t.id))} · 👎 ${nfmt(dislikeCount(t.id))} <span class="pill ${t.visibility==='private'?'prv':'pub'}">${t.visibility==='private'?'Private':'Public'}</span></div></div>
     ${isLocal?`<button class="btn sm primary" data-action="migratetrack" data-id="${t.id}" title="Upload this track to the cloud so all fans can hear it">☁️ Move to cloud</button><button class="btn sm" data-action="addlink" data-id="${t.id}" data-title="${esc(t.title)}" title="Paste a public URL instead">＋ Add link</button>`:''}
     ${t.visibility==='private'?`<button class="btn sm primary" data-action="publish" data-id="${t.id}">Publish</button>`:`<button class="btn sm" data-action="unpublish" data-id="${t.id}">Hide</button>`}
@@ -649,17 +898,29 @@ function renderMyMusic(){
   }).join("");
   const migrateBanner=localCount?`<div class="migrate-banner">📵 <b>${localCount} track${localCount!==1?"s":""} stored locally</b> — only you can hear them on this device. Move them to the cloud so your fans can listen everywhere.<button class="btn sm primary" data-action="migratealltracks" style="margin-left:12px">☁️ Move all to cloud</button></div>`:"";
   $("page").innerHTML=`<div class="h-title">My Music</div>
+    <div class="mytracks-row">
+      <label class="mytracks-label"><input type="checkbox" id="myTracksOnlyChk"${myTracksOnlyMode?' checked':''}/> 🎵 My tracks only</label>
+      <span class="mytracks-tip">When checked, the player plays only your music — uncheck to hear everyone on OK Music</span>
+    </div>
     ${migrateBanner}
     <div class="folder-banner">📁 <b>Share your music — works on mobile and desktop.</b> On <b>mobile</b>: tap "Add a folder" to pick music files directly from your phone, iCloud, or Google Drive. On <b>desktop</b> (Chrome/Edge): pick an entire folder from your computer or cloud drive. All tracks are cached after selection so they play even when offline.
       <div class="folder-note">☁️ <b>Cloud drive tip (desktop):</b> Make sure your cloud drive is set to <b>sync files locally</b> (not "stream-only"). In Google Drive: Preferences → open files online only → off. In Dropbox: right-click folder → Make available offline.</div>
     <div style="display:flex;gap:8px;margin-bottom:18px;flex-wrap:wrap"><button class="btn primary" data-action="sharefolder">📁 Add a folder</button><button class="btn" data-action="upload">＋ Add single track</button></div>
     ${pls.length?`<div class="section-title">Playlists (folders)</div>${pls.map(p=>playlistBlock(p,true)).join("")}`:""}
-    ${tracks.length?`<div class="section-title">Single tracks</div>${rows}`:""}
-    ${(!pls.length&&!tracks.length)?'<div class="empty">No music yet — share a folder to begin.</div>':""}`;
+    ${standaloneTracks.length?`<div class="section-title">Single tracks</div>${rows}`:""}
+    ${(!pls.length&&!standaloneTracks.length)?'<div class="empty">No music yet — share a folder to begin.</div>':""}`;
   pls.forEach(loadCovers);
 }
 function setVisibility(id,v){ fbDB.collection("tracks").doc(id).update({ visibility:v }).then(()=>toast(v==="public"?"Published 🎉 (now public)":"Hidden — set to private 🔒")).catch(e=>toast(e.code||e.message)); }
-function deleteTrack(id){ if(!confirm("Delete this track permanently? This cannot be undone.")) return; fbDB.collection("tracks").doc(id).delete().then(()=>toast("Track deleted")).catch(e=>toast(e.code||e.message)); }
+function deleteTrack(id){
+  openOverlay(`<h2>🗑️ Delete track?</h2>
+    <p style="margin:10px 0 22px;color:var(--muted);line-height:1.5">This will permanently remove the track. This cannot be undone.</p>
+    <div style="display:flex;gap:10px">
+      <button class="btn block" data-action="close">Cancel</button>
+      <button class="btn block" data-action="confirmdel" data-id="${id}" style="color:#c0392b;border-color:#f5c6c6">Yes, delete</button>
+    </div>`);
+}
+function doDeleteTrack(id){ fbDB.collection("tracks").doc(id).delete().then(()=>{ closeOverlay(); toast("Track deleted"); }).catch(e=>toast(e.code||e.message)); }
 
 function openAddLink(trackId,title){
   openOverlay(`<h2>🔗 Add streaming link</h2>
@@ -683,25 +944,99 @@ async function saveTrackLink(trackId){
 
 // ---------- edit profile (photo + bg + bio) ----------
 function openCustomize(){
-  const u=currentUser();
-  openOverlay(`<h2>🎨 Edit profile</h2><p class="sub">Add your photo and make your page yours.</p>
+  const u=currentUser(); const bgF=u.pageBgFilter||{};
+  const bannerStyle=u.bgImg?`background-image:url('${u.bgImg}');background-size:cover;background-position:center`:`background:linear-gradient(135deg,var(--orange-2),var(--orange-3))`;
+  const pageBgStyle=u.pageBgImg?`background-image:url('${u.pageBgImg}');background-size:cover;background-position:center`:`background:var(--orange-1)`;
+  openOverlay(`<h2>🎨 Edit profile</h2><p class="sub">Make your page unique — fans see all of this on any device.</p>
     <div class="field"><label>Profile photo</label><div class="avup"><div class="avprev" id="avPrev" style="${u.avatarImg?`background-image:url('${u.avatarImg}')`:''}">${u.avatarImg?'':initials(u.name)}</div>
-      <div><input type="file" id="avFile" accept="image/*" /><div class="note" style="margin-top:4px">JPG/PNG from your computer — or paste a link below.</div></div></div></div>
+      <div><input type="file" id="avFile" accept="image/*" /><div class="note" style="margin-top:4px">JPG/PNG — or paste a link below.</div></div></div></div>
     <div class="field"><label>Photo link (optional)</label><input id="avUrl" placeholder="https://…/photo.jpg" /></div>
-    <div class="field"><label>Bio (shown on your profile)</label><textarea id="bgBio" placeholder="Tell fans about your music…">${esc(u.bio||"")}</textarea></div>
-    <div class="field"><label>Profile theme</label>
+    <div class="field"><label>Bio</label><textarea id="bgBio" placeholder="Tell fans about your music…">${esc(u.bio||"")}</textarea></div>
+    <div class="field">
+      <label>🖼️ Banner — wide photo at the top of your page</label>
+      <div class="cust-banner-prev" id="bannerPrev" style="${bannerStyle}"><span class="cust-hint">Concert · Album art · Artist photo</span>${u.bgImg?`<button class="cust-remove-btn" data-action="removebanner" title="Remove banner">✕</button>`:''}</div>
+      <input type="file" id="bannerFile" accept="image/*,.heic,.heif" style="margin-top:6px" />
+      <input id="bannerUrl" placeholder="Or paste a banner image link" value="${esc(u.bgImg||"")}" style="margin-top:6px;width:100%" />
+    </div>
+    <div class="field">
+      <label>🌄 Page background image</label>
+      <div class="cust-bg-prev" id="pageBgPrev" style="${pageBgStyle}"><span class="cust-hint" style="color:rgba(60,30,0,.6)">Shown behind your whole page</span>${u.pageBgImg?`<button class="cust-remove-btn" data-action="removepagebg" title="Remove background">✕</button>`:''}</div>
+      <input type="file" id="pageBgFile" accept="image/*,.heic,.heif" style="margin-top:6px" />
+      <input id="pageBgUrl" placeholder="Or paste a background image link" value="${esc(u.pageBgImg||"")}" style="margin-top:6px;width:100%" />
+      <label style="margin-top:10px;display:block;font-size:13px;color:var(--muted)">Display mode</label>
+      <div class="bg-mode-row">
+        <button class="bg-mode-btn ${(u.pageBgMode||'stretch')==='stretch'?'sel':''}" data-action="setbgmode" data-mode="stretch">⤢ Stretch</button>
+        <button class="bg-mode-btn ${(u.pageBgMode||'')==='tile'?'sel':''}" data-action="setbgmode" data-mode="tile">▦ Tile</button>
+        <button class="bg-mode-btn ${(u.pageBgMode||'')==='center'?'sel':''}" data-action="setbgmode" data-mode="center">⊡ Center</button>
+      </div>
+      <label style="margin-top:12px;display:block;font-size:13px;color:var(--muted)">🎛️ Adjustments</label>
+      <div class="adj-row"><span class="adj-label">☀️ Brightness</span><input type="range" id="adjBrightness" class="adj-slider" min="0" max="200" value="${bgF.brightness!=null?bgF.brightness:100}" /><span class="adj-val" id="adjBrightnessVal">${bgF.brightness!=null?bgF.brightness:100}%</span></div>
+      <div class="adj-row"><span class="adj-label">◑ Contrast</span><input type="range" id="adjContrast" class="adj-slider" min="0" max="200" value="${bgF.contrast!=null?bgF.contrast:100}" /><span class="adj-val" id="adjContrastVal">${bgF.contrast!=null?bgF.contrast:100}%</span></div>
+      <div class="adj-row"><span class="adj-label">🎨 Color</span><input type="range" id="adjSaturate" class="adj-slider" min="0" max="200" value="${bgF.saturate!=null?bgF.saturate:100}" /><span class="adj-val" id="adjSaturateVal">${bgF.saturate!=null?bgF.saturate:100}%</span></div>
+      <div class="adj-row"><span class="adj-label">◻ Transparency</span><input type="range" id="adjOpacity" class="adj-slider" min="10" max="100" value="${bgF.opacity!=null?bgF.opacity:100}" /><span class="adj-val" id="adjOpacityVal">${bgF.opacity!=null?bgF.opacity:100}%</span></div>
+    </div>
+    <div class="field"><label>Banner colour (if no photo)</label>
       <div class="theme-grid" id="themeGrid">${THEMES.map(t=>`<div class="theme-swatch ${(u.bgTheme||"")===t.id?'sel':''}" style="background:${t.css}" data-action="theme" data-t="${t.id}" title="${t.label}"><span class="theme-label">${t.label}</span></div>`).join("")}</div></div>
-    <div class="field"><label>Or a solid color</label><div class="swatches" id="bgSw">${["#FFCBA0","#7c5cff","#36d1c4","#ff5c7c","#2bbf4e","#5c8bff","#33272f"].map(c=>`<div class="swatch ${u.bgColor===c&&!u.bgTheme?'sel':''}" style="background:${c}" data-action="bgcolor" data-c="${c}"></div>`).join("")}</div></div>
-    <div class="field"><label>Or a banner image link</label><input id="bgImg" placeholder="https://…/banner.jpg" value="${esc(u.bgImg||"")}" /></div>
-    <button class="btn primary block" data-action="savecustom">Save profile</button>`);
-  window._bgColor=u.bgColor||""; window._bgTheme=u.bgTheme||""; window._avatar=null;
+    <div class="field"><label>Or a solid colour</label><div class="swatches" id="bgSw">${["#FFCBA0","#7c5cff","#36d1c4","#ff5c7c","#2bbf4e","#5c8bff","#33272f"].map(c=>`<div class="swatch ${u.bgColor===c&&!u.bgTheme?'sel':''}" style="background:${c}" data-action="bgcolor" data-c="${c}"></div>`).join("")}</div></div>
+    <button class="btn primary block" data-action="savecustom">Save profile</button>
+    <button class="btn block" data-action="openresetcustom" style="margin-top:10px;color:#c0392b;border-color:#f5c6c6">🔄 Reset page to default</button>`);
+  window._bgColor=u.bgColor||""; window._bgTheme=u.bgTheme||""; window._avatar=null; window._avatarFile=null; window._bannerFile=null; window._pageBgFile=null; window._bgMode=u.pageBgMode||"stretch"; window._clearBanner=false; window._clearPageBg=false;
 }
-function saveCustom(){
-  if(!ME) return; const url=($("avUrl").value||"").trim();
-  const upd={ bio:($("bgBio").value||"").trim()||ME.bio||"", bgColor:window._bgTheme?"":(window._bgColor||""), bgTheme:window._bgTheme||"", bgImg:($("bgImg").value||"").trim() };
-  if(window._avatar){ if(window._avatar.length>700000) return toast("That photo is too big — paste a link instead, or use a smaller image."); upd.avatarImg=window._avatar; }
-  else if(url) upd.avatarImg=url;
-  fbDB.collection("users").doc(ME.id).set(upd,{merge:true}).then(()=>{ Object.assign(ME,upd); closeOverlay(); toast("Profile saved ✨"); go("profile",{profileId:ME.id}); }).catch(e=>toast("Couldn't save: "+(e.code||e.message)));
+function removeBanner(){
+  window._bannerFile=null; window._clearBanner=true;
+  const p=$("bannerPrev"); if(p){ p.style.backgroundImage=""; p.style.background="linear-gradient(135deg,var(--orange-2),var(--orange-3))"; const h=p.querySelector(".cust-hint"); if(h) h.style.opacity="1"; const rb=p.querySelector(".cust-remove-btn"); if(rb) rb.remove(); }
+  const u=$("bannerUrl"); if(u) u.value="";
+}
+function removePageBg(){
+  window._pageBgFile=null; window._clearPageBg=true;
+  const p=$("pageBgPrev"); if(p){ p.style.backgroundImage=""; p.style.background="var(--orange-1)"; const h=p.querySelector(".cust-hint"); if(h) h.style.opacity="1"; const rb=p.querySelector(".cust-remove-btn"); if(rb) rb.remove(); }
+  const u=$("pageBgUrl"); if(u) u.value="";
+}
+function openResetCustom(){
+  openOverlay(`<h2>🔄 Reset page to default?</h2>
+    <p style="margin:10px 0 22px;color:var(--muted);line-height:1.5">This removes your banner photo, page background, colour theme and solid colour.<br>Your profile photo and bio will be kept.</p>
+    <div style="display:flex;gap:10px">
+      <button class="btn block" data-action="close">Cancel</button>
+      <button class="btn block" data-action="resetcustom" style="color:#c0392b;border-color:#f5c6c6">Yes, reset</button>
+    </div>`);
+}
+async function resetCustom(){
+  if(!ME) return;
+  const upd={ bgImg:"", pageBgImg:"", pageBgMode:"stretch", bgColor:"", bgTheme:"", pageBgFilter:{} };
+  try{
+    await fbDB.collection("users").doc(ME.id).set(upd,{merge:true});
+    Object.assign(ME,upd); _clearBg(); closeOverlay(); toast("Page reset to default ✓");
+    go("profile",{profileId:ME.id});
+  }catch(e){ toast("Reset failed: "+(e.code||e.message)); }
+}
+function setBgMode(mode){
+  window._bgMode=mode;
+  document.querySelectorAll(".bg-mode-btn").forEach(b=>b.classList.toggle("sel",b.dataset.mode===mode));
+}
+async function saveCustom(){
+  if(!ME) return;
+  const saveBtn=document.querySelector('[data-action="savecustom"]');
+  if(saveBtn){ saveBtn.disabled=true; saveBtn.textContent="Saving…"; }
+  const url=($("avUrl").value||"").trim();
+  const upd={ bio:($("bgBio").value||"").trim()||ME.bio||"", bgColor:window._bgTheme?"":(window._bgColor||""), bgTheme:window._bgTheme||"", pageBgMode:window._bgMode||"stretch" };
+  upd.pageBgFilter={ brightness:parseInt(($("adjBrightness")||{value:"100"}).value)||100, contrast:parseInt(($("adjContrast")||{value:"100"}).value)||100, saturate:parseInt(($("adjSaturate")||{value:"100"}).value)||100, opacity:parseInt(($("adjOpacity")||{value:"100"}).value)||100 };
+  if(window._avatarFile){
+    try{ if(saveBtn) saveBtn.textContent="Uploading photo…"; upd.avatarImg=await uploadMediaToCloudinary(window._avatarFile); }
+    catch(e){ if(saveBtn){saveBtn.disabled=false;saveBtn.textContent="Save profile";} return toast("Photo upload failed: "+(e.message||e)); }
+  } else if(url) upd.avatarImg=url;
+  if(window._bannerFile){
+    try{ if(saveBtn) saveBtn.textContent="Uploading banner…"; upd.bgImg=await uploadMediaToCloudinary(window._bannerFile); }
+    catch(e){ if(saveBtn){saveBtn.disabled=false;saveBtn.textContent="Save profile";} return toast("Banner upload failed: "+(e.message||e)); }
+  } else if(window._clearBanner){ upd.bgImg=""; }
+  else { const v=($("bannerUrl")||{value:""}).value.trim(); if(v) upd.bgImg=v; }
+  if(window._pageBgFile){
+    try{ if(saveBtn) saveBtn.textContent="Uploading background…"; upd.pageBgImg=await uploadMediaToCloudinary(window._pageBgFile); }
+    catch(e){ if(saveBtn){saveBtn.disabled=false;saveBtn.textContent="Save profile";} return toast("Background upload failed: "+(e.message||e)); }
+  } else if(window._clearPageBg){ upd.pageBgImg=""; }
+  else { const v=($("pageBgUrl")||{value:""}).value.trim(); if(v) upd.pageBgImg=v; }
+  fbDB.collection("users").doc(ME.id).set(upd,{merge:true})
+    .then(()=>{ Object.assign(ME,upd); closeOverlay(); toast("Profile saved ✨"); go("profile",{profileId:ME.id}); })
+    .catch(e=>{ if(saveBtn){saveBtn.disabled=false;saveBtn.textContent="Save profile";} toast("Couldn't save: "+(e.code||e.message)); });
 }
 
 // ---------- invite ----------
@@ -727,7 +1062,7 @@ function viewAvatar(uid){
 
 // ---------- overlay ----------
 function openOverlay(h){ $("overlayBody").innerHTML=`<div class="modal"><button class="modal-x" data-action="close">✕</button>${h}</div>`; $("overlay").hidden=false; }
-function closeOverlay(){ $("overlay").hidden=true; $("overlayBody").innerHTML=""; }
+function closeOverlay(){ if(activePc){endCall();return;} $("overlay").hidden=true; $("overlayBody").innerHTML=""; }
 
 // ---------- player ----------
 let hasSrc=false;
@@ -735,6 +1070,10 @@ function showPlayer(title,artist,accent,src){ $("miniplayer").classList.add("sho
   if(src){ hasSrc=true; audio.src=src; audio.play().then(()=>setPlaying(true)).catch(()=>setPlaying(false)); } else { hasSrc=false; setPlaying(true); } }
 async function playTrack(id){ const t=allTracks().find(x=>x.id===id); if(!t) return; const u=userById(t.userId); const d=db(); d.plays[id]=(d.plays[id]||0)+1; commit(d);
   nowPlayingId=id;
+  // Lock queue to the viewed profile or My Music — prevents bleed across users
+  if(state.view==="profile"&&state.profileId) nowPlayingContext={uid:state.profileId};
+  else if(state.view==="mymusic") nowPlayingContext={uid:currentUser().id};
+  else nowPlayingContext=null;
   if(t.src&&t.src.startsWith("local:")){
     const blob=await audioGet(t.src.slice(6));
     if(blob){ showPlayer(t.title,u.name,t.accent,URL.createObjectURL(blob)); }
@@ -745,7 +1084,9 @@ async function playTrack(id){ const t=allTracks().find(x=>x.id===id); if(!t) ret
   showPlayer(t.title,u.name,t.accent,t.src); if(!t.src) toast("Demo track — no audio linked yet. Reactions still work!"); }
 function setPlaying(p){ $("mpPlay").textContent=p?"⏸":"▶"; }
 function playQueue(direction){
-  const queue=allTracks().filter(t=>t.src&&!t.src.startsWith("local:")&&t.visibility!=="private");
+  let queue=allTracks().filter(t=>t.src&&!t.src.startsWith("local:")&&t.visibility!=="private");
+  const filterUid=myTracksOnlyMode&&ME?ME.id:(nowPlayingContext&&nowPlayingContext.uid?nowPlayingContext.uid:null);
+  if(filterUid) queue=queue.filter(t=>t.userId===filterUid);
   if(!queue.length) return;
   if(playMode==="shuffle"){ playTrack(queue[Math.floor(Math.random()*queue.length)].id); return; }
   const idx=queue.findIndex(t=>t.id===nowPlayingId);
@@ -803,13 +1144,17 @@ function renderAdmin(){
     <div style="background:#fff;border-radius:14px;padding:16px;box-shadow:0 2px 8px rgba(180,120,60,.08)">
       <p style="font-size:14px;margin:0 0 12px">Send the getting-started guide to every registered user as a notification they can read in the app.</p>
       <button class="btn primary" data-action="broadcastwelcome">📢 Send Instructions to All Users (${users.length})</button>
-    </div>`;
+    </div>
+    <div class="section-title" style="margin-top:28px">💡 Feature Suggestions (${(CACHE.suggestions||[]).length})</div>
+    ${(CACHE.suggestions||[]).length?(CACHE.suggestions||[]).map(s=>`<div class="mrow2" style="padding:12px;background:#fff;border-radius:12px;margin-bottom:8px;box-shadow:0 2px 6px rgba(180,120,60,.06)">
+      <div class="minfo"><div class="mt">${esc(s.text)}</div><div class="ms">${esc(s.name||'Anonymous')} · ${timeAgo(s.time)}</div></div>
+    </div>`).join(''):'<div class="empty" style="margin-top:8px">No suggestions yet.</div>'}`;
 }
 async function broadcastWelcome(){
   if(!isAdmin()) return;
   const users=Object.values(CACHE.users).filter(u=>u.id&&!String(u.id).startsWith("u_"));
   if(!users.length) return toast("No users loaded yet — wait a moment and try again.");
-  const text="📖 OK Music Guide updated! Share music, playlists, buy & sell in the Marketplace, and now send private messages & voice call any member. Tap to open the guide.";
+  const text="📖 OK Music Guide updated! Cloud music, custom banners & page backgrounds, private chat with edit/delete, free voice calls, Marketplace & more. Tap to read the full guide.";
   let sent=0;
   for(const u of users){
     try{
@@ -885,36 +1230,55 @@ function mpSellerCard(p){
 function openProductForm(productId){
   const p=productId?CACHE.products.find(x=>x.id===productId):null;
   window._mpPhoto=p?.photos?.[0]||null;
+  window._mpPhotoFile=null;
   const prevStyle=window._mpPhoto?`background-image:url('${window._mpPhoto}');background-size:cover;background-position:center`:'background:var(--orange-1)';
   openOverlay(`<h2>${p?'Edit product':'Add a product'}</h2>
-    <div class="field"><label>Title</label><input class="fb-field" id="mpTitle" placeholder="e.g. OK Music hoodie" value="${esc(p?.title||'')}" /></div>
-    <div class="field"><label>Description</label><textarea class="fb-field" id="mpDesc" placeholder="Describe your product — material, size, condition…" style="min-height:90px">${esc(p?.description||'')}</textarea></div>
-    <div class="field"><label>Category</label><select class="fb-field" id="mpCat">${MP_CATEGORIES.map(c=>`<option value="${c}" ${(p?.category||'Other')===c?'selected':''}>${c}</option>`).join("")}</select></div>
-    <div class="field"><label>Price (USD)</label><input class="fb-field" id="mpPrice" type="number" min="0.01" step="0.01" placeholder="0.00" value="${p?.price||''}" /></div>
-    <div class="field"><label>Shipping cost (USD)</label><input class="fb-field" id="mpShip" type="number" min="0" step="0.01" placeholder="0.00" value="${p?.shipping||''}" /></div>
+    <div class="field"><label>Title</label><input class="fb-field" id="prodTitle" placeholder="e.g. OK Music hoodie" value="${esc(p?.title||'')}" /></div>
+    <div class="field"><label>Description</label><textarea class="fb-field" id="prodDesc" placeholder="Describe your product — material, size, condition…" style="min-height:90px">${esc(p?.description||'')}</textarea></div>
+    <div class="field"><label>Category</label><select class="fb-field" id="prodCat">${MP_CATEGORIES.map(c=>`<option value="${c}" ${(p?.category||'Other')===c?'selected':''}>${c}</option>`).join("")}</select></div>
+    <div class="field"><label>Price (USD)</label><input class="fb-field" id="prodPrice" type="number" min="0.01" step="0.01" placeholder="0.00" value="${p?.price||''}" /></div>
+    <div class="field"><label>Shipping cost (USD)</label><input class="fb-field" id="prodShip" type="number" min="0" step="0.01" placeholder="0.00" value="${p?.shipping||''}" /></div>
     <div class="field"><label>Product photo</label>
-      <div class="covup"><div class="covprev" id="mpPhotoPrev" style="${prevStyle}">${window._mpPhoto?'':'📦'}</div>
-        <div><input type="file" id="mpPhotoFile" accept="image/*" /><div class="note" style="margin-top:4px">JPG/PNG — max ~600KB</div></div></div></div>
+      <div class="covup"><div class="covprev" id="prodPhotoPrev" style="${prevStyle}">${window._mpPhoto?'':'📦'}</div>
+        <div><input type="file" id="prodPhotoFile" accept="image/*,.heic,.heif,.avif,.webp,.tiff,.bmp,.svg" /><div class="note" style="margin-top:4px">All photo formats supported (JPG, PNG, WEBP, HEIC, RAW…)</div></div></div></div>
     <button class="btn primary block" data-action="dosaveproduct" data-id="${productId||''}" style="margin-top:16px">${p?'Save changes':'List product'}</button>`);
 }
 async function doSaveProduct(productId){
-  const title=($("mpTitle").value||"").trim(), description=($("mpDesc").value||"").trim();
-  const price=parseFloat($("mpPrice").value), shipping=parseFloat($("mpShip").value||"0")||0;
-  const category=$("mpCat").value||"Other";
+  const title=($("prodTitle").value||"").trim(), description=($("prodDesc").value||"").trim();
+  const price=parseFloat(($("prodPrice")||{value:""}).value), shipping=parseFloat(($("prodShip")||{value:"0"}).value||"0")||0;
+  const category=($("prodCat")||{value:"Other"}).value||"Other";
   if(!title||!description) return toast("Fill in title and description");
   if(!price||price<=0) return toast("Enter a valid price");
-  if(window._mpPhoto&&window._mpPhoto.length>900000) return toast("Photo too large — use an image under ~600KB");
-  const data={ sellerId:ME.id, title, description, category, price, shipping, photos:window._mpPhoto?[window._mpPhoto]:[], updatedAt:Date.now() };
+  const saveBtn=document.querySelector('[data-action="dosaveproduct"]');
+  let photos=window._mpPhoto?[window._mpPhoto]:[];
+  if(window._mpPhotoFile){
+    try{
+      if(saveBtn){saveBtn.disabled=true;saveBtn.textContent="Uploading photo…";}
+      photos=[await uploadMediaToCloudinary(window._mpPhotoFile)];
+    }catch(e){
+      if(saveBtn){saveBtn.disabled=false;saveBtn.textContent=productId?'Save changes':'List product';}
+      return toast("Photo upload failed: "+(e.message||e));
+    }
+  }
+  const data={ sellerId:ME.id, title, description, category, price, shipping, photos, updatedAt:Date.now() };
   try{
-    if(productId){ await fbDB.collection("products").doc(productId).update(data); toast("Product updated ✓"); }
-    else{ data.createdAt=Date.now(); await fbDB.collection("products").add(data); toast("Product listed! 🎉"); }
-    closeOverlay(); go("mystore");
-  } catch(e){ toast("Couldn't save: "+(e.code||e.message)); }
+    if(productId){ await fbDB.collection("products").doc(productId).update(data); closeOverlay(); toast("Product updated ✓"); }
+    else{ data.createdAt=Date.now(); await fbDB.collection("products").add(data); closeOverlay(); toast("Product listed! 🎉"); }
+    go("mystore");
+  } catch(e){
+    if(saveBtn){saveBtn.disabled=false;saveBtn.textContent=productId?'Save changes':'List product';}
+    toast("Couldn't save: "+(e.code||e.message));
+  }
 }
 function deleteProduct(id){
-  if(!confirm("Delete this product? Cannot be undone.")) return;
-  fbDB.collection("products").doc(id).delete().then(()=>toast("Product deleted")).catch(e=>toast(e.code||e.message));
+  openOverlay(`<h2>🗑️ Delete product?</h2>
+    <p style="margin:10px 0 22px;color:var(--muted);line-height:1.5">This will permanently remove the listing. This cannot be undone.</p>
+    <div style="display:flex;gap:10px">
+      <button class="btn block" data-action="close">Cancel</button>
+      <button class="btn block" data-action="confirmdelprod" data-id="${id}" style="color:#c0392b;border-color:#f5c6c6">Yes, delete</button>
+    </div>`);
 }
+function doDeleteProduct(id){ fbDB.collection("products").doc(id).delete().then(()=>{ closeOverlay(); toast("Product deleted"); go("mystore"); }).catch(e=>toast(e.code||e.message)); }
 
 // ---------- buyer browse ----------
 function renderMarketplace(){
@@ -969,10 +1333,11 @@ function addToCart(id){
   if(!state.cart) state.cart=[];
   const has=state.cart.includes(id);
   state.cart=has?state.cart.filter(x=>x!==id):[...state.cart,id];
+  persistCart();
   toast(has?"Removed from cart":"Added to cart 🛒");
   closeOverlay(); renderMain();
 }
-function removeFromCart(id){ state.cart=(state.cart||[]).filter(x=>x!==id); renderCart(); }
+function removeFromCart(id){ state.cart=(state.cart||[]).filter(x=>x!==id); persistCart(); renderCart(); }
 function renderCart(){
   if(!state.cart) state.cart=[];
   const items=state.cart.map(id=>CACHE.products.find(p=>p.id===id)).filter(Boolean);
@@ -1037,7 +1402,7 @@ async function doPlaceOrder(){
       items:items.map(p=>({ productId:p.id, title:p.title, price:p.price, shipping:p.shipping||0, sellerId:p.sellerId })),
       subtotal, shipping:shippingTotal, platformFee:fee, total, status:"pending_payment", createdAt:Date.now()
     });
-    state.cart=[];
+    state.cart=[]; persistCart();
     closeOverlay();
     openOverlay(`<div style="text-align:center;padding:8px">
       <div style="font-size:44px;margin-bottom:12px">✅</div>
@@ -1088,12 +1453,94 @@ function notify(forUid,type,text){
   if(String(forUid).startsWith("u_")) return;          // skip seed/demo recipients
   fbDB.collection("notifications").add({ forUid, type, fromUid:ME.id, fromName:ME.name, text, time:Date.now(), read:false }).catch(()=>{});
 }
+
+// ---- Push / browser notifications ----
+const _shownNotifIds=new Set();
+
+function showBrowserNotif(title, body, opts={}){
+  if(!('Notification' in window)||Notification.permission!=='granted') return null;
+  try{
+    const n=new Notification(title,{ body, icon:'favicon.ico', badge:'favicon.ico', ...opts });
+    n.onclick=()=>{ window.focus(); n.close(); };
+    return n;
+  }catch(e){ return null; }
+}
+
+function showCallBrowserNotif(callerId){
+  if(!('Notification' in window)||Notification.permission!=='granted') return;
+  const caller=userById(callerId);
+  const name=caller?.name||'Someone';
+  try{
+    const n=new Notification(`📞 ${name} is calling you`,{
+      body:'Tap to answer on OK Music',
+      icon:'favicon.ico',
+      badge:'favicon.ico',
+      requireInteraction:true,   // stays on screen until user acts
+      tag:'incoming-call',
+      renotify:true,
+    });
+    n.onclick=()=>{ window.focus(); n.close(); };
+  }catch(e){}
+}
+
+async function initPushNotifications(){
+  if(!('Notification' in window)) return;
+  // Only request if not already decided
+  if(Notification.permission==='default'){
+    const perm=await Notification.requestPermission().catch(()=>'denied');
+    if(perm!=='granted') return;
+  }
+  if(Notification.permission!=='granted') return;
+
+  // Register service worker and get FCM token
+  if(!('serviceWorker' in navigator)) return;
+  try{
+    const reg=await navigator.serviceWorker.register('/firebase-messaging-sw.js',{ scope:'/' });
+    // Listen for messages from the SW (e.g. notification click when app was closed)
+    navigator.serviceWorker.addEventListener('message',e=>{
+      const d=e.data||{};
+      if(d.type==='SW_NOTIF_CLICK'){
+        if(d.notifType==='message'&&d.fromUid) go('chat',{profileId:d.fromUid});
+        else if(d.notifType==='call'&&d.fromUid) { /* call UI already handles this */ }
+        else go('notifs');
+      }
+    });
+
+    // Save FCM token to Firestore so a backend can send pushes when browser is closed
+    try{
+      const fbMsg=firebase.messaging();
+      // VAPID key from Firebase Console → Project Settings → Cloud Messaging → Web Push
+      // Replace the placeholder below with your actual VAPID key
+      const VAPID_KEY='BFKRCVx_uzQuiIaD7kxidjMmzb-mvdptTILkdAsyLyLw5mUXOcEzzX3PP1tZxIzITLwQI6iVZ47DyMH3k1VfdkY';
+      if(!VAPID_KEY.includes('PLACEHOLDER')){
+        const token=await fbMsg.getToken({ vapidKey:VAPID_KEY, serviceWorkerRegistration:reg });
+        if(token&&ME?.id){
+          fbDB.collection("users").doc(ME.id).set({ fcmToken:token }, { merge:true }).catch(()=>{});
+        }
+      }
+    }catch(e){ /* FCM token optional — in-tab notifs still work */ }
+  }catch(e){ console.warn('SW registration failed',e); }
+}
+
 let notifUnsub=null;
 function startMyNotifications(){
   if(notifUnsub){ notifUnsub(); notifUnsub=null; }
   if(!ME||!ME.handle){ CACHE.notifications=[]; return; }
   notifUnsub=fbDB.collection("notifications").where("forUid","==",ME.id)
-    .onSnapshot(s=>{ CACHE.notifications=s.docs.map(d=>({ id:d.id, ...d.data() })); scheduleRender(); }, e=>console.warn("notif",e.code));
+    .onSnapshot(s=>{
+      CACHE.notifications=s.docs.map(d=>({ id:d.id, ...d.data() }));
+      // Show browser notification for each new unread item (works when tab is in background)
+      s.docChanges().forEach(ch=>{
+        if(ch.type!=='added') return;
+        const n={ id:ch.doc.id, ...ch.doc.data() };
+        if(n.read||_shownNotifIds.has(n.id)) return;
+        if(Date.now()-n.time>30000) return;  // ignore old notifications on page load
+        _shownNotifIds.add(n.id);
+        if(n.type==='call') return;  // calls handled separately by listenForIncomingCalls
+        showBrowserNotif('◎ OK Music', n.text, { tag:n.type, renotify:true });
+      });
+      scheduleRender();
+    }, e=>console.warn("notif",e.code));
 }
 function markAllRead(){
   const un=(CACHE.notifications||[]).filter(n=>!n.read); if(!un.length) return;
@@ -1123,9 +1570,10 @@ function renderBuzzing(){
   $("page").innerHTML=`<div class="h-title">🔥 Buzzing right now</div>
     <p class="note" style="margin-bottom:14px">The community's hottest tracks, ranked by plays + likes.</p>
     ${list.map((x,i)=>{ const t=x.t, u=userById(t.userId); const medal=i===0?'🥇':i===1?'🥈':i===2?'🥉':('#'+(i+1));
+      const bzArt=t.coverImg?`background-image:url('${t.coverImg}');background-size:cover;background-position:center`:`background:${grad(t.accent)}`;
       return `<div class="mrow2">
         <div style="width:34px;text-align:center;font-weight:900;color:var(--orange-deep)">${medal}</div>
-        <div class="mart" style="background:${grad(t.accent)};cursor:pointer" data-action="play" data-id="${t.id}">◎</div>
+        <div class="mart" style="${bzArt};cursor:pointer" data-action="play" data-id="${t.id}">${t.coverImg?'':'◎'}</div>
         <div class="minfo"><div class="mt" data-action="play" data-id="${t.id}">${esc(t.title)}</div>
           <div class="ms" data-action="profile" data-uid="${u.id}">${esc(u.name)} · ▶ ${nfmt(playCount(t.id))} · 👍 ${nfmt(likeCount(t.id))}</div></div>
         <button class="btn sm primary" data-action="play" data-id="${t.id}">▶</button></div>`; }).join("")}`;
@@ -1145,6 +1593,446 @@ function sendSuggest(){
     .catch(e=>toast("Couldn't send: "+(e.code||e.message)));
 }
 
+// =========================================================
+// SECURITY — session tracking, device management
+// =========================================================
+function getDeviceInfo(){
+  const ua=navigator.userAgent;
+  let browser='Browser';
+  if(ua.includes('Edg/')) browser='Edge';
+  else if(ua.includes('Chrome')&&!ua.includes('Chromium')) browser='Chrome';
+  else if(ua.includes('Firefox')) browser='Firefox';
+  else if(ua.includes('Safari')) browser='Safari';
+  else if(ua.includes('OPR')||ua.includes('Opera')) browser='Opera';
+  let os='Unknown';
+  if(/iPhone|iPad|iPod/.test(ua)) os='iOS';
+  else if(/Android/.test(ua)) os='Android';
+  else if(ua.includes('Mac')) os='Mac';
+  else if(ua.includes('Windows')) os='Windows';
+  else if(ua.includes('Linux')) os='Linux';
+  let device='Desktop';
+  if(/Android|iPhone|iPod|BlackBerry|IEMobile|Opera Mini/i.test(ua)) device='Mobile';
+  else if(/iPad|Tablet/i.test(ua)) device='Tablet';
+  const tz=Intl.DateTimeFormat().resolvedOptions().timeZone||'Unknown';
+  return { browser, os, device, tz };
+}
+function getSessionId(){
+  let sid=localStorage.getItem('okm_sid');
+  if(!sid){
+    const arr=new Uint8Array(16); crypto.getRandomValues(arr);
+    sid=[...arr].map((b,i)=>(i===4||i===6||i===8||i===10?'-':'')+b.toString(16).padStart(2,'0')).join('');
+    localStorage.setItem('okm_sid',sid);
+  }
+  return sid;
+}
+let _sessionUnsub=null;
+async function handleLoginSecurity(uid){
+  const sid=getSessionId();
+  try{
+    const snap=await fbDB.collection('users').doc(uid).collection('sessions').doc(sid).get();
+    if(snap.exists){
+      const d=snap.data();
+      if(d.active===false){ toast('This session was signed out remotely. Please log in again.'); setTimeout(()=>fbAuth.signOut(),1800); return; }
+      if(d.expiresAt&&d.expiresAt<Date.now()){ toast('Your public device session has expired. Please log in again.'); setTimeout(()=>fbAuth.signOut(),1800); return; }
+      fbDB.collection('users').doc(uid).collection('sessions').doc(sid).update({ lastSeen:Date.now() }).catch(()=>{});
+      _startSessionListener(uid,sid);
+      if(d.expiresAt&&d.expiresAt>Date.now()) _schedulePublicExpiry(d.expiresAt);
+    } else {
+      _showDeviceTypePrompt(uid);
+    }
+  }catch(e){ console.warn('Security init error:',e); }
+}
+function _showDeviceTypePrompt(uid){
+  openOverlay(`<div style="text-align:center;padding:4px 0 8px">
+    <div style="font-size:48px;margin-bottom:12px">🔒</div>
+    <h2>Quick Security Check</h2>
+    <p class="sub">Is this a private or shared device? This helps protect your account.</p>
+    <button class="btn primary block" style="margin-bottom:10px" data-action="devicetype" data-pub="0" data-uid="${uid}">🏠 Private device — keep me signed in</button>
+    <button class="btn block" data-action="devicetype" data-pub="1" data-uid="${uid}">🖥️ Public / shared device — 2-hour session</button>
+  </div>`);
+}
+async function _initSession(uid,isPublic){
+  const sid=getSessionId(); const devInfo=getDeviceInfo(); const now=Date.now();
+  const expiresAt=isPublic?now+2*60*60*1000:null;
+  const sessionRef=fbDB.collection('users').doc(uid).collection('sessions').doc(sid);
+  try{
+    const userSnap=await fbDB.collection('users').doc(uid).get();
+    const fcmToken=userSnap.data()?.fcmToken||null;
+    await sessionRef.set({ sid, ...devInfo, active:true, createdAt:now, lastSeen:now, expiresAt, isPublic:!!isPublic, fcmToken },{ merge:false });
+    fbDB.collection('users').doc(uid).collection('activityLog').add({ type:'login', ...devInfo, timestamp:now, isPublic:!!isPublic }).catch(()=>{});
+    // New device notification to other sessions
+    const others=await fbDB.collection('users').doc(uid).collection('sessions').where('active','==',true).get();
+    let hasOtherActive=false;
+    others.forEach(d=>{ if(d.id!==sid&&d.data().active!==false) hasOtherActive=true; });
+    if(hasOtherActive){
+      fbDB.collection('notifications').add({ forUid:uid, type:'new_login', fromUid:'platform', fromName:'OK Music',
+        text:`🔐 New sign-in detected: ${devInfo.browser} on ${devInfo.os} (${devInfo.tz}). If this wasn't you, go to Security in your profile immediately.`,
+        time:now, read:false }).catch(()=>{});
+    }
+    _startSessionListener(uid,sid);
+    if(isPublic) _schedulePublicExpiry(expiresAt);
+  }catch(e){ console.warn('Session write error:',e); }
+}
+function _startSessionListener(uid,sid){
+  if(_sessionUnsub){ _sessionUnsub(); _sessionUnsub=null; }
+  _sessionUnsub=fbDB.collection('users').doc(uid).collection('sessions').doc(sid)
+    .onSnapshot(snap=>{
+      if(!snap.exists||!ME) return;
+      const d=snap.data();
+      if(d.active===false){ toast('You were signed out from another device.'); setTimeout(()=>fbAuth.signOut(),1800); }
+      else if(d.expiresAt&&d.expiresAt<Date.now()){ toast('Your session has expired.'); setTimeout(()=>fbAuth.signOut(),1800); }
+    },()=>{});
+}
+function _schedulePublicExpiry(expiresAt){
+  const ms=expiresAt-Date.now(); if(ms<=0) return;
+  setTimeout(()=>{ toast('Your 2-hour public device session has expired. Signing out…'); setTimeout(()=>fbAuth.signOut(),2500); }, ms);
+}
+async function logoutAllOtherDevices(){
+  if(!ME) return;
+  const sid=getSessionId();
+  try{
+    const sessions=await fbDB.collection('users').doc(ME.id).collection('sessions').where('active','==',true).get();
+    const batch=fbDB.batch();
+    let count=0;
+    sessions.forEach(d=>{ if(d.id!==sid){ batch.update(d.ref,{ active:false }); count++; } });
+    if(count===0){ toast('No other active sessions to sign out.'); return; }
+    await batch.commit();
+    fbDB.collection('users').doc(ME.id).collection('activityLog').add({ type:'logout_all', ...getDeviceInfo(), timestamp:Date.now() }).catch(()=>{});
+    toast(`Signed out ${count} other device${count>1?'s':''} ✓`);
+    openSecurityModal();
+  }catch(e){ toast('Error: '+(e.message||e)); }
+}
+async function openSecurityModal(){
+  if(!ME) return;
+  const uid=ME.id; const sid=getSessionId();
+  openOverlay(`<div class="sec-loading">Loading security info…</div>`);
+  try{
+    const [sessionSnap,logSnap]=await Promise.all([
+      fbDB.collection('users').doc(uid).collection('sessions').orderBy('lastSeen','desc').limit(12).get().catch(()=>null),
+      fbDB.collection('users').doc(uid).collection('activityLog').orderBy('timestamp','desc').limit(15).get().catch(()=>null),
+    ]);
+    const sessions=[]; if(sessionSnap) sessionSnap.forEach(d=>sessions.push({ id:d.id,...d.data() }));
+    const logs=[]; if(logSnap) logSnap.forEach(d=>logs.push({ id:d.id,...d.data() }));
+    const devIcon=s=>s.device==='Mobile'?'📱':s.device==='Tablet'?'📲':'💻';
+    const sessionRows=sessions.length?sessions.map(s=>{
+      const isCur=s.id===sid; const active=s.active!==false; const expired=s.expiresAt&&s.expiresAt<Date.now();
+      const badge=isCur?'<span class="sec-badge cur">This device</span>':(!active||expired)?'<span class="sec-badge off">Signed out</span>':'<span class="sec-badge on">Active</span>';
+      const exp=s.expiresAt&&!expired?` · Expires ${new Date(s.expiresAt).toLocaleTimeString()}`:'';
+      return `<div class="sec-session">${devIcon(s)}<div class="sec-sess-info"><div class="sec-sess-name">${esc(s.browser||'Browser')} on ${esc(s.os||'?')} ${badge}</div><div class="sec-sess-meta">${esc(s.tz||'')} · Last seen ${timeAgo(s.lastSeen||s.createdAt)}${exp}</div></div></div>`;
+    }).join(''):`<div class="empty" style="padding:12px">No sessions found.</div>`;
+    const logRows=logs.length?logs.map(l=>{
+      const icon=l.type==='login'?'🔑':l.type==='logout_all'?'🔒':'📋';
+      const label=l.type==='login'?'Sign-in':l.type==='logout_all'?'Signed out all devices':'Activity';
+      return `<div class="sec-log-row">${icon}<div class="sec-log-info"><div>${label} · ${esc(l.browser||'Browser')} on ${esc(l.os||'?')}${l.isPublic?' · Public device':''}</div><div class="sec-log-meta">${esc(l.tz||'')} · ${new Date(l.timestamp).toLocaleString()}</div></div></div>`;
+    }).join(''):`<div class="empty" style="padding:12px">No activity yet.</div>`;
+    const hasOthers=sessions.some(s=>s.id!==sid&&s.active!==false&&!(s.expiresAt&&s.expiresAt<Date.now()));
+    openOverlay(`<h2>🔐 Account Security</h2>
+      <div class="sec-section"><div class="sec-title">Active Sessions</div>${sessionRows}
+        ${hasOthers?`<button class="btn block sec-signout-btn" data-action="logoutall">Sign out all other devices</button>`:'<p class="sec-note">No other active sessions.</p>'}
+      </div>
+      <div class="sec-section"><div class="sec-title">Recent Activity (last 15 events)</div>${logRows}</div>`);
+  }catch(e){ openOverlay(`<p class="sub" style="text-align:center">Couldn't load security info.</p>`); }
+}
+
+// =========================================================
+// PRIVACY & SETTINGS
+// =========================================================
+function getPrivacy(u){ return u?.privacy||{}; }
+function hasBlocked(uid){ return (ME?.blockedUsers||[]).includes(uid); }
+function isBlockedByMe(uid){ return hasBlocked(uid); }
+function canMessage(targetUid){
+  const t=userById(targetUid); if(!t) return true;
+  if(hasBlocked(targetUid)) return false;
+  const p=getPrivacy(t);
+  if(p.whoCanMessage==='none') return false;
+  if(p.whoCanMessage==='followers') return (CACHE.follows[ME?.id]||[]).includes(targetUid);
+  return true;
+}
+function canCall(targetUid){
+  const t=userById(targetUid); if(!t) return true;
+  if(hasBlocked(targetUid)) return false;
+  const p=getPrivacy(t);
+  if(p.whoCanCall==='none') return false;
+  if(p.whoCanCall==='followers') return (CACHE.follows[ME?.id]||[]).includes(targetUid);
+  return true;
+}
+function isProfilePrivate(uid){
+  const u=userById(uid); if(!u) return false;
+  return !!(getPrivacy(u).profilePrivate) && !(CACHE.follows[ME?.id]||[]).includes(uid) && uid!==ME?.id;
+}
+
+async function openSettingsModal(tab='privacy'){
+  if(!ME) return;
+  const tabs=['privacy','blocked','security','account'];
+  const tabLabels={ privacy:'🔒 Privacy', blocked:'🚫 Blocked', security:'🔐 Security', account:'👤 Account' };
+  const tabNav=tabs.map(t=>`<button class="stab ${t===tab?'active':''}" data-action="settingstab" data-tab="${t}">${tabLabels[t]}</button>`).join('');
+
+  let body='';
+  if(tab==='privacy'){
+    const p=getPrivacy(ME);
+    body=`
+      <div class="sset-group">
+        <div class="sset-label">Profile Privacy</div>
+        <div class="sset-row"><div><div class="sset-name">Private profile</div><div class="sset-hint">Only followers can see your tracks and posts</div></div>
+          <label class="stoggle"><input type="checkbox" id="privProfile" ${p.profilePrivate?'checked':''}><span class="stoggle-sl"></span></label></div>
+      </div>
+      <div class="sset-group">
+        <div class="sset-label">Messaging</div>
+        <div class="sset-name" style="margin-bottom:8px">Who can send me messages?</div>
+        ${['all','followers','none'].map(v=>`<label class="sradio"><input type="radio" name="whoMsg" value="${v}" ${(p.whoCanMessage||'all')===v?'checked':''}><span>${v==='all'?'Everyone':v==='followers'?'Followers only':'Nobody'}</span></label>`).join('')}
+      </div>
+      <div class="sset-group">
+        <div class="sset-label">Calls</div>
+        <div class="sset-name" style="margin-bottom:8px">Who can call me?</div>
+        ${['all','followers','none'].map(v=>`<label class="sradio"><input type="radio" name="whoCall" value="${v}" ${(p.whoCanCall||'all')===v?'checked':''}><span>${v==='all'?'Everyone':v==='followers'?'Followers only':'Nobody'}</span></label>`).join('')}
+      </div>
+      <div class="sset-group">
+        <div class="sset-label">Discoverability</div>
+        <div class="sset-row"><div><div class="sset-name">Hide from Discover & Search</div><div class="sset-hint">Your profile won't appear to other users browsing</div></div>
+          <label class="stoggle"><input type="checkbox" id="privDiscover" ${p.hideFromDiscover?'checked':''}><span class="stoggle-sl"></span></label></div>
+      </div>
+      <button class="btn primary block" data-action="saveprivacy" style="margin-top:8px">Save Privacy Settings</button>`;
+  } else if(tab==='blocked'){
+    const blocked=(ME.blockedUsers||[]).map(uid=>userById(uid)).filter(Boolean);
+    body=`<div class="sset-group">
+      <div class="sset-label">Blocked Users (${blocked.length})</div>
+      ${blocked.length?blocked.map(u=>`<div class="sset-row" style="padding:10px 0;border-bottom:1px solid var(--border)">
+        <div style="display:flex;align-items:center;gap:10px">
+          <div class="avatar" style="${avatarStyle(u,38)}">${u.avatarImg?'':initials(u.name)}</div>
+          <div><div class="sset-name">${esc(u.name)}</div><div class="sset-hint">@${esc(u.handle)}</div></div>
+        </div>
+        <button class="btn sm" data-action="unblockuser" data-uid="${u.id}">Unblock</button>
+      </div>`).join(''):`<div class="empty" style="padding:20px">You haven't blocked anyone.</div>`}
+    </div>`;
+  } else if(tab==='security'){
+    body=`<div class="sset-group">
+      <div class="sset-label">Sessions & Activity</div>
+      <p class="sset-hint" style="margin-bottom:14px">View all devices signed in to your account, sign out remotely, and review your recent activity log.</p>
+      <button class="btn primary block" data-action="security">Open Security Center</button>
+    </div>`;
+  } else if(tab==='account'){
+    const isEmail=fbAuth.currentUser?.providerData?.some(p=>p.providerId==='password');
+    body=`
+      ${isEmail?`<div class="sset-group">
+        <div class="sset-label">Credentials</div>
+        <button class="btn block" data-action="changepw" style="margin-bottom:8px">🔑 Change Password</button>
+        <button class="btn block" data-action="changeemail">✉️ Change Email</button>
+      </div>`:''}
+      <div class="sset-group">
+        <div class="sset-label">Your Data</div>
+        <button class="btn block" data-action="exportdata" style="margin-bottom:8px">📦 Export My Data (JSON)</button>
+      </div>
+      <div class="sset-group">
+        <div class="sset-label" style="color:#e2554f">Danger Zone</div>
+        <p class="sset-hint" style="margin-bottom:10px">Permanently delete your account and all your data. This cannot be undone.</p>
+        <button class="btn block" data-action="deleteaccount" style="background:#e2554f;color:#fff;border-color:#e2554f">🗑️ Delete My Account</button>
+      </div>`;
+  }
+
+  openOverlay(`<h2>⚙️ Settings</h2>
+    <div class="stab-row">${tabNav}</div>
+    <div class="stab-body">${body}</div>`);
+}
+
+async function savePrivacySettings(){
+  if(!ME) return;
+  const profilePrivate=!!document.getElementById('privProfile')?.checked;
+  const hideFromDiscover=!!document.getElementById('privDiscover')?.checked;
+  const whoCanMessage=document.querySelector('input[name="whoMsg"]:checked')?.value||'all';
+  const whoCanCall=document.querySelector('input[name="whoCall"]:checked')?.value||'all';
+  const privacy={ profilePrivate, hideFromDiscover, whoCanMessage, whoCanCall };
+  try{
+    await fbDB.collection('users').doc(ME.id).update({ privacy });
+    ME.privacy=privacy;
+    const d=db(); if(d.usersById[ME.id]) d.usersById[ME.id].privacy=privacy; commit(d);
+    toast('Privacy settings saved ✓');
+    closeOverlay();
+  }catch(e){ toast('Save failed: '+(e.message||e)); }
+}
+
+async function blockUser(targetUid){
+  if(!ME||targetUid===ME.id) return;
+  const target=userById(targetUid);
+  if(!target) return;
+  openOverlay(`<div style="text-align:center;padding:8px">
+    <div style="font-size:40px;margin-bottom:12px">🚫</div>
+    <h2>Block ${esc(target.name)}?</h2>
+    <p class="sub">They won't be able to message or call you. They won't know they're blocked.</p>
+    <button class="btn block" style="background:#e2554f;color:#fff;border-color:#e2554f;margin-bottom:8px" data-action="confirmblock" data-uid="${targetUid}">Block</button>
+    <button class="btn block" data-action="close">Cancel</button>
+  </div>`);
+}
+async function confirmBlock(targetUid){
+  if(!ME) return;
+  const blocked=[...(ME.blockedUsers||[])];
+  if(!blocked.includes(targetUid)) blocked.push(targetUid);
+  try{
+    await fbDB.collection('users').doc(ME.id).update({ blockedUsers:blocked });
+    ME.blockedUsers=blocked;
+    const d=db(); if(d.usersById[ME.id]) d.usersById[ME.id].blockedUsers=blocked; commit(d);
+    toast('User blocked.');
+    closeOverlay();
+    render();
+  }catch(e){ toast('Error: '+(e.message||e)); }
+}
+async function unblockUser(targetUid){
+  if(!ME) return;
+  const blocked=(ME.blockedUsers||[]).filter(u=>u!==targetUid);
+  try{
+    await fbDB.collection('users').doc(ME.id).update({ blockedUsers:blocked });
+    ME.blockedUsers=blocked;
+    const d=db(); if(d.usersById[ME.id]) d.usersById[ME.id].blockedUsers=blocked; commit(d);
+    toast('User unblocked ✓');
+    openSettingsModal('blocked');
+  }catch(e){ toast('Error: '+(e.message||e)); }
+}
+
+function openReportModal(targetUid){
+  const target=userById(targetUid); if(!target) return;
+  openOverlay(`<h2>Report ${esc(target.name)}</h2>
+    <p class="sub">Select a reason — this will be reviewed by the OK Music team.</p>
+    <div class="sset-group">
+      ${['Harassment or bullying','Spam or fake account','Inappropriate content','Hate speech','Impersonation','Other'].map(r=>`<label class="sradio"><input type="radio" name="reportReason" value="${r}"><span>${r}</span></label>`).join('')}
+    </div>
+    <div class="field" style="margin-top:10px"><textarea id="reportDetail" placeholder="Additional details (optional)" style="min-height:70px"></textarea></div>
+    <button class="btn primary block" data-action="sendreport" data-uid="${targetUid}">Send Report</button>
+    <button class="btn block" data-action="close" style="margin-top:8px">Cancel</button>`);
+}
+async function sendReport(targetUid){
+  const reason=document.querySelector('input[name="reportReason"]:checked')?.value;
+  if(!reason) return toast('Please select a reason.');
+  const detail=document.getElementById('reportDetail')?.value?.trim()||'';
+  try{
+    await fbDB.collection('reports').add({ reportedUid:targetUid, reporterUid:ME?.id||'anon', reason, detail, time:Date.now(), status:'pending' });
+    toast('Report submitted. Thank you for helping keep OK Music safe.');
+    closeOverlay();
+  }catch(e){ toast('Error: '+(e.message||e)); }
+}
+
+async function doChangePassword(){
+  openOverlay(`<h2>🔑 Change Password</h2>
+    <div class="field"><label>Current password</label><input class="fb-field" id="pwOld" type="password" /></div>
+    <div class="field"><label>New password (min 6 chars)</label><input class="fb-field" id="pwNew" type="password" /></div>
+    <div class="field"><label>Confirm new password</label><input class="fb-field" id="pwNew2" type="password" /></div>
+    <button class="btn primary block" data-action="confirmpwchange">Change Password</button>
+    <button class="btn block" data-action="close" style="margin-top:8px">Cancel</button>`);
+}
+async function confirmPwChange(){
+  const old=document.getElementById('pwOld')?.value||'';
+  const n1=document.getElementById('pwNew')?.value||'';
+  const n2=document.getElementById('pwNew2')?.value||'';
+  if(!old) return toast('Enter your current password.');
+  if(n1.length<6) return toast('New password must be at least 6 characters.');
+  if(n1!==n2) return toast('New passwords do not match.');
+  try{
+    const user=fbAuth.currentUser;
+    const cred=firebase.auth.EmailAuthProvider.credential(user.email,old);
+    await user.reauthenticateWithCredential(cred);
+    await user.updatePassword(n1);
+    toast('Password changed successfully ✓');
+    closeOverlay();
+    fbDB.collection('users').doc(ME.id).collection('activityLog').add({ type:'password_change',...getDeviceInfo(),timestamp:Date.now() }).catch(()=>{});
+  }catch(e){
+    if(e.code==='auth/wrong-password'||e.code==='auth/invalid-credential') toast('Current password is incorrect.');
+    else toast('Error: '+(e.code||e.message));
+  }
+}
+async function doChangeEmail(){
+  openOverlay(`<h2>✉️ Change Email</h2>
+    <div class="field"><label>Current password</label><input class="fb-field" id="cePass" type="password" /></div>
+    <div class="field"><label>New email address</label><input class="fb-field" id="ceNew" type="email" /></div>
+    <button class="btn primary block" data-action="confirmemailchange">Change Email</button>
+    <button class="btn block" data-action="close" style="margin-top:8px">Cancel</button>`);
+}
+async function confirmEmailChange(){
+  const pass=document.getElementById('cePass')?.value||'';
+  const email=(document.getElementById('ceNew')?.value||'').trim();
+  if(!pass) return toast('Enter your password to confirm.');
+  if(!email.includes('@')) return toast('Enter a valid email address.');
+  try{
+    const user=fbAuth.currentUser;
+    const cred=firebase.auth.EmailAuthProvider.credential(user.email,pass);
+    await user.reauthenticateWithCredential(cred);
+    await user.verifyBeforeUpdateEmail(email);
+    toast('Verification email sent to '+email+'. Check your inbox to confirm the change.');
+    closeOverlay();
+  }catch(e){
+    if(e.code==='auth/wrong-password'||e.code==='auth/invalid-credential') toast('Password is incorrect.');
+    else if(e.code==='auth/email-already-in-use') toast('That email is already in use.');
+    else toast('Error: '+(e.code||e.message));
+  }
+}
+async function exportMyData(){
+  if(!ME) return;
+  toast('Preparing your data export…');
+  try{
+    const [tracks,statuses,notifs]=await Promise.all([
+      fbDB.collection('tracks').where('userId','==',ME.id).get(),
+      fbDB.collection('statuses').where('userId','==',ME.id).get(),
+      fbDB.collection('notifications').where('forUid','==',ME.id).limit(100).get(),
+    ]);
+    const data={
+      exportedAt:new Date().toISOString(),
+      profile:{ id:ME.id,name:ME.name,handle:ME.handle,bio:ME.bio,createdAt:ME.createdAt },
+      tracks:[],statuses:[],notifications:[]
+    };
+    tracks.forEach(d=>data.tracks.push({ id:d.id,...d.data() }));
+    statuses.forEach(d=>data.statuses.push({ id:d.id,...d.data() }));
+    notifs.forEach(d=>data.notifications.push({ id:d.id,...d.data() }));
+    const blob=new Blob([JSON.stringify(data,null,2)],{ type:'application/json' });
+    const url=URL.createObjectURL(blob);
+    const a=document.createElement('a'); a.href=url; a.download=`okmusic-data-${ME.handle||ME.id}.json`; a.click();
+    URL.revokeObjectURL(url);
+    toast('Data exported ✓');
+  }catch(e){ toast('Export failed: '+(e.message||e)); }
+}
+function doDeleteAccount(){
+  const isEmail=fbAuth.currentUser?.providerData?.some(p=>p.providerId==='password');
+  openOverlay(`<div style="text-align:center;padding:8px">
+    <div style="font-size:48px;margin-bottom:12px">⚠️</div>
+    <h2>Delete Account?</h2>
+    <p class="sub">This permanently deletes your profile, all your tracks, posts and data. <b>This cannot be undone.</b></p>
+    <div class="field" style="margin-top:16px"><label>Type DELETE to confirm</label><input class="fb-field" id="delConfirm" placeholder="DELETE" /></div>
+    ${isEmail?`<div class="field"><label>Your password</label><input class="fb-field" id="delPass" type="password" placeholder="Required to confirm" /></div>`:`<p class="sub" style="margin-bottom:8px">You'll be asked to sign in with Google again to confirm.</p>`}
+    <button class="btn block" style="background:#e2554f;color:#fff;border-color:#e2554f;margin-bottom:8px" data-action="confirmdelete">Delete My Account</button>
+    <button class="btn block" data-action="close">Cancel</button>
+  </div>`);
+}
+async function confirmDelete(){
+  const confirm=document.getElementById('delConfirm')?.value||'';
+  if(confirm!=='DELETE') return toast('Type DELETE exactly to confirm.');
+  try{
+    const user=fbAuth.currentUser;
+    const isEmail=user.providerData?.some(p=>p.providerId==='password');
+    if(isEmail){
+      const pass=document.getElementById('delPass')?.value||'';
+      if(!pass) return toast('Enter your password to confirm.');
+      const cred=firebase.auth.EmailAuthProvider.credential(user.email,pass);
+      await user.reauthenticateWithCredential(cred);
+    } else {
+      await user.reauthenticateWithPopup(new firebase.auth.GoogleAuthProvider());
+    }
+    // Delete Firestore data
+    const batch=fbDB.batch();
+    batch.delete(fbDB.collection('users').doc(ME.id));
+    const [trSnap,stSnap]=await Promise.all([
+      fbDB.collection('tracks').where('userId','==',ME.id).get(),
+      fbDB.collection('statuses').where('userId','==',ME.id).get(),
+    ]);
+    trSnap.forEach(d=>batch.delete(d.ref));
+    stSnap.forEach(d=>batch.delete(d.ref));
+    await batch.commit();
+    // Delete Firebase Auth account
+    await user.delete();
+    toast('Your account has been deleted. Goodbye.');
+    closeOverlay();
+  }catch(e){
+    if(e.code==='auth/wrong-password'||e.code==='auth/invalid-credential') toast('Password is incorrect.');
+    else if(e.code==='auth/requires-recent-login') toast('Please sign out and sign back in, then try again.');
+    else toast('Error: '+(e.code||e.message));
+  }
+}
+
 document.addEventListener("click",e=>{
   const el=e.target.closest("[data-action]"); if(!el) return; const a=el.dataset.action;
   const M={
@@ -1152,7 +2040,7 @@ document.addEventListener("click",e=>{
     auth:()=>{ if(el.dataset.p==="google") signInGoogle(); else toast("Apple sign-in needs a paid Apple Developer account — coming later. Use Google or email 🙂"); },
     authemail:()=>openEmailAuth(($("liEmail").value||"").trim()), emailgo:()=>emailGo(el.dataset.mode), finishonboard:()=>finishOnboard(),
     sharefolder:shareMusicFolder, savemobilepl:saveMobilePlaylist, setthumbs:()=>setThumbsFolder(el.dataset.pl), relink:()=>relinkFolder(el.dataset.pl), playfile:()=>playFolderTrack(el.dataset.pl,el.dataset.file),
-    upload:openUpload, dopublish:doPublish, customize:openCustomize, savecustom:saveCustom, invite:openInvite,
+    upload:openUpload, dopublish:doPublish, customize:openCustomize, savecustom:saveCustom, openresetcustom:openResetCustom, resetcustom:resetCustom, removebanner:removeBanner, removepagebg:removePageBg, invite:openInvite, setbgmode:()=>setBgMode(el.dataset.mode),
     copyinvite:()=>{ const i=$("invLink"); i.select(); if(navigator.clipboard)navigator.clipboard.writeText(i.value); toast("Invite link copied ✓"); },
     play:()=>playTrack(el.dataset.id), like:()=>toggleLike(el.dataset.id), dislike:()=>toggleDislike(el.dataset.id),
     poststatus:postStatus, slike:()=>stLike(el.dataset.id), sdislike:()=>stDislike(el.dataset.id), scomment:()=>stComment(el.dataset.id),
@@ -1178,40 +2066,147 @@ document.addEventListener("click",e=>{
     broadcastwelcome:broadcastWelcome,
     showguide:()=>showWelcomeGuide(ME?.name||"there"),
     openchat:()=>{ state.chatUid=el.dataset.uid; state.view="chat"; renderApp(); },
+    attachfile:()=>{ const fi=$("chatFileInput");if(fi)fi.click(); },
+    clearpendingfile:clearPendingFile,
     sendmsg:()=>sendMsg(el.dataset.uid),
     editmsg:()=>editMsg(el.dataset.msgid,el.dataset.cid,el.dataset.text),
     saveeditmsg:()=>saveEditMsg(el.dataset.msgid,el.dataset.cid),
     deletemsgmenu:()=>deleteMsgMenu(el.dataset.msgid,el.dataset.cid),
     deletemsgall:()=>deleteMsgForAll(el.dataset.msgid,el.dataset.cid),
     deletemsgme:()=>deleteMsgForMe(el.dataset.msgid,el.dataset.cid),
-    startcall:()=>startCall(el.dataset.uid),
+    startcall:()=>startCall(el.dataset.uid), testmic:testMic,
     acceptcall:()=>acceptCall(el.dataset.uid),
     mutecall:muteCall,
-    endcall:endCall
+    endcall:endCall,
+    confirmdel:()=>doDeleteTrack(el.dataset.id),
+    confirmdelcmt:()=>doDeleteComment(el.dataset.id),
+    confirmdelprod:()=>doDeleteProduct(el.dataset.id),
+    saveeditcmt:()=>saveEditComment(el.dataset.id),
+    security:()=>openSecurityModal(),
+    devicetype:()=>{ const isPublic=el.dataset.pub==='1'; closeOverlay(); _initSession(el.dataset.uid,isPublic); if(isPublic) toast('Public session active — you will be signed out in 2 hours.'); },
+    logoutall:()=>logoutAllOtherDevices(),
+    settings:()=>openSettingsModal('privacy'),
+    settingstab:()=>openSettingsModal(el.dataset.tab),
+    saveprivacy:()=>savePrivacySettings(),
+    blockuser:()=>blockUser(el.dataset.uid),
+    confirmblock:()=>confirmBlock(el.dataset.uid),
+    unblockuser:()=>unblockUser(el.dataset.uid),
+    reportuser:()=>openReportModal(el.dataset.uid),
+    sendreport:()=>sendReport(el.dataset.uid),
+    changepw:()=>doChangePassword(),
+    confirmpwchange:()=>confirmPwChange(),
+    changeemail:()=>doChangeEmail(),
+    confirmemailchange:()=>confirmEmailChange(),
+    exportdata:()=>exportMyData(),
+    deleteaccount:()=>doDeleteAccount(),
+    confirmdelete:()=>confirmDelete()
   };
   if(M[a]) M[a]();
 });
 document.addEventListener("change",e=>{
-  if(e.target.id==="avFile"){ const f=e.target.files[0]; if(!f) return; const r=new FileReader(); r.onload=()=>{ window._avatar=r.result; const p=$("avPrev"); if(p){ p.style.backgroundImage=`url('${r.result}')`; p.textContent=""; } }; r.readAsDataURL(f); }
-  if(e.target.id==="covFile"){ const f=e.target.files[0]; if(!f) return; const r=new FileReader(); r.onload=()=>{ window._trackCover=r.result; const p=$("covPrev"); if(p){ p.style.backgroundImage=`url('${r.result}')`; p.style.backgroundSize="cover"; p.style.backgroundPosition="center"; p.style.background=""; p.textContent=""; } }; r.readAsDataURL(f); }
+  if(e.target.id==="myTracksOnlyChk"){ myTracksOnlyMode=e.target.checked; toast(myTracksOnlyMode?"🎵 Playing your tracks only":"🌐 Playing all website tracks"); }
+  if(e.target.id==="avFile"){ const f=e.target.files[0]; if(!f) return; window._avatarFile=f; window._avatar=null; const p=$("avPrev"); if(p){ p.style.backgroundImage=`url('${URL.createObjectURL(f)}')`; p.textContent=""; } }
+  if(e.target.id==="covFile"){ const f=e.target.files[0]; if(!f) return; window._coverFile=f; window._trackCover=null; const p=$("covPrev"); if(p){ p.style.backgroundImage=`url('${URL.createObjectURL(f)}')`; p.style.backgroundSize="cover"; p.style.backgroundPosition="center"; p.style.background=""; p.textContent=""; } }
   if(e.target.id==="audioFile"){ const f=e.target.files[0]; if(!f) return; window._audioFile=f; const fn=$("audioFilename"); if(fn) fn.textContent="✓ "+f.name+" ("+Math.round(f.size/1024)+" KB)"; }
-  if(e.target.id==="mpPhotoFile"){ const f=e.target.files[0]; if(!f) return; const r=new FileReader(); r.onload=()=>{ window._mpPhoto=r.result; const p=$("mpPhotoPrev"); if(p){ p.style.backgroundImage=`url('${r.result}')`; p.style.backgroundSize="cover"; p.style.backgroundPosition="center"; p.textContent=""; } }; r.readAsDataURL(f); }
+  if(e.target.id==="prodPhotoFile"){ const f=e.target.files[0]; if(!f) return; window._mpPhotoFile=f; window._mpPhoto=null; const p=$("prodPhotoPrev"); if(p){ p.style.backgroundImage=`url('${URL.createObjectURL(f)}')`; p.style.backgroundSize="cover"; p.style.backgroundPosition="center"; p.textContent=""; } }
+  if(e.target.id==="bannerFile"){ const f=e.target.files[0]; if(!f) return; window._bannerFile=f; window._clearBanner=false; const p=$("bannerPrev"); if(p){ const url=URL.createObjectURL(f); p.style.backgroundImage=`url('${url}')`; p.style.backgroundSize="cover"; p.style.backgroundPosition="center"; const h=p.querySelector(".cust-hint"); if(h) h.style.opacity="0"; } }
+  if(e.target.id==="pageBgFile"){ const f=e.target.files[0]; if(!f) return; window._pageBgFile=f; window._clearPageBg=false; const p=$("pageBgPrev"); if(p){ const url=URL.createObjectURL(f); p.style.backgroundImage=`url('${url}')`; p.style.backgroundSize="cover"; p.style.backgroundPosition="center"; const h=p.querySelector(".cust-hint"); if(h) h.style.opacity="0"; } }
 });
 $("overlay").addEventListener("click",e=>{ if(e.target.id==="overlay") closeOverlay(); });
 document.addEventListener("keydown",e=>{ if(e.key==="Escape") closeOverlay(); });
+document.addEventListener("input",e=>{
+  if(!["adjBrightness","adjContrast","adjSaturate","adjOpacity"].includes(e.target.id)) return;
+  const vEl=document.getElementById(e.target.id+"Val"); if(vEl) vEl.textContent=e.target.value+"%";
+  const br=parseInt(($("adjBrightness")||{value:"100"}).value)/100;
+  const co=parseInt(($("adjContrast")||{value:"100"}).value)/100;
+  const sa=parseInt(($("adjSaturate")||{value:"100"}).value)/100;
+  const op=parseInt(($("adjOpacity")||{value:"100"}).value)/100;
+  const prev=$("pageBgPrev"); if(prev){ prev.style.filter=`brightness(${br}) contrast(${co}) saturate(${sa})`; prev.style.opacity=op; }
+  const bgEl=document.getElementById("page-bg-layer"); if(bgEl){ bgEl.style.filter=`brightness(${br}) contrast(${co}) saturate(${sa})`; bgEl.style.opacity=op; }
+});
 
 // ---------- live Firestore listeners (shared data) ----------
 let _rt=null;
-function scheduleRender(){ clearTimeout(_rt); _rt=setTimeout(()=>{ const a=document.activeElement; if(a && /INPUT|TEXTAREA/.test(a.tagName)) return; render(); }, 80); }
+function scheduleRender(){ clearTimeout(_rt); _rt=setTimeout(()=>{ const a=document.activeElement; if(a && /INPUT|TEXTAREA/.test(a.tagName)) return; render(); setTimeout(fetchLinkPreviews,120); }, 80); }
 
 // ============ PRIVATE MESSENGER ============
-const ICE=[{urls:"stun:stun.l.google.com:19302"},{urls:"stun:stun1.l.google.com:19302"}];
-let activePc=null,activeStream=null,activeCallId=null,callUnsub=null,callInterval=null,muted=false;
+async function getICE(){
+  try{
+    const r=await fetch("https://ok-music.metered.live/api/v1/turn/credentials?apiKey=6a4f497eafeedfd890d5183d");
+    if(r.ok){const servers=await r.json();if(Array.isArray(servers)&&servers.length)return servers;}
+  }catch(e){}
+  // Fallback to Google STUN if Metered is unreachable
+  return[{urls:"stun:stun.l.google.com:19302"},{urls:"stun:stun1.l.google.com:19302"}];
+}
+let activePc=null,activeStream=null,activeCallId=null,callUnsub=null,callInterval=null,muted=false,_iceTimeout=null;
+let _vizAnimId=null,_vizCtx=null,_localAn=null,_remoteAn=null,_localData=null,_remoteData=null,_testMicStream=null;
+
+function _makeAn(stream){
+  const src=_vizCtx.createMediaStreamSource(stream);
+  const an=_vizCtx.createAnalyser();
+  an.fftSize=64;an.smoothingTimeConstant=0.8;
+  src.connect(an);
+  return an;
+}
+
+function _drawBars(id,an,data){
+  const wrap=$(id);if(!wrap||!an)return;
+  an.getByteFrequencyData(data);
+  const bars=wrap.querySelectorAll(".vv-bar");
+  const n=bars.length;const sl=Math.max(1,Math.floor(data.length*0.55/n));
+  bars.forEach((b,i)=>{
+    const v=data[Math.min(i*sl+1,data.length-1)]||0;
+    b.style.height=Math.max(3,Math.round((v/255)*42))+"px";
+    b.classList.toggle("lit",v>8);
+  });
+}
+
+function startVoiceViz(localStream){
+  stopVoiceViz();
+  try{
+    _vizCtx=new(window.AudioContext||window.webkitAudioContext)();
+    _vizCtx.resume();
+    _localAn=_makeAn(localStream);
+    _localData=new Uint8Array(_localAn.frequencyBinCount);
+    function tick(){
+      _vizAnimId=requestAnimationFrame(tick);
+      _drawBars("localBars",_localAn,_localData);
+      if(_remoteAn&&_remoteData)_drawBars("remoteBars",_remoteAn,_remoteData);
+    }
+    tick();
+  }catch(e){}
+}
+
+function addRemoteViz(stream){
+  if(!_vizCtx||!stream)return;
+  try{_remoteAn=_makeAn(stream);_remoteData=new Uint8Array(_remoteAn.frequencyBinCount);}catch(e){}
+}
+
+function stopVoiceViz(){
+  if(_vizAnimId){cancelAnimationFrame(_vizAnimId);_vizAnimId=null;}
+  if(_vizCtx){_vizCtx.close().catch(()=>{});_vizCtx=null;}
+  _localAn=null;_remoteAn=null;_localData=null;_remoteData=null;
+  if(_testMicStream){_testMicStream.getTracks().forEach(t=>t.stop());_testMicStream=null;}
+}
+
+async function testMic(){
+  if(_testMicStream)return;
+  const btn=$("micTestBtn");if(btn)btn.style.display="none";
+  try{
+    const stream=await navigator.mediaDevices.getUserMedia({audio:true});
+    _testMicStream=stream;
+    startVoiceViz(stream);
+  }catch(e){
+    toast(e.name==="NotAllowedError"?"Microphone blocked — allow access in your browser settings.":"Mic error: "+(e.message||e));
+    const btn2=$("micTestBtn");if(btn2)btn2.style.display="flex";
+  }
+}
 
 // ---- Sound feedback (Web Audio API — no external files needed) ----
-let _ringCtx=null;
+let _ringCtx=null,_ringOscs=[];
 function playRing(){
   stopRing();
+  _ringOscs=[];
   try{
     const ctx=new(window.AudioContext||window.webkitAudioContext)();
     _ringCtx=ctx;
@@ -1227,13 +2222,21 @@ function playRing(){
         const o=ctx.createOscillator();
         o.type="sine";o.frequency.value=freq;
         o.connect(g);o.start(t);o.stop(t+2.0);
+        _ringOscs.push(o);
       });
     }
     if(navigator.vibrate) navigator.vibrate([2000,4000,2000,4000,2000,4000,2000,4000,2000,4000]);
   }catch(e){}
 }
 function stopRing(){
-  if(_ringCtx){try{_ringCtx.close();}catch(e){}_ringCtx=null;}
+  // Stop each oscillator immediately — close() alone is async and too slow on Safari/iOS
+  _ringOscs.forEach(o=>{try{o.stop(0);}catch(e){}});
+  _ringOscs=[];
+  if(_ringCtx){
+    try{_ringCtx.suspend();}catch(e){} // hardware-level mute, instant
+    try{_ringCtx.close();}catch(e){}
+    _ringCtx=null;
+  }
   if(navigator.vibrate) navigator.vibrate(0);
 }
 function playMsgSound(){
@@ -1252,7 +2255,7 @@ function playMsgSound(){
     if(navigator.vibrate) navigator.vibrate(40);
   }catch(e){}
 }
-let msgUnsub=null,convUnsub=null;
+let msgUnsub=null,convUnsub=null,_pendingFile=null,_pendingPreviewUrl=null;
 function convId(a,b){return[a,b].sort().join("_");}
 
 function msgUnreadTotal(){
@@ -1286,6 +2289,39 @@ function renderMessages(){
 }
 
 // ---- open a chat thread ----
+function clearPendingFile(){
+  if(_pendingPreviewUrl){URL.revokeObjectURL(_pendingPreviewUrl);_pendingPreviewUrl=null;}
+  _pendingFile=null;
+  const p=$("chatFilePreview");if(p){p.innerHTML="";p.style.display="none";}
+}
+
+function renderMsgContent(m){
+  const edited=m.edited?'<span class="msg-edited"> · edited</span>':'';
+  if(!m.fileUrl){
+    const{html:mH,firstUrl:mU}=linkifyText(m.text||'');
+    return`<div class="msg-text">${mH}${edited}</div>${lpTag(mU)}`;
+  }
+  // 3-day expiry check
+  if(m.fileExpiry&&Date.now()>m.fileExpiry){
+    const{html:cH}=m.text?linkifyText(m.text):{html:''};
+    const caption=m.text?`<div class="msg-caption">${cH}${edited}</div>`:"";
+    return`<div class="msg-media"><div class="msg-file-expired">⏳ File expired — no longer available</div>${caption}</div>`;
+  }
+  let fileEl;
+  if(m.fileType&&m.fileType.startsWith("image/")){
+    fileEl=`<a href="${m.fileUrl}" target="_blank" rel="noopener"><img class="msg-img" src="${m.fileUrl}" loading="lazy" onerror="this.closest('.msg-media').innerHTML='<div class=\\'msg-file-expired\\'>⚠️ Image could not be loaded</div>'"/></a>`;
+  } else if(m.fileType&&m.fileType.startsWith("audio/")){
+    fileEl=`<audio class="msg-audio" src="${m.fileUrl}" controls preload="none"></audio>`;
+  } else if(m.fileType&&m.fileType.startsWith("video/")){
+    fileEl=`<video class="msg-video" src="${m.fileUrl}" controls preload="none" onerror="this.closest('.msg-media').innerHTML='<div class=\\'msg-file-expired\\'>⚠️ Video could not be loaded</div>'"></video>`;
+  } else {
+    fileEl=`<a class="msg-file-link" href="${m.fileUrl}" target="_blank" rel="noopener noreferrer">📎 ${esc(m.fileName||"File")}</a>`;
+  }
+  const{html:cH,firstUrl:cU}=m.text?linkifyText(m.text):{html:'',firstUrl:''};
+  const caption=m.text?`<div class="msg-caption">${cH}${edited}</div>${lpTag(cU)}`:"";
+  return`<div class="msg-media">${fileEl}${caption}</div>`;
+}
+
 function openChat(uid){
   const other=userById(uid);if(!other)return toast("User not found");
   const cid=convId(ME.id,uid);
@@ -1300,8 +2336,13 @@ function openChat(uid){
     </div>
     <div class="chat-msgs" id="chatMsgs"></div>
     <div class="chat-input-row">
-      <input class="chat-input" id="chatInput" placeholder="Type a message…" maxlength="1000"/>
-      <button class="btn primary" data-action="sendmsg" data-uid="${uid}">Send</button>
+      <button class="chat-attach-btn" data-action="attachfile" title="Attach file">📎</button>
+      <input type="file" id="chatFileInput" style="display:none"/>
+      <div class="chat-input-wrap">
+        <div class="chat-file-preview" id="chatFilePreview"></div>
+        <input class="chat-input" id="chatInput" placeholder="Type a message…" maxlength="1000"/>
+      </div>
+      <button class="btn primary" data-action="sendmsg" data-uid="${uid}" id="chatSendBtn">Send</button>
     </div>`;
   fbDB.collection("messages").doc(cid).set({participants:[ME.id,uid],unread:{[ME.id]:0}},{merge:true}).catch(()=>{});
   let _prevMsgCount=0;
@@ -1321,34 +2362,76 @@ function openChat(uid){
             <div class="msg-text"><em>🗑️ Message deleted</em></div>
             <div class="msg-time">${timeAgo(m.time)}</div></div>`;
           return`<div class="msg-bubble ${mine?'mine':'theirs'}">
-            <div class="msg-text">${esc(m.text)}${m.edited?'<span class="msg-edited"> · edited</span>':''}</div>
+            ${renderMsgContent(m)}
             <div class="msg-meta">
               <span class="msg-time">${timeAgo(m.time)}</span>
               ${mine?`<span class="msg-actions">
-                <button class="msg-act" data-action="editmsg" data-msgid="${d.id}" data-cid="${cid}" data-text="${esc(m.text)}" title="Edit">✏️</button>
+                <button class="msg-act" data-action="editmsg" data-msgid="${d.id}" data-cid="${cid}" data-text="${esc(m.text||'')}" title="Edit">✏️</button>
                 <button class="msg-act" data-action="deletemsgmenu" data-msgid="${d.id}" data-cid="${cid}" title="Delete">🗑️</button>
               </span>`:''}
             </div></div>`;
         }).join('');
       el.scrollTop=el.scrollHeight;
+      setTimeout(fetchLinkPreviews,0);
     },e=>console.warn("msgs",e));
   setTimeout(()=>{
     const inp=$("chatInput");
     if(inp) inp.addEventListener("keydown",e=>{if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();sendMsg(uid);}});
+    const fi=$("chatFileInput");
+    if(fi) fi.addEventListener("change",()=>{
+      const f=fi.files[0];if(!f)return;
+      if(f.size>27*1024*1024){toast("File is too large — max 27 MB.");fi.value="";return;}
+      clearPendingFile();
+      _pendingFile=f;
+      const preview=$("chatFilePreview");if(!preview)return;
+      if(f.type.startsWith("image/")){
+        _pendingPreviewUrl=URL.createObjectURL(f);
+        preview.innerHTML=`<img class="attach-preview-img" src="${_pendingPreviewUrl}"/><span class="attach-preview-name">${esc(f.name)}</span><button class="attach-clear" data-action="clearpendingfile" title="Remove">✕</button>`;
+      } else {
+        preview.innerHTML=`<span class="attach-preview-icon">${f.type.startsWith("audio/")?"🎵":f.type.startsWith("video/")?"🎬":"📎"}</span><span class="attach-preview-name">${esc(f.name)}</span><button class="attach-clear" data-action="clearpendingfile" title="Remove">✕</button>`;
+      }
+      preview.style.display="flex";
+      fi.value="";
+    });
   },100);
 }
 
 async function sendMsg(uid){
+  if(!canMessage(uid)){ toast("This user has restricted who can message them."); return; }
   const inp=$("chatInput");if(!inp)return;
-  const text=inp.value.trim();if(!text)return;
+  const text=inp.value.trim();
+  if(!text&&!_pendingFile)return;
   inp.value="";playMsgSound();
   const cid=convId(ME.id,uid);const time=Date.now();
-  await fbDB.collection("messages").doc(cid).collection("msgs").add({senderId:ME.id,text,time,read:false});
+  const msgData={senderId:ME.id,text:text||"",time,read:false};
+  if(_pendingFile){
+    const file=_pendingFile;
+    clearPendingFile();
+    const btn=$("chatSendBtn");if(btn){btn.disabled=true;btn.textContent="Uploading…";}
+    try{
+      const url=await uploadChatFile(file,pct=>{if(btn)btn.textContent=`${pct}%`;});
+      msgData.fileUrl=url;
+      msgData.fileType=file.type||"application/octet-stream";
+      msgData.fileName=file.name||"file";
+      msgData.fileExpiry=Date.now()+(3*24*60*60*1000); // 3 days
+    }catch(e){
+      if(btn){btn.disabled=false;btn.textContent="Send";}
+      return toast("Upload failed: "+(e.message||e));
+    }
+    if(btn){btn.disabled=false;btn.textContent="Send";}
+  }
+  await fbDB.collection("messages").doc(cid).collection("msgs").add(msgData);
+  const preview=msgData.fileUrl
+    ?(msgData.fileType.startsWith("image/")?"📷 Photo"
+      :msgData.fileType.startsWith("audio/")?"🎵 Audio"
+      :msgData.fileType.startsWith("video/")?"🎬 Video"
+      :`📎 ${msgData.fileName}`)
+    :text;
   await fbDB.collection("messages").doc(cid).set({
-    participants:[ME.id,uid],lastMsg:text,lastTime:time,
+    participants:[ME.id,uid],lastMsg:preview,lastTime:time,
     unread:{[ME.id]:0,[uid]:firebase.firestore.FieldValue.increment(1)}
   },{merge:true});
-  if(!String(uid).startsWith("u_")) fbDB.collection("notifications").add({forUid:uid,type:"message",fromUid:ME.id,fromName:ME.name,text:`💬 ${ME.name}: ${text.slice(0,60)}`,time,read:false}).catch(()=>{});
+  if(!String(uid).startsWith("u_")) fbDB.collection("notifications").add({forUid:uid,type:"message",fromUid:ME.id,fromName:ME.name,text:`💬 ${ME.name}: ${preview.slice(0,60)}`,time,read:false}).catch(()=>{});
 }
 
 function editMsg(msgId,cid,currentText){
@@ -1388,22 +2471,45 @@ async function deleteMsgForMe(msgId,cid){
 function startCall(uid){
   if(!navigator.mediaDevices)return toast("Microphone not available on this device.");
   if(activePc)return toast("Already in a call.");
+  if(!canCall(uid)){ toast("This user has restricted who can call them."); return; }
   openCallUI(uid,"outgoing");
 }
 
 function openCallUI(uid,mode){
   const other=userById(uid)||{name:"Someone",color:"#888"};
+  const pulse=mode==="incoming"||mode==="outgoing";
   openOverlay(`<div class="call-ui">
-    <div class="call-avatar"><div class="avatar" style="${avatarStyle(other,80)};margin:0 auto">${other.avatarImg?'':initials(other.name)}</div></div>
+    <div class="call-avatar-wrap">
+      ${pulse?'<div class="call-pulse"></div><div class="call-pulse d2"></div>':''}
+      <div class="avatar" style="${avatarStyle(other,108)}">${other.avatarImg?'':initials(other.name)}</div>
+    </div>
     <div class="call-name">${esc(other.name)}</div>
     <div class="call-status" id="callStatus">${mode==="outgoing"?"Calling…":"Incoming call…"}</div>
-    <div class="call-timer" id="callTimer">0:00</div>
     <audio id="remoteAudio" autoplay playsinline></audio>
+    <div class="call-timer" id="callTimer" style="display:none">0:00</div>
+    <div class="voice-viz" id="voiceViz">
+      <div class="vv-col">
+        <div class="vv-bars" id="localBars">${'<div class="vv-bar"></div>'.repeat(10)}</div>
+        <span class="vv-lbl">🎙️ You</span>
+      </div>
+      <div class="vv-mid">〰</div>
+      <div class="vv-col">
+        <div class="vv-bars" id="remoteBars">${'<div class="vv-bar vv-r"></div>'.repeat(10)}</div>
+        <span class="vv-lbl">🔊 Them</span>
+      </div>
+    </div>
+    ${mode==="incoming"?`<button class="mic-test-btn" id="micTestBtn" data-action="testmic">🎙️ Test your mic before answering</button>`:''}
     <div class="call-btns">
-      ${mode==="incoming"?`<button class="call-btn-accept" data-action="acceptcall" data-uid="${uid}">✅ Accept</button>`:''}
-      <button class="call-btn-mute" id="muteBtn" data-action="mutecall">🎙️ Mute</button>
-      <button class="call-btn-end" data-action="endcall" data-uid="${uid}">${mode==="incoming"?"❌ Decline":"📵 End"}</button>
-    </div></div>`);
+      ${mode==="incoming"?`<button class="call-btn-accept" data-action="acceptcall" data-uid="${uid}" title="Accept">📞</button>`:''}
+      <button class="call-btn-mute" id="muteBtn" data-action="mutecall" title="Mute">🎙️</button>
+      <button class="call-btn-end" data-action="endcall" title="${mode==="incoming"?"Decline":"End call"}">📵</button>
+    </div>
+  </div>`);
+  // Unlock Web Audio API during this user-gesture frame (required for iOS/Safari).
+  // Do NOT call ra.play() here — no source yet, and a failed play() can corrupt
+  // the element's internal state before the real stream arrives in ontrack.
+  try{const _ac=new(window.AudioContext||window.webkitAudioContext)();_ac.resume().catch(()=>{});}catch(e){}
+  _preMusicVol=audio.volume||1; audio.volume=0.12;
   if(mode==="incoming") playRing();
   if(mode==="outgoing") initiateCall(uid);
 }
@@ -1413,51 +2519,170 @@ async function initiateCall(uid){
   try{
     const stream=await navigator.mediaDevices.getUserMedia({audio:true});
     activeStream=stream;
-    const pc=new RTCPeerConnection({iceServers:ICE});activePc=pc;
+    startVoiceViz(stream); // local bars start animating immediately so caller can verify mic
+    const iceServers=await getICE();
+    const pc=new RTCPeerConnection({iceServers});activePc=pc;
     stream.getTracks().forEach(t=>pc.addTrack(t,stream));
-    pc.ontrack=e=>{const ra=$("remoteAudio");if(ra)ra.srcObject=e.streams[0];};
-    const offer=await pc.createOffer();await pc.setLocalDescription(offer);
-    await fbDB.collection("calls").doc(cid).set({callerId:ME.id,calleeId:uid,offer:{type:offer.type,sdp:offer.sdp},callerCandidates:[],calleeCandidates:[],status:"ringing",time:Date.now()});
-    pc.onicecandidate=async e=>{if(e.candidate) await fbDB.collection("calls").doc(cid).update({callerCandidates:firebase.firestore.FieldValue.arrayUnion(e.candidate.toJSON())}).catch(()=>{});};
-    fbDB.collection("notifications").add({forUid:uid,type:"call",fromUid:ME.id,fromName:ME.name,text:`📞 ${ME.name} is calling you — open the app to answer.`,time:Date.now(),read:false}).catch(()=>{});
+
+    pc.ontrack=e=>{
+      const ra=$("remoteAudio");if(!ra)return;
+      const ms=(e.streams&&e.streams.length&&e.streams[0])||new MediaStream([e.track]);
+      ra.srcObject=ms;ra.muted=false;ra.volume=1.0;
+      ra.play().catch(()=>{});
+      e.track.onunmute=()=>{if(ra.paused)ra.play().catch(()=>{});};
+      addRemoteViz(ms); // remote bars start animating when their audio arrives
+    };
+
+    pc.oniceconnectionstatechange=()=>{
+      const st=pc.iceConnectionState;
+      if(st==="checking"){
+        clearTimeout(_iceTimeout);
+        _iceTimeout=setTimeout(()=>{
+          if(activePc&&activePc.iceConnectionState==="checking"){
+            const s=$("callStatus");if(s)s.textContent="Could not connect — check your network and try again.";
+            setTimeout(endCall,2500);
+          }
+        },30000);
+      } else if(st==="connected"||st==="completed"){
+        clearTimeout(_iceTimeout);_iceTimeout=null;
+        startCallTimer();const s=$("callStatus");if(s)s.textContent="Connected ✓";
+      } else if(st==="failed"){
+        clearTimeout(_iceTimeout);_iceTimeout=null;
+        const s=$("callStatus");if(s)s.textContent="Connection failed — check mic & network.";
+        setTimeout(endCall,2500);
+      } else if(st==="disconnected"){
+        const s=$("callStatus");if(s)s.textContent="Connection lost — reconnecting…";
+      }
+    };
+
+    const buf=[];let docReady=false;
+    pc.onicecandidate=e=>{
+      if(!e.candidate)return;
+      const j=e.candidate.toJSON();
+      if(docReady) fbDB.collection("calls").doc(cid).update({callerCandidates:firebase.firestore.FieldValue.arrayUnion(j)}).catch(()=>{});
+      else buf.push(j);
+    };
+
+    const offer=await pc.createOffer();
+    await pc.setLocalDescription(offer); // <-- gathering starts here
+
+    await fbDB.collection("calls").doc(cid).set({
+      callerId:ME.id,calleeId:uid,
+      offer:{type:offer.type,sdp:offer.sdp},
+      callerCandidates:[],calleeCandidates:[],
+      status:"ringing",time:Date.now()
+    });
+    docReady=true;
+    if(buf.length) fbDB.collection("calls").doc(cid).update({callerCandidates:firebase.firestore.FieldValue.arrayUnion(...buf)}).catch(()=>{});
+
+    fbDB.collection("notifications").add({forUid:uid,type:"call",fromUid:ME.id,fromName:ME.name,text:`📞 ${ME.name} is calling you`,time:Date.now(),read:false}).catch(()=>{});
+
+    let addedCallee=0;
     callUnsub=fbDB.collection("calls").doc(cid).onSnapshot(async snap=>{
-      const d=snap.data();if(!d)return;
+      const d=snap.data();if(!d||!activePc)return;
       if(d.status==="ended"){endCall();return;}
       if(d.answer&&!pc.currentRemoteDescription){
         await pc.setRemoteDescription(new RTCSessionDescription(d.answer)).catch(()=>{});
-        const s=$("callStatus");if(s)s.textContent="Connected ✓";
-        startCallTimer();
+        const s=$("callStatus");if(s&&s.textContent==="Calling…")s.textContent="Connecting…";
       }
-      if(d.calleeCandidates?.length){for(const c of d.calleeCandidates)await pc.addIceCandidate(new RTCIceCandidate(c)).catch(()=>{});}
+      if(pc.currentRemoteDescription&&(d.calleeCandidates||[]).length>addedCallee){
+        const fresh=d.calleeCandidates.slice(addedCallee);
+        for(const c of fresh)await pc.addIceCandidate(new RTCIceCandidate(c)).catch(()=>{});
+        addedCallee=d.calleeCandidates.length;
+      }
     });
-  }catch(e){toast("Mic error: "+(e.message||e));endCall();}
+  }catch(e){
+    toast(e.name==="NotAllowedError"?"Microphone blocked — allow mic access in your browser settings and try again.":`Mic error: ${e.message||e}`);
+    endCall();
+  }
 }
 
 async function acceptCall(uid){
   stopRing();
   const s=$("callStatus");if(s)s.textContent="Connecting…";
-  const snap=await fbDB.collection("calls").where("callerId","==",uid).where("calleeId","==",ME.id).where("status","==","ringing").orderBy("time","desc").limit(1).get().catch(()=>null);
-  if(!snap||snap.empty){toast("Call expired.");closeOverlay();return;}
+  const snap=await fbDB.collection("calls")
+    .where("callerId","==",uid).where("calleeId","==",ME.id).where("status","==","ringing")
+    .orderBy("time","desc").limit(1).get().catch(()=>null);
+  if(!snap||snap.empty){toast("Call already ended.");$("overlay").hidden=true;$("overlayBody").innerHTML="";return;}
   const doc=snap.docs[0];const d=doc.data();const cid=doc.id;activeCallId=cid;
   try{
+    // Stop any test-mic stream before getting a fresh one for the actual call
+    if(_testMicStream){_testMicStream.getTracks().forEach(t=>t.stop());_testMicStream=null;}
     const stream=await navigator.mediaDevices.getUserMedia({audio:true});
     activeStream=stream;
-    const pc=new RTCPeerConnection({iceServers:ICE});activePc=pc;
+    startVoiceViz(stream); // local bars start animating immediately so callee can verify mic
+    const iceServers=await getICE();
+    const pc=new RTCPeerConnection({iceServers});activePc=pc;
     stream.getTracks().forEach(t=>pc.addTrack(t,stream));
-    pc.ontrack=e=>{const ra=$("remoteAudio");if(ra)ra.srcObject=e.streams[0];};
+
+    pc.ontrack=e=>{
+      const ra=$("remoteAudio");if(!ra)return;
+      const ms=(e.streams&&e.streams.length&&e.streams[0])||new MediaStream([e.track]);
+      ra.srcObject=ms;ra.muted=false;ra.volume=1.0;
+      ra.play().catch(()=>{});
+      e.track.onunmute=()=>{if(ra.paused)ra.play().catch(()=>{});};
+      addRemoteViz(ms); // remote bars start animating when their audio arrives
+    };
+
+    pc.oniceconnectionstatechange=()=>{
+      const ist=pc.iceConnectionState;
+      if(ist==="checking"){
+        clearTimeout(_iceTimeout);
+        _iceTimeout=setTimeout(()=>{
+          if(activePc&&activePc.iceConnectionState==="checking"){
+            const s=$("callStatus");if(s)s.textContent="Could not connect — check your network and try again.";
+            setTimeout(endCall,2500);
+          }
+        },30000);
+      } else if(ist==="connected"||ist==="completed"){
+        clearTimeout(_iceTimeout);_iceTimeout=null;
+        startCallTimer();const st=$("callStatus");if(st)st.textContent="Connected ✓";
+      } else if(ist==="failed"){
+        clearTimeout(_iceTimeout);_iceTimeout=null;
+        const st=$("callStatus");if(st)st.textContent="Connection failed — check mic & network.";
+        setTimeout(endCall,2500);
+      } else if(ist==="disconnected"){
+        const st=$("callStatus");if(st)st.textContent="Connection lost — reconnecting…";
+      }
+    };
+
+    // CRITICAL: set onicecandidate BEFORE setLocalDescription
+    const buf=[];let docReady=false;
+    pc.onicecandidate=e=>{
+      if(!e.candidate)return;
+      const j=e.candidate.toJSON();
+      if(docReady) fbDB.collection("calls").doc(cid).update({calleeCandidates:firebase.firestore.FieldValue.arrayUnion(j)}).catch(()=>{});
+      else buf.push(j);
+    };
+
     await pc.setRemoteDescription(new RTCSessionDescription(d.offer));
-    const answer=await pc.createAnswer();await pc.setLocalDescription(answer);
+    const answer=await pc.createAnswer();
+    await pc.setLocalDescription(answer); // <-- gathering starts here
+
     await fbDB.collection("calls").doc(cid).update({answer:{type:answer.type,sdp:answer.sdp},status:"active"});
-    pc.onicecandidate=async e=>{if(e.candidate) await fbDB.collection("calls").doc(cid).update({calleeCandidates:firebase.firestore.FieldValue.arrayUnion(e.candidate.toJSON())}).catch(()=>{});};
-    if(d.callerCandidates?.length){for(const c of d.callerCandidates)await pc.addIceCandidate(new RTCIceCandidate(c)).catch(()=>{});}
+    docReady=true;
+    if(buf.length) fbDB.collection("calls").doc(cid).update({calleeCandidates:firebase.firestore.FieldValue.arrayUnion(...buf)}).catch(()=>{});
+
+    // Add caller's candidates that arrived before we accepted
+    let addedCaller=0;
+    if((d.callerCandidates||[]).length){
+      for(const c of d.callerCandidates)await pc.addIceCandidate(new RTCIceCandidate(c)).catch(()=>{});
+      addedCaller=d.callerCandidates.length;
+    }
+
     callUnsub=fbDB.collection("calls").doc(cid).onSnapshot(async snap2=>{
-      const d2=snap2.data();if(!d2)return;
+      const d2=snap2.data();if(!d2||!activePc)return;
       if(d2.status==="ended"){endCall();return;}
-      if(d2.callerCandidates?.length){for(const c of d2.callerCandidates)await pc.addIceCandidate(new RTCIceCandidate(c)).catch(()=>{});}
+      if((d2.callerCandidates||[]).length>addedCaller){
+        const fresh=d2.callerCandidates.slice(addedCaller);
+        for(const c of fresh)await pc.addIceCandidate(new RTCIceCandidate(c)).catch(()=>{});
+        addedCaller=d2.callerCandidates.length;
+      }
     });
-    if(s)s.textContent="Connected ✓";
-    startCallTimer();
-  }catch(e){toast("Mic error: "+(e.message||e));endCall();}
+  }catch(e){
+    toast(e.name==="NotAllowedError"?"Microphone blocked — allow mic access in your browser settings and try again.":`Mic error: ${e.message||e}`);
+    endCall();
+  }
 }
 
 function startCallTimer(){
@@ -1471,7 +2696,9 @@ function muteCall(){
   const b=$("muteBtn");if(b)b.textContent=muted?"🔇 Unmute":"🎙️ Mute";
 }
 async function endCall(){
-  stopRing();
+  stopRing();stopVoiceViz();
+  clearTimeout(_iceTimeout);_iceTimeout=null;
+  audio.volume=_preMusicVol;
   clearInterval(callInterval);callInterval=null;
   if(callUnsub){callUnsub();callUnsub=null;}
   if(activePc){activePc.close();activePc=null;}
@@ -1482,16 +2709,26 @@ async function endCall(){
 
 function listenForIncomingCalls(){
   if(!ME||!ME.handle)return;
-  fbDB.collection("calls").where("calleeId","==",ME.id).where("status","==","ringing")
+  if(_callsUnsub){_callsUnsub();_callsUnsub=null;}
+  // Single-field query — no composite index needed.
+  // Two-field query (calleeId + status) silently fails without a composite index,
+  // so we filter status and recency in JavaScript instead.
+  _callsUnsub=fbDB.collection("calls").where("calleeId","==",ME.id)
     .onSnapshot(snap=>{
       snap.docChanges().forEach(ch=>{
         if(ch.type==="added"&&!activePc){
           const d=ch.doc.data();
-          openCallUI(d.callerId,"incoming");
+          const fresh=Date.now()-d.time<120000; // ignore calls older than 2 min
+          if(d.status==="ringing"&&fresh){
+            // Show OS-level notification so user sees the ring even in a different app
+            showCallBrowserNotif(d.callerId);
+            openCallUI(d.callerId,"incoming");
+          }
         }
       });
-    },()=>{});
+    },e=>console.warn("calls listener:",e.code||e.message));
 }
+let _callsUnsub=null;
 function startListeners(){
   fbDB.collection("users").onSnapshot(s=>{ CACHE.users={}; s.forEach(d=>CACHE.users[d.id]={ id:d.id, ...d.data() }); scheduleRender(); }, e=>console.warn("users",e.code));
   fbDB.collection("tracks").onSnapshot(s=>{ CACHE.tracks=s.docs.map(d=>({ id:d.id, ...d.data() })); scheduleRender(); }, e=>console.warn("tracks",e.code));
@@ -1501,9 +2738,34 @@ function startListeners(){
   fbDB.collection("comments").onSnapshot(s=>{ CACHE.comments=s.docs.map(d=>({ id:d.id, ...d.data() })); scheduleRender(); }, e=>console.warn("comments",e.code));
   fbDB.collection("products").onSnapshot(s=>{ CACHE.products=s.docs.map(d=>({ id:d.id, ...d.data() })).sort((a,b)=>b.createdAt-a.createdAt); scheduleRender(); }, e=>console.warn("products",e.code));
   fbDB.collection("sellers").onSnapshot(s=>{ CACHE.sellers={}; s.forEach(d=>CACHE.sellers[d.id]={ id:d.id, ...d.data() }); scheduleRender(); }, e=>console.warn("sellers",e.code));
+}
+function startAuthListeners(uid){
+  // buyer orders (and admin gets all orders)
+  const ordersQ=fbAuth.currentUser?.email===ADMIN_EMAIL
+    ?fbDB.collection("orders")
+    :fbDB.collection("orders").where("buyerId","==",uid);
+  ordersQ.onSnapshot(s=>{ CACHE.orders=s.docs.map(d=>({ id:d.id, ...d.data() })); scheduleRender(); }, e=>console.warn("orders",e.code));
+  // suggestions (admin only)
   if(fbAuth.currentUser?.email===ADMIN_EMAIL){
-    fbDB.collection("orders").onSnapshot(s=>{ CACHE.orders=s.docs.map(d=>({ id:d.id, ...d.data() })); scheduleRender(); }, e=>console.warn("orders",e.code));
+    fbDB.collection("suggestions").orderBy("time","desc").limit(50).onSnapshot(s=>{ CACHE.suggestions=s.docs.map(d=>({ id:d.id, ...d.data() })); scheduleRender(); }, e=>console.warn("suggestions",e.code));
   }
+}
+
+// ---------- My Orders (buyer) ----------
+function renderMyOrders(){
+  const orders=(CACHE.orders||[]).filter(o=>o.buyerId===ME.id).sort((a,b)=>b.createdAt-a.createdAt);
+  $("page").innerHTML=`<div class="h-title">📦 My Orders</div>
+    ${orders.length?orders.map(o=>{
+      const statusLabel={pending_payment:"⏳ Awaiting payment",paid:"✅ Paid",shipped:"🚚 Shipped",completed:"✓ Completed"}[o.status]||o.status;
+      return`<div class="mrow2" style="flex-wrap:wrap;gap:10px;padding:14px;border-radius:14px;background:#fff;box-shadow:0 2px 8px rgba(180,120,60,.07);margin-bottom:10px">
+        <div class="minfo" style="flex:1;min-width:0">
+          <div class="mt">Order <b>${o.id.slice(0,8).toUpperCase()}</b> · ${timeAgo(o.createdAt)}</div>
+          <div class="ms">${(o.items||[]).map(i=>esc(i.title)).join(", ")}</div>
+          <div class="ms" style="margin-top:4px">${statusLabel} · <b>$${parseFloat(o.total||0).toFixed(2)}</b></div>
+        </div>
+        ${o.status==="pending_payment"?`<div style="font-size:12px;color:var(--muted);max-width:200px">Send $${parseFloat(o.total||0).toFixed(2)} via Payoneer to <b>${PLATFORM_EMAIL}</b> — include order ID <b>${o.id.slice(0,8).toUpperCase()}</b></div>`:''}
+      </div>`;
+    }).join(""):'<div class="empty">No orders yet — browse the Marketplace to start shopping. 🛍️</div>'}`;
 }
 
 // ---------- init: real Firebase auth + live data ----------
@@ -1512,7 +2774,11 @@ startListeners();
 fbAuth.onAuthStateChanged(async (user)=>{
   if(user){
     const prof=await loadProfile(user.uid);
-    if(prof){ ME=prof; syncME(); startMyNotifications(); listenForIncomingCalls(); render(); }
+    startAuthListeners(user.uid);
+    if(prof){ ME=prof; syncME(); startMyNotifications(); listenForIncomingCalls(); initPushNotifications(); render(); handleLoginSecurity(user.uid); }
     else { ME={ id:user.uid, name:user.displayName||"" }; render(); }   // no profile yet → onboarding
-  } else { ME=null; syncME(); startMyNotifications(); render(); }
+  } else {
+    if(_callsUnsub){_callsUnsub();_callsUnsub=null;}
+    ME=null; syncME(); startMyNotifications(); render();
+  }
 });
