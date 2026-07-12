@@ -13,3 +13,4 @@ node_modules/
 # large media files
 *.mp3
 *.mp4
+publish/audio/
