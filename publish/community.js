@@ -104,7 +104,7 @@ let toastTimer; function toast(m){ const e=$("toast"); e.textContent=m; e.hidden
 // ---------- state ----------
 let ME=null;                                   // the signed-in user's profile (Firebase)
 // live shared data, kept in sync by Firestore listeners
-const CACHE={ users:{}, tracks:[], statuses:[], follows:{}, reactions:{}, comments:[], notifications:[], products:[], sellers:{}, orders:[], convos:{}, suggestions:[] };
+const CACHE={ users:{}, tracks:[], statuses:[], follows:{}, reactions:{}, comments:[], notifications:[], products:[], sellers:{}, orders:[], convos:{}, suggestions:[], followRequests:[] };
 let state={ view:"discover", profileId:null, query:"", cart:JSON.parse(localStorage.getItem("okmusic_cart")||"[]") };
 function persistCart(){ try{ localStorage.setItem("okmusic_cart",JSON.stringify(state.cart||[])); }catch(e){} }
 let playMode="continuous"; // "continuous" | "repeat" | "shuffle"
@@ -444,7 +444,7 @@ function renderProfile(uid){
   const blocked=hasBlocked(uid);
   const headActions=mine
     ? `<button class="btn primary" data-action="customize">🎨 Edit profile</button><button class="btn" data-action="invite">✉️ Invite</button><button class="btn" data-action="settings">⚙️ Settings</button>`
-    : `<button class="btn ${isFollowing(uid)?'':'primary'}" data-action="follow" data-uid="${uid}">${isFollowing(uid)?'Following ✓':'Follow'}</button>
+    : `${(()=>{const following=isFollowing(uid);const requested=!following&&(CACHE.followRequests||[]).some(r=>r.fromUid===ME?.id&&r.toUid===uid&&r.status==='pending');return`<button class="btn ${following?'':'primary'}" data-action="follow" data-uid="${uid}">${following?'Following ✓':requested?'Requested ↗':'Follow'}</button>`;})()}
        ${!blocked&&canMessage(uid)?`<button class="btn" data-action="openchat" data-uid="${uid}">💬 Message</button>`:''}
        <button class="btn" data-action="blockuser" data-uid="${uid}" style="${blocked?'background:#e2554f;color:#fff;border-color:#e2554f':''}">${blocked?'🚫 Blocked':'🚫 Block'}</button>
        <button class="btn" data-action="reportuser" data-uid="${uid}">⚑ Report</button>`;
@@ -798,15 +798,42 @@ async function doPublish(){
     .catch(e=>toast("Couldn't save: "+(e.code||e.message))); }
 
 // ---------- Cloudinary upload helpers ----------
-function uploadMediaToCloudinary(file){
-  // Always use video/upload — the okmusic_audio preset is configured for that endpoint
-  // and Cloudinary serves the resulting URL correctly for any file type (image, audio, video)
+function _isImageFile(file){
+  if(file.type&&file.type.startsWith("image/")) return true;
+  const ext=(file.name||"").split(".").pop().toLowerCase();
+  return ["jpg","jpeg","png","gif","webp","heic","heif","bmp","tiff","tif","avif","svg"].includes(ext);
+}
+async function imageToJpeg(file){
+  return new Promise(resolve=>{
+    const img=new Image();
+    const blobUrl=URL.createObjectURL(file);
+    img.onload=()=>{
+      const MAX=2048;
+      let w=img.naturalWidth,h=img.naturalHeight;
+      if(w>MAX){h=Math.round(h*MAX/w);w=MAX;}
+      if(h>MAX){w=Math.round(w*MAX/h);h=MAX;}
+      const c=document.createElement("canvas");c.width=w;c.height=h;
+      c.getContext("2d").drawImage(img,0,0,w,h);
+      URL.revokeObjectURL(blobUrl);
+      c.toBlob(b=>resolve(b||file),"image/jpeg",0.92);
+    };
+    img.onerror=()=>{URL.revokeObjectURL(blobUrl);resolve(file);};
+    img.src=blobUrl;
+  });
+}
+async function uploadMediaToCloudinary(file){
+  let uploadFile=file;
+  let endpoint="video/upload";
+  if(_isImageFile(file)){
+    uploadFile=await imageToJpeg(file);
+    endpoint="image/upload";
+  }
   return new Promise((resolve,reject)=>{
     const fd=new FormData();
-    fd.append("file",file);
+    fd.append("file",uploadFile);
     fd.append("upload_preset","okmusic_audio");
     const xhr=new XMLHttpRequest();
-    xhr.open("POST","https://api.cloudinary.com/v1_1/llka5use/video/upload");
+    xhr.open("POST","https://api.cloudinary.com/v1_1/llka5use/"+endpoint);
     xhr.onload=()=>{ try{ const r=JSON.parse(xhr.responseText); if(r.secure_url) resolve(r.secure_url); else reject(new Error(r.error?.message||"Upload failed")); }catch(err){ reject(err); } };
     xhr.onerror=()=>reject(new Error("Network error"));
     xhr.send(fd);
@@ -826,14 +853,23 @@ function uploadToCloudinary(blob, onProgress){
   });
 }
 // Chat file upload: use the correct Cloudinary resource namespace per file type.
-function uploadChatFile(file, onProgress){
+async function uploadChatFile(file, onProgress){
+  let uploadFile=file;
   let endpoint;
-  if(file.type.startsWith("image/")) endpoint="image/upload";
-  else if(file.type.startsWith("audio/")||file.type.startsWith("video/")) endpoint="video/upload";
-  else endpoint="raw/upload";
+  const ext=(file.name||"").split(".").pop().toLowerCase();
+  const isAudioExt=["mp3","m4a","aac","ogg","wav","flac","opus"].includes(ext);
+  const isVideoExt=["mp4","mov","avi","mkv","webm"].includes(ext);
+  if(_isImageFile(file)){
+    uploadFile=await imageToJpeg(file);
+    endpoint="image/upload";
+  } else if(file.type.startsWith("audio/")||file.type.startsWith("video/")||isAudioExt||isVideoExt){
+    endpoint="video/upload";
+  } else {
+    endpoint="raw/upload";
+  }
   return new Promise((resolve,reject)=>{
     const fd=new FormData();
-    fd.append("file",file);
+    fd.append("file",uploadFile);
     fd.append("upload_preset","okmusic_audio");
     const xhr=new XMLHttpRequest();
     xhr.open("POST",`https://api.cloudinary.com/v1_1/llka5use/${endpoint}`);
@@ -1046,9 +1082,24 @@ function openInvite(){ const u=currentUser(); const link=`${location.origin}${lo
 
 // ---------- social ----------
 function share(id){ const link=`${location.origin}${location.pathname}?track=${id}`; if(navigator.clipboard) navigator.clipboard.writeText(link).then(()=>toast("Share link copied ✓")).catch(()=>toast(link)); else toast(link); }
-function toggleFollow(uid){ if(!ME) return openEmailAuth(); const F=firebase.firestore.FieldValue; const has=(CACHE.follows[ME.id]||[]).includes(uid);
-  fbDB.collection("follows").doc(ME.id).set({ following: has?F.arrayRemove(uid):F.arrayUnion(uid) },{merge:true}).then(()=>toast(has?"Unfollowed":"You're now a fan ✓")).catch(e=>toast(e.code||e.message));
-  if(!has) notify(uid,"follow",`${ME.name} is now one of your fans 🎉`); }
+function toggleFollow(uid){
+  if(!ME) return openEmailAuth();
+  const F=firebase.firestore.FieldValue;
+  const has=(CACHE.follows[ME.id]||[]).includes(uid);
+  if(has){
+    fbDB.collection("follows").doc(ME.id).set({following:F.arrayRemove(uid)},{merge:true}).then(()=>toast("Unfollowed")).catch(e=>toast(e.code||e.message));
+    return;
+  }
+  const alreadyRequested=(CACHE.followRequests||[]).some(r=>r.fromUid===ME.id&&r.toUid===uid&&r.status==='pending');
+  if(alreadyRequested){toast("Request already sent");return;}
+  const target=userById(uid);
+  if(target?.privacy?.requireFollowApproval){
+    sendFollowRequest(uid);
+    return;
+  }
+  fbDB.collection("follows").doc(ME.id).set({following:F.arrayUnion(uid)},{merge:true}).then(()=>toast("You're now a fan ✓")).catch(e=>toast(e.code||e.message));
+  notify(uid,"follow",`${ME.name} is now one of your fans 🎉`);
+}
 function logout(){ fbAuth.signOut(); }
 
 // ---------- avatar lightbox ----------
@@ -1427,7 +1478,9 @@ function followersOf(uid){ const r=[]; for(const f in CACHE.follows){ if(CACHE.f
 function userCard(u){
   if(!u) return "";
   const me=currentUser(); const self=me&&me.id===u.id;
-  const btn=self?"":`<button class="btn sm ${isFollowing(u.id)?'':'primary'}" data-action="follow" data-uid="${u.id}">${isFollowing(u.id)?'Following ✓':'Follow back'}</button>`;
+  const following=isFollowing(u.id);
+  const requested=!following&&(CACHE.followRequests||[]).some(r=>r.fromUid===ME?.id&&r.toUid===u.id&&r.status==='pending');
+  const btn=self?"":`<button class="btn sm ${following?'':'primary'}" data-action="follow" data-uid="${u.id}">${following?'Following ✓':requested?'Requested ↗':'Follow back'}</button>`;
   return `<div class="mrow2">
     <div class="avatar" style="${avatarStyle(u,44)};cursor:pointer" data-action="viewavatar" data-uid="${u.id}">${u.avatarImg?'':initials(u.name)}</div>
     <div class="minfo"><div class="mt" data-action="profile" data-uid="${u.id}">${esc(u.name)}</div><div class="ms">@${esc(u.handle)} · ${nfmt(followerCount(u.id))} fans</div></div>
@@ -1438,13 +1491,33 @@ function renderFans(){
   const tab=state.fanTab||"fans";
   const fans=followersOf(me.id).map(userById).filter(Boolean);
   const following=followingOf(me.id).map(userById).filter(Boolean);
-  const list=tab==="fans"?fans:following;
+  const pendingReqs=(CACHE.followRequests||[]).filter(r=>r.toUid===me.id&&r.status==='pending');
+  const reqCount=pendingReqs.length;
+  let content="";
+  if(tab==="fans"){
+    content=fans.length?fans.map(u=>`<div class="mrow2">
+      <div class="avatar" style="${avatarStyle(u,44)};cursor:pointer" data-action="viewavatar" data-uid="${u.id}">${u.avatarImg?'':initials(u.name)}</div>
+      <div class="minfo"><div class="mt" data-action="profile" data-uid="${u.id}">${esc(u.name)}</div><div class="ms">@${esc(u.handle)}</div></div>
+      <button class="btn sm" style="color:#e2554f;border-color:#e2554f" data-action="removefan" data-uid="${u.id}">Remove</button>
+    </div>`).join(""):'<div class="empty">No fans yet — share your invite link, post tracks and statuses to attract them! 🎶</div>';
+  } else if(tab==="requests"){
+    content=reqCount?pendingReqs.map(r=>{const u=userById(r.fromUid)||{name:r.fromName||'?',id:r.fromUid,color:'#FB7A28'};
+      return`<div class="mrow2">
+        <div class="avatar" style="${avatarStyle(u,44)};cursor:pointer" data-action="profile" data-uid="${u.id}">${u.avatarImg?'':initials(u.name||'?')}</div>
+        <div class="minfo"><div class="mt">${esc(u.name||r.fromName||'?')}</div><div class="ms">Wants to be your fan · ${timeAgo(r.time)}</div></div>
+        <button class="btn sm primary" data-action="acceptfollow" data-fromuid="${r.fromUid}" data-reqid="${r.id}">Accept</button>
+        <button class="btn sm" data-action="rejectfollow" data-fromuid="${r.fromUid}" data-reqid="${r.id}">Decline</button>
+      </div>`}).join(""):'<div class="empty">No pending fan requests.</div>';
+  } else {
+    content=following.length?following.map(userCard).join(""):'<div class="empty">You\'re not following anyone yet. Open Discover and follow creators you love.</div>';
+  }
   $("page").innerHTML=`<div class="h-title">My Fanbase</div>
-    <div class="tabs">
+    ${myBusyToggle()}
+    <div class="tabs" style="margin-top:10px">
       <button class="tab ${tab==='fans'?'active':''}" data-action="fantab" data-t="fans">Fans (${fans.length})</button>
+      <button class="tab ${tab==='requests'?'active':''}" data-action="fantab" data-t="requests">Requests${reqCount?` <span class="bell-badge" style="position:static;margin-left:4px">${reqCount}</span>`:''}  </button>
       <button class="tab ${tab==='following'?'active':''}" data-action="fantab" data-t="following">Following (${following.length})</button>
-    </div>
-    ${list.length?list.map(userCard).join(""):`<div class="empty">${tab==='fans'?"No fans yet — share your invite link, post tracks and statuses to attract them! 🎶":"You're not following anyone yet. Open Discover and follow creators you love."}</div>`}`;
+    </div>${content}`;
 }
 
 // ---------- notifications ----------
@@ -1548,11 +1621,21 @@ function markAllRead(){
 }
 function renderNotifs(){
   const list=(CACHE.notifications||[]).slice().sort((a,b)=>b.time-a.time);
-  $("page").innerHTML=`<div class="h-title">Notifications 🔔</div>${
+  const pendingReqs=(CACHE.followRequests||[]).filter(r=>r.toUid===ME?.id&&r.status==='pending');
+  const reqSection=pendingReqs.length?`<div class="h-title" style="font-size:15px;margin-top:0;margin-bottom:8px">Fan Requests (${pendingReqs.length})</div>`+pendingReqs.map(r=>{
+    const u=userById(r.fromUid)||{name:r.fromName||'?',id:r.fromUid,color:'#FB7A28'};
+    return`<div class="mrow2" style="background:#fff7f1;border-radius:12px;margin-bottom:6px;padding:10px">
+      <div class="avatar" style="${avatarStyle(u,42)};cursor:pointer" data-action="profile" data-uid="${u.id}">${u.avatarImg?'':initials(u.name||'?')}</div>
+      <div class="minfo"><div class="mt">${esc(u.name||r.fromName||'?')} wants to be your fan</div><div class="ms">${timeAgo(r.time)}</div></div>
+      <button class="btn sm primary" data-action="acceptfollow" data-fromuid="${r.fromUid}" data-reqid="${r.id}">Accept</button>
+      <button class="btn sm" data-action="rejectfollow" data-fromuid="${r.fromUid}" data-reqid="${r.id}">Decline</button>
+    </div>`;}).join(""):'';
+  $("page").innerHTML=`<div class="h-title">Notifications 🔔</div>${reqSection}${
     list.length?list.map(n=>{
       const isPlatform=n.fromUid==="platform";
       const isMsg=n.type==="message";
-      const action=isPlatform?`data-action="showguide"`:isMsg?`data-action="openchat" data-uid="${n.fromUid}"`:`data-action="profile" data-uid="${n.fromUid}"`;
+      const isFollowReq=n.type==="followrequest";
+      const action=isPlatform?`data-action="showguide"`:isMsg?`data-action="openchat" data-uid="${n.fromUid}"`:isFollowReq?`data-action="fantab" data-t="requests"` :`data-action="profile" data-uid="${n.fromUid}"`;
       const av=isPlatform
         ?`<div class="avatar" style="width:42px;height:42px;font-size:20px;background:var(--orange);flex-shrink:0;border-radius:50%;display:grid;place-items:center;color:#fff">◎</div>`
         :`<div class="avatar" style="${avatarStyle(userById(n.fromUid)||{color:'#FB7A28'},42)}">${(userById(n.fromUid)?.avatarImg)?'':initials(n.fromName||'?')}</div>`;
@@ -1787,6 +1870,11 @@ async function openSettingsModal(tab='privacy'){
         ${['all','followers','none'].map(v=>`<label class="sradio"><input type="radio" name="whoCall" value="${v}" ${(p.whoCanCall||'all')===v?'checked':''}><span>${v==='all'?'Everyone':v==='followers'?'Followers only':'Nobody'}</span></label>`).join('')}
       </div>
       <div class="sset-group">
+        <div class="sset-label">Fan Requests</div>
+        <div class="sset-row"><div><div class="sset-name">Approve fans manually</div><div class="sset-hint">New fans must request to follow you — you accept or decline</div></div>
+          <label class="stoggle"><input type="checkbox" id="privFollowApproval" ${p.requireFollowApproval?'checked':''}><span class="stoggle-sl"></span></label></div>
+      </div>
+      <div class="sset-group">
         <div class="sset-label">Discoverability</div>
         <div class="sset-row"><div><div class="sset-name">Hide from Discover & Search</div><div class="sset-hint">Your profile won't appear to other users browsing</div></div>
           <label class="stoggle"><input type="checkbox" id="privDiscover" ${p.hideFromDiscover?'checked':''}><span class="stoggle-sl"></span></label></div>
@@ -1838,9 +1926,10 @@ async function savePrivacySettings(){
   if(!ME) return;
   const profilePrivate=!!document.getElementById('privProfile')?.checked;
   const hideFromDiscover=!!document.getElementById('privDiscover')?.checked;
+  const requireFollowApproval=!!document.getElementById('privFollowApproval')?.checked;
   const whoCanMessage=document.querySelector('input[name="whoMsg"]:checked')?.value||'all';
   const whoCanCall=document.querySelector('input[name="whoCall"]:checked')?.value||'all';
-  const privacy={ profilePrivate, hideFromDiscover, whoCanMessage, whoCanCall };
+  const privacy={ profilePrivate, hideFromDiscover, requireFollowApproval, whoCanMessage, whoCanCall };
   try{
     await fbDB.collection('users').doc(ME.id).update({ privacy });
     ME.privacy=privacy;
@@ -1848,6 +1937,172 @@ async function savePrivacySettings(){
     toast('Privacy settings saved ✓');
     closeOverlay();
   }catch(e){ toast('Save failed: '+(e.message||e)); }
+}
+
+// =========================================================
+// PRESENCE — Online / Busy / Offline status
+// =========================================================
+let _presenceInterval=null;
+
+function setMyStatus(status){
+  if(!ME) return;
+  const upd={status,lastSeenAt:Date.now()};
+  fbDB.collection('users').doc(ME.id).update(upd).catch(()=>{});
+  ME.status=status; ME.lastSeenAt=upd.lastSeenAt;
+}
+
+function initPresence(uid){
+  if(_presenceInterval) clearInterval(_presenceInterval);
+  setMyStatus('online');
+  window.addEventListener('beforeunload',()=>setMyStatus('offline'));
+  document.addEventListener('visibilitychange',()=>{
+    if(document.visibilityState==='hidden') setMyStatus('offline');
+    else setMyStatus('online');
+  });
+  _presenceInterval=setInterval(()=>setMyStatus('online'),60000);
+}
+
+function userStatus(uid){
+  const u=userById(uid); if(!u) return 'offline';
+  if(u.status==='busy') return 'busy';
+  if(!u.lastSeenAt||Date.now()-u.lastSeenAt>3*60*1000) return 'offline';
+  return u.status||'offline';
+}
+
+function statusDot(uid){
+  const s=userStatus(uid);
+  const color=s==='online'?'#22c55e':s==='busy'?'#f59e0b':'#9ca3af';
+  const label=s==='online'?'Online':s==='busy'?'Busy':'Offline';
+  return`<span class="status-dot" style="background:${color}" title="${label}"></span>`;
+}
+
+function myBusyToggle(){
+  if(!ME) return '';
+  const isBusy=(ME.status||'')===`busy`;
+  return`<button class="avail-btn${isBusy?' busy':''}" data-action="togglebusy">${isBusy?'🟡 Busy — tap to go Online':'🟢 Online — tap to set Busy'}</button>`;
+}
+
+function toggleBusy(){
+  if(!ME) return;
+  const isBusy=(ME.status||'')==='busy';
+  setMyStatus(isBusy?'online':'busy');
+  scheduleRender();
+}
+
+// =========================================================
+// E2EE — End-to-End Encryption for messages (ECDH + AES-GCM)
+// =========================================================
+const _msgDecryptCache=new Map(); // key: cid+"|"+msgId → decrypted text
+const E2EE={
+  _keyPair:null,
+  _pubKeyCache:{},
+
+  async init(uid){
+    try{
+      const stored=localStorage.getItem('e2ee_kp_'+uid);
+      if(stored){
+        const{pub,priv}=JSON.parse(stored);
+        const pubKey=await crypto.subtle.importKey('jwk',pub,{name:'ECDH',namedCurve:'P-256'},true,[]);
+        const privKey=await crypto.subtle.importKey('jwk',priv,{name:'ECDH',namedCurve:'P-256'},true,['deriveKey']);
+        this._keyPair={publicKey:pubKey,privateKey:privKey};
+      } else {
+        this._keyPair=await crypto.subtle.generateKey({name:'ECDH',namedCurve:'P-256'},true,['deriveKey']);
+        const pub=await crypto.subtle.exportKey('jwk',this._keyPair.publicKey);
+        const priv=await crypto.subtle.exportKey('jwk',this._keyPair.privateKey);
+        localStorage.setItem('e2ee_kp_'+uid,JSON.stringify({pub,priv}));
+      }
+      const pubJwk=await crypto.subtle.exportKey('jwk',this._keyPair.publicKey);
+      fbDB.collection('users').doc(uid).update({e2eePubKey:JSON.stringify(pubJwk)}).catch(()=>{});
+    }catch(e){console.warn('E2EE init failed',e);}
+  },
+
+  async getOtherPubKey(otherUid){
+    if(this._pubKeyCache[otherUid]) return this._pubKeyCache[otherUid];
+    try{
+      const snap=await fbDB.collection('users').doc(otherUid).get();
+      const jwkStr=snap.data()?.e2eePubKey; if(!jwkStr) return null;
+      const key=await crypto.subtle.importKey('jwk',JSON.parse(jwkStr),{name:'ECDH',namedCurve:'P-256'},true,[]);
+      this._pubKeyCache[otherUid]=key; return key;
+    }catch{return null;}
+  },
+
+  async getSharedKey(otherUid){
+    if(!this._keyPair) return null;
+    const otherPub=await this.getOtherPubKey(otherUid); if(!otherPub) return null;
+    try{
+      return await crypto.subtle.deriveKey(
+        {name:'ECDH',public:otherPub},
+        this._keyPair.privateKey,
+        {name:'AES-GCM',length:256},
+        false,['encrypt','decrypt']
+      );
+    }catch{return null;}
+  },
+
+  async encrypt(otherUid,text){
+    try{
+      const key=await this.getSharedKey(otherUid); if(!key) return{text,encrypted:false};
+      const iv=crypto.getRandomValues(new Uint8Array(12));
+      const ct=await crypto.subtle.encrypt({name:'AES-GCM',iv},key,new TextEncoder().encode(text));
+      const ivB64=btoa(String.fromCharCode(...iv));
+      const ctB64=btoa(String.fromCharCode(...new Uint8Array(ct)));
+      return{text:ivB64+'.'+ctB64,encrypted:true};
+    }catch{return{text,encrypted:false};}
+  },
+
+  async decrypt(otherUid,msg){
+    if(!msg.encrypted) return msg.text;
+    try{
+      const key=await this.getSharedKey(otherUid); if(!key) return'🔒 (unavailable)';
+      const[ivB64,ctB64]=(msg.text||'').split('.');
+      if(!ivB64||!ctB64) return'🔒 (corrupt)';
+      const iv=Uint8Array.from(atob(ivB64),c=>c.charCodeAt(0));
+      const ct=Uint8Array.from(atob(ctB64),c=>c.charCodeAt(0));
+      const plain=await crypto.subtle.decrypt({name:'AES-GCM',iv},key,ct);
+      return new TextDecoder().decode(plain);
+    }catch{return'🔒 (could not decrypt)';}
+  }
+};
+
+// =========================================================
+// FOLLOW REQUESTS — Accept / Reject / Remove fan
+// =========================================================
+async function sendFollowRequest(targetUid){
+  if(!ME) return openEmailAuth();
+  const reqData={fromUid:ME.id,fromName:ME.name,toUid:targetUid,time:Date.now(),status:'pending'};
+  try{
+    await fbDB.collection('followRequests').add(reqData);
+    notify(targetUid,'followrequest',`${ME.name} wants to be your fan`);
+    toast('Follow request sent');
+    scheduleRender();
+  }catch(e){toast(e.message||'Could not send request');}
+}
+
+async function acceptFollowRequest(fromUid,reqId){
+  if(!ME) return;
+  const F=firebase.firestore.FieldValue;
+  try{
+    await fbDB.collection('follows').doc(fromUid).set({following:F.arrayUnion(ME.id)},{merge:true});
+    await fbDB.collection('followRequests').doc(reqId).delete();
+    notify(fromUid,'follow',`${ME.name} accepted your fan request 🎉`);
+    toast('Fan request accepted ✓');
+  }catch(e){toast(e.message||'Error');}
+}
+
+async function rejectFollowRequest(fromUid,reqId){
+  try{
+    await fbDB.collection('followRequests').doc(reqId).delete();
+    toast('Request declined');
+  }catch(e){toast(e.message||'Error');}
+}
+
+async function removeFan(fanUid){
+  if(!ME) return;
+  const F=firebase.firestore.FieldValue;
+  try{
+    await fbDB.collection('follows').doc(fanUid).set({following:F.arrayRemove(ME.id)},{merge:true});
+    toast('Fan removed');
+  }catch(e){toast(e.message||'Error');}
 }
 
 async function blockUser(targetUid){
@@ -2047,7 +2302,7 @@ document.addEventListener("click",e=>{
     follow:()=>toggleFollow(el.dataset.uid), share:()=>share(el.dataset.id), logout:logout, close:closeOverlay,
     publish:()=>setVisibility(el.dataset.id,"public"), unpublish:()=>setVisibility(el.dataset.id,"private"), deltrack:()=>deleteTrack(el.dataset.id),
     editcmt:()=>editComment(el.dataset.id), delcmt:()=>deleteComment(el.dataset.id),
-    fantab:()=>{ state.fanTab=el.dataset.t; renderFans(); }, suggest:openSuggest, sendsuggest:sendSuggest,
+    fantab:()=>{ state.fanTab=el.dataset.t; state.view='fans'; renderFans(); }, suggest:openSuggest, sendsuggest:sendSuggest,
     openmarketplace:openMarketplace, gobuyer:goBuyer, goseller:goSeller, gosellerdirect:()=>{ if(!ME) return openEmailAuth(); CACHE.sellers[ME.id]?go("mystore"):openSellerSetup(); },
     doregisterseller:doRegisterSeller, addproduct:()=>openProductForm(), editproduct:()=>openProductForm(el.dataset.id), delproduct:()=>deleteProduct(el.dataset.id),
     dosaveproduct:()=>doSaveProduct(el.dataset.id||null), viewproduct:()=>viewProduct(el.dataset.id),
@@ -2099,7 +2354,11 @@ document.addEventListener("click",e=>{
     confirmemailchange:()=>confirmEmailChange(),
     exportdata:()=>exportMyData(),
     deleteaccount:()=>doDeleteAccount(),
-    confirmdelete:()=>confirmDelete()
+    confirmdelete:()=>confirmDelete(),
+    togglebusy:toggleBusy,
+    acceptfollow:()=>acceptFollowRequest(el.dataset.fromuid,el.dataset.reqid),
+    rejectfollow:()=>rejectFollowRequest(el.dataset.fromuid,el.dataset.reqid),
+    removefan:()=>removeFan(el.dataset.uid)
   };
   if(M[a]) M[a]();
 });
@@ -2295,11 +2554,20 @@ function clearPendingFile(){
   const p=$("chatFilePreview");if(p){p.innerHTML="";p.style.display="none";}
 }
 
-function renderMsgContent(m){
+function renderMsgContent(m,msgId,cid,otherUid){
   const edited=m.edited?'<span class="msg-edited"> · edited</span>':'';
   if(!m.fileUrl){
-    const{html:mH,firstUrl:mU}=linkifyText(m.text||'');
-    return`<div class="msg-text">${mH}${edited}</div>${lpTag(mU)}`;
+    let displayText=m.text||'';
+    if(m.encrypted){
+      const cacheKey=(cid||'')+'|'+(msgId||'');
+      if(_msgDecryptCache.has(cacheKey)){
+        displayText=_msgDecryptCache.get(cacheKey);
+      } else {
+        displayText='🔒 Decrypting…';
+      }
+    }
+    const{html:mH,firstUrl:mU}=linkifyText(displayText);
+    return`<div class="msg-text">${m.encrypted?'🔒 ':''} ${mH}${edited}</div>${lpTag(mU)}`;
   }
   // 3-day expiry check
   if(m.fileExpiry&&Date.now()>m.fileExpiry){
@@ -2327,11 +2595,21 @@ function openChat(uid){
   const cid=convId(ME.id,uid);
   if(msgUnsub){msgUnsub();msgUnsub=null;}
   state.chatUid=uid;
+  const otherStatus=userStatus(uid);
+  const statusColor=otherStatus==='online'?'#22c55e':otherStatus==='busy'?'#f59e0b':'#9ca3af';
+  const statusLabel=otherStatus==='online'?'Online':otherStatus==='busy'?'Busy':'Offline';
   $("page").innerHTML=`
     <div class="chat-header">
       <button class="btn sm" data-action="nav" data-view="msgs" style="flex-shrink:0">← Back</button>
-      <div class="avatar" style="${avatarStyle(other,36)};flex-shrink:0">${other.avatarImg?'':initials(other.name)}</div>
-      <span class="chat-name">${esc(other.name)}</span>
+      <div style="position:relative;flex-shrink:0">
+        <div class="avatar" style="${avatarStyle(other,36)}">${other.avatarImg?'':initials(other.name)}</div>
+        <span class="status-dot" style="background:${statusColor};position:absolute;bottom:0;right:0;border:2px solid var(--bg)" title="${statusLabel}"></span>
+      </div>
+      <div style="flex:1;min-width:0">
+        <span class="chat-name">${esc(other.name)}</span>
+        <span style="font-size:11px;color:${statusColor};margin-left:6px">${statusLabel}</span>
+      </div>
+      <span title="End-to-end encrypted" style="font-size:16px;opacity:.6;flex-shrink:0">🔒</span>
       <button class="btn sm" data-action="startcall" data-uid="${uid}" title="Voice call" style="flex-shrink:0">📞 Call</button>
     </div>
     <div class="chat-msgs" id="chatMsgs"></div>
@@ -2345,34 +2623,49 @@ function openChat(uid){
       <button class="btn primary" data-action="sendmsg" data-uid="${uid}" id="chatSendBtn">Send</button>
     </div>`;
   fbDB.collection("messages").doc(cid).set({participants:[ME.id,uid],unread:{[ME.id]:0}},{merge:true}).catch(()=>{});
+
+  function _renderChatDocs(docs){
+    const el=$("chatMsgs");if(!el)return;
+    el.innerHTML=docs
+      .filter(d=>!(d.data().deletedFor||[]).includes(ME.id))
+      .map(d=>{const m=d.data();const mine=m.senderId===ME.id;
+        if(m.deleted) return`<div class="msg-bubble ${mine?'mine':'theirs'} deleted">
+          <div class="msg-text"><em>🗑️ Message deleted</em></div>
+          <div class="msg-time">${timeAgo(m.time)}</div></div>`;
+        return`<div class="msg-bubble ${mine?'mine':'theirs'}">
+          ${renderMsgContent(m,d.id,cid,uid)}
+          <div class="msg-meta">
+            <span class="msg-time">${timeAgo(m.time)}</span>
+            ${mine?`<span class="msg-actions">
+              <button class="msg-act" data-action="editmsg" data-msgid="${d.id}" data-cid="${cid}" data-text="${esc(m.encrypted?'':m.text||'')}" title="Edit">✏️</button>
+              <button class="msg-act" data-action="deletemsgmenu" data-msgid="${d.id}" data-cid="${cid}" title="Delete">🗑️</button>
+            </span>`:''}
+          </div></div>`;
+      }).join('');
+    el.scrollTop=el.scrollHeight;
+    setTimeout(fetchLinkPreviews,0);
+  }
+
   let _prevMsgCount=0;
   msgUnsub=fbDB.collection("messages").doc(cid).collection("msgs")
     .orderBy("time","asc").limitToLast(80)
-    .onSnapshot(snap=>{
+    .onSnapshot(async snap=>{
       const el=$("chatMsgs");if(!el)return;
       if(_prevMsgCount>0&&snap.docs.length>_prevMsgCount){
         const newest=snap.docs[snap.docs.length-1].data();
         if(newest.senderId!==ME.id&&!newest.deleted&&!(newest.deletedFor||[]).includes(ME.id)) playMsgSound();
       }
       _prevMsgCount=snap.docs.length;
-      el.innerHTML=snap.docs
-        .filter(d=>!(d.data().deletedFor||[]).includes(ME.id))
-        .map(d=>{const m=d.data();const mine=m.senderId===ME.id;
-          if(m.deleted) return`<div class="msg-bubble ${mine?'mine':'theirs'} deleted">
-            <div class="msg-text"><em>🗑️ Message deleted</em></div>
-            <div class="msg-time">${timeAgo(m.time)}</div></div>`;
-          return`<div class="msg-bubble ${mine?'mine':'theirs'}">
-            ${renderMsgContent(m)}
-            <div class="msg-meta">
-              <span class="msg-time">${timeAgo(m.time)}</span>
-              ${mine?`<span class="msg-actions">
-                <button class="msg-act" data-action="editmsg" data-msgid="${d.id}" data-cid="${cid}" data-text="${esc(m.text||'')}" title="Edit">✏️</button>
-                <button class="msg-act" data-action="deletemsgmenu" data-msgid="${d.id}" data-cid="${cid}" title="Delete">🗑️</button>
-              </span>`:''}
-            </div></div>`;
-        }).join('');
-      el.scrollTop=el.scrollHeight;
-      setTimeout(fetchLinkPreviews,0);
+      _renderChatDocs(snap.docs);
+      // decrypt encrypted messages in background then re-render
+      const encryptedDocs=snap.docs.filter(d=>d.data().encrypted&&!_msgDecryptCache.has(cid+'|'+d.id));
+      if(encryptedDocs.length){
+        await Promise.all(encryptedDocs.map(async d=>{
+          const plain=await E2EE.decrypt(uid,d.data());
+          _msgDecryptCache.set(cid+'|'+d.id,plain);
+        }));
+        _renderChatDocs(snap.docs);
+      }
     },e=>console.warn("msgs",e));
   setTimeout(()=>{
     const inp=$("chatInput");
@@ -2420,13 +2713,23 @@ async function sendMsg(uid){
     }
     if(btn){btn.disabled=false;btn.textContent="Send";}
   }
+  // encrypt text if E2EE is ready and message has text only (not file-only messages)
+  let plainPreview=text;
+  if(text&&!_pendingFile){
+    const enc=await E2EE.encrypt(uid,text);
+    if(enc.encrypted){
+      msgData.text=enc.text;
+      msgData.encrypted=true;
+      plainPreview=text; // keep plain version for notification preview
+    }
+  }
   await fbDB.collection("messages").doc(cid).collection("msgs").add(msgData);
   const preview=msgData.fileUrl
     ?(msgData.fileType.startsWith("image/")?"📷 Photo"
       :msgData.fileType.startsWith("audio/")?"🎵 Audio"
       :msgData.fileType.startsWith("video/")?"🎬 Video"
       :`📎 ${msgData.fileName}`)
-    :text;
+    :plainPreview;
   await fbDB.collection("messages").doc(cid).set({
     participants:[ME.id,uid],lastMsg:preview,lastTime:time,
     unread:{[ME.id]:0,[uid]:firebase.firestore.FieldValue.increment(1)}
@@ -2745,6 +3048,9 @@ function startAuthListeners(uid){
     ?fbDB.collection("orders")
     :fbDB.collection("orders").where("buyerId","==",uid);
   ordersQ.onSnapshot(s=>{ CACHE.orders=s.docs.map(d=>({ id:d.id, ...d.data() })); scheduleRender(); }, e=>console.warn("orders",e.code));
+  // follow requests (incoming: someone wants to follow me)
+  fbDB.collection("followRequests").where("toUid","==",uid).where("status","==","pending")
+    .onSnapshot(s=>{ CACHE.followRequests=s.docs.map(d=>({ id:d.id, ...d.data() })); scheduleRender(); }, e=>console.warn("followRequests",e.code));
   // suggestions (admin only)
   if(fbAuth.currentUser?.email===ADMIN_EMAIL){
     fbDB.collection("suggestions").orderBy("time","desc").limit(50).onSnapshot(s=>{ CACHE.suggestions=s.docs.map(d=>({ id:d.id, ...d.data() })); scheduleRender(); }, e=>console.warn("suggestions",e.code));
@@ -2775,9 +3081,10 @@ fbAuth.onAuthStateChanged(async (user)=>{
   if(user){
     const prof=await loadProfile(user.uid);
     startAuthListeners(user.uid);
-    if(prof){ ME=prof; syncME(); startMyNotifications(); listenForIncomingCalls(); initPushNotifications(); render(); handleLoginSecurity(user.uid); }
+    if(prof){ ME=prof; syncME(); startMyNotifications(); listenForIncomingCalls(); initPushNotifications(); render(); handleLoginSecurity(user.uid); initPresence(user.uid); E2EE.init(user.uid); }
     else { ME={ id:user.uid, name:user.displayName||"" }; render(); }   // no profile yet → onboarding
   } else {
+    if(_presenceInterval){clearInterval(_presenceInterval);_presenceInterval=null;}
     if(_callsUnsub){_callsUnsub();_callsUnsub=null;}
     ME=null; syncME(); startMyNotifications(); render();
   }
