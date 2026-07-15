@@ -1992,9 +1992,11 @@ function toggleBusy(){
 // =========================================================
 // E2EE — End-to-End Encryption for messages (ECDH + AES-GCM)
 // =========================================================
-const _msgDecryptCache=new Map(); // key: cid+"|"+msgId → decrypted text
+// Map: cid+"|"+msgId → decrypted plaintext (only successful decryptions stored)
+const _msgDecryptCache=new Map();
 const E2EE={
   _keyPair:null,
+  _ready:false,
   _pubKeyCache:{},
 
   async init(uid){
@@ -2013,6 +2015,9 @@ const E2EE={
       }
       const pubJwk=await crypto.subtle.exportKey('jwk',this._keyPair.publicKey);
       fbDB.collection('users').doc(uid).update({e2eePubKey:JSON.stringify(pubJwk)}).catch(()=>{});
+      this._ready=true;
+      // signal open chats to retry decryption of any pending encrypted messages
+      document.dispatchEvent(new CustomEvent('e2ee-ready'));
     }catch(e){console.warn('E2EE init failed',e);}
   },
 
@@ -2045,22 +2050,27 @@ const E2EE={
       const iv=crypto.getRandomValues(new Uint8Array(12));
       const ct=await crypto.subtle.encrypt({name:'AES-GCM',iv},key,new TextEncoder().encode(text));
       const ivB64=btoa(String.fromCharCode(...iv));
-      const ctB64=btoa(String.fromCharCode(...new Uint8Array(ct)));
+      const ctArr=new Uint8Array(ct);
+      let ctB64='';for(let i=0;i<ctArr.length;i++) ctB64+=String.fromCharCode(ctArr[i]);
+      ctB64=btoa(ctB64);
       return{text:ivB64+'.'+ctB64,encrypted:true};
     }catch{return{text,encrypted:false};}
   },
 
+  // Returns decrypted string on success, null on failure (never caches null — allows retry)
   async decrypt(otherUid,msg){
     if(!msg.encrypted) return msg.text;
     try{
-      const key=await this.getSharedKey(otherUid); if(!key) return'🔒 (unavailable)';
-      const[ivB64,ctB64]=(msg.text||'').split('.');
-      if(!ivB64||!ctB64) return'🔒 (corrupt)';
+      const key=await this.getSharedKey(otherUid); if(!key) return null;
+      const dotIdx=(msg.text||'').indexOf('.');
+      if(dotIdx<1) return null;
+      const ivB64=msg.text.slice(0,dotIdx);
+      const ctB64=msg.text.slice(dotIdx+1);
       const iv=Uint8Array.from(atob(ivB64),c=>c.charCodeAt(0));
       const ct=Uint8Array.from(atob(ctB64),c=>c.charCodeAt(0));
       const plain=await crypto.subtle.decrypt({name:'AES-GCM',iv},key,ct);
       return new TextDecoder().decode(plain);
-    }catch{return'🔒 (could not decrypt)';}
+    }catch{return null;}
   }
 };
 
@@ -2560,14 +2570,12 @@ function renderMsgContent(m,msgId,cid,otherUid){
     let displayText=m.text||'';
     if(m.encrypted){
       const cacheKey=(cid||'')+'|'+(msgId||'');
-      if(_msgDecryptCache.has(cacheKey)){
-        displayText=_msgDecryptCache.get(cacheKey);
-      } else {
-        displayText='🔒 Decrypting…';
-      }
+      displayText=_msgDecryptCache.has(cacheKey)
+        ?_msgDecryptCache.get(cacheKey)
+        :'🔒 Decrypting…';
     }
     const{html:mH,firstUrl:mU}=linkifyText(displayText);
-    return`<div class="msg-text">${m.encrypted?'🔒 ':''} ${mH}${edited}</div>${lpTag(mU)}`;
+    return`<div class="msg-text">${mH}${edited}</div>${lpTag(mU)}`;
   }
   // 3-day expiry check
   if(m.fileExpiry&&Date.now()>m.fileExpiry){
@@ -2647,6 +2655,23 @@ function openChat(uid){
   }
 
   let _prevMsgCount=0;
+  let _latestDocs=[];
+
+  async function _decryptAndRender(docs){
+    // only attempt docs not already successfully decrypted
+    const toDecrypt=docs.filter(d=>d.data().encrypted&&!_msgDecryptCache.has(cid+'|'+d.id));
+    if(!toDecrypt.length) return;
+    await Promise.all(toDecrypt.map(async d=>{
+      const plain=await E2EE.decrypt(uid,d.data());
+      if(plain!==null) _msgDecryptCache.set(cid+'|'+d.id,plain); // only cache successes
+    }));
+    if($("chatMsgs")) _renderChatDocs(docs);
+  }
+
+  // when E2EE initializes after the chat is already open, retry pending decryptions
+  function _onE2EEReady(){ _decryptAndRender(_latestDocs); }
+  document.addEventListener('e2ee-ready',_onE2EEReady,{once:true});
+
   msgUnsub=fbDB.collection("messages").doc(cid).collection("msgs")
     .orderBy("time","asc").limitToLast(80)
     .onSnapshot(async snap=>{
@@ -2656,16 +2681,9 @@ function openChat(uid){
         if(newest.senderId!==ME.id&&!newest.deleted&&!(newest.deletedFor||[]).includes(ME.id)) playMsgSound();
       }
       _prevMsgCount=snap.docs.length;
+      _latestDocs=snap.docs;
       _renderChatDocs(snap.docs);
-      // decrypt encrypted messages in background then re-render
-      const encryptedDocs=snap.docs.filter(d=>d.data().encrypted&&!_msgDecryptCache.has(cid+'|'+d.id));
-      if(encryptedDocs.length){
-        await Promise.all(encryptedDocs.map(async d=>{
-          const plain=await E2EE.decrypt(uid,d.data());
-          _msgDecryptCache.set(cid+'|'+d.id,plain);
-        }));
-        _renderChatDocs(snap.docs);
-      }
+      _decryptAndRender(snap.docs);
     },e=>console.warn("msgs",e));
   setTimeout(()=>{
     const inp=$("chatInput");
@@ -2723,7 +2741,9 @@ async function sendMsg(uid){
       plainPreview=text; // keep plain version for notification preview
     }
   }
-  await fbDB.collection("messages").doc(cid).collection("msgs").add(msgData);
+  const msgRef=await fbDB.collection("messages").doc(cid).collection("msgs").add(msgData);
+  // sender caches their own plaintext immediately so it shows without waiting for decryption
+  if(msgData.encrypted&&plainPreview) _msgDecryptCache.set(cid+'|'+msgRef.id,plainPreview);
   const preview=msgData.fileUrl
     ?(msgData.fileType.startsWith("image/")?"📷 Photo"
       :msgData.fileType.startsWith("audio/")?"🎵 Audio"
