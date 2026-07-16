@@ -2000,34 +2000,54 @@ const E2EE={
   _pubKeyCache:{},
 
   async init(uid){
+    // Guard: Web Crypto is HTTPS-only; unavailable on old mobile browsers
+    if(!crypto?.subtle){ console.warn('E2EE: WebCrypto unavailable'); return; }
     try{
-      const stored=localStorage.getItem('e2ee_kp_'+uid);
-      if(stored){
-        const{pub,priv}=JSON.parse(stored);
-        const pubKey=await crypto.subtle.importKey('jwk',pub,{name:'ECDH',namedCurve:'P-256'},true,[]);
-        const privKey=await crypto.subtle.importKey('jwk',priv,{name:'ECDH',namedCurve:'P-256'},true,['deriveKey']);
-        this._keyPair={publicKey:pubKey,privateKey:privKey};
-      } else {
+      // --- Step 1: load or generate key pair ---
+      // localStorage may throw on iOS private mode — wrap each call separately
+      let loaded=false;
+      try{
+        const stored=localStorage.getItem('e2ee_kp_'+uid);
+        if(stored){
+          const{pub,priv}=JSON.parse(stored);
+          const pubKey=await crypto.subtle.importKey('jwk',pub,{name:'ECDH',namedCurve:'P-256'},true,[]);
+          const privKey=await crypto.subtle.importKey('jwk',priv,{name:'ECDH',namedCurve:'P-256'},true,['deriveKey']);
+          this._keyPair={publicKey:pubKey,privateKey:privKey};
+          loaded=true;
+        }
+      }catch(e){ console.warn('E2EE: could not load stored key',e); }
+
+      if(!loaded){
         this._keyPair=await crypto.subtle.generateKey({name:'ECDH',namedCurve:'P-256'},true,['deriveKey']);
-        const pub=await crypto.subtle.exportKey('jwk',this._keyPair.publicKey);
-        const priv=await crypto.subtle.exportKey('jwk',this._keyPair.privateKey);
-        localStorage.setItem('e2ee_kp_'+uid,JSON.stringify({pub,priv}));
+        // Persist the key — wrapped separately so a storage failure doesn't block Firestore publish
+        try{
+          const pub=await crypto.subtle.exportKey('jwk',this._keyPair.publicKey);
+          const priv=await crypto.subtle.exportKey('jwk',this._keyPair.privateKey);
+          localStorage.setItem('e2ee_kp_'+uid,JSON.stringify({pub,priv}));
+        }catch{} // private mode / storage full — key is session-only, still works
       }
+
+      // --- Step 2: always publish current pub key to Firestore ---
+      // This MUST happen every init so other devices get the latest key.
+      // If we skip this (e.g. due to a storage throw), senders will encrypt
+      // with a stale key that the recipient can no longer decrypt.
       const pubJwk=await crypto.subtle.exportKey('jwk',this._keyPair.publicKey);
-      fbDB.collection('users').doc(uid).update({e2eePubKey:JSON.stringify(pubJwk)}).catch(()=>{});
+      await fbDB.collection('users').doc(uid).update({e2eePubKey:JSON.stringify(pubJwk)}).catch(()=>{});
+
       this._ready=true;
-      // signal open chats to retry decryption of any pending encrypted messages
+      // Invalidate any cached pub keys from a previous session
+      this._pubKeyCache={};
       document.dispatchEvent(new CustomEvent('e2ee-ready'));
-    }catch(e){console.warn('E2EE init failed',e);}
+    }catch(e){ console.warn('E2EE init failed',e); }
   },
 
+  // Always fetches from Firestore (no in-memory cache) so key changes are picked up immediately.
+  // Firestore's local SDK cache makes this fast after the first fetch.
   async getOtherPubKey(otherUid){
-    if(this._pubKeyCache[otherUid]) return this._pubKeyCache[otherUid];
     try{
       const snap=await fbDB.collection('users').doc(otherUid).get();
       const jwkStr=snap.data()?.e2eePubKey; if(!jwkStr) return null;
-      const key=await crypto.subtle.importKey('jwk',JSON.parse(jwkStr),{name:'ECDH',namedCurve:'P-256'},true,[]);
-      this._pubKeyCache[otherUid]=key; return key;
+      return await crypto.subtle.importKey('jwk',JSON.parse(jwkStr),{name:'ECDH',namedCurve:'P-256'},true,[]);
     }catch{return null;}
   },
 
@@ -2045,32 +2065,38 @@ const E2EE={
   },
 
   async encrypt(otherUid,text){
+    if(!this._keyPair) return{text,encrypted:false};
     try{
       const key=await this.getSharedKey(otherUid); if(!key) return{text,encrypted:false};
       const iv=crypto.getRandomValues(new Uint8Array(12));
       const ct=await crypto.subtle.encrypt({name:'AES-GCM',iv},key,new TextEncoder().encode(text));
-      const ivB64=btoa(String.fromCharCode(...iv));
+      const ivArr=new Uint8Array(iv);
       const ctArr=new Uint8Array(ct);
+      let ivB64='';for(let i=0;i<ivArr.length;i++) ivB64+=String.fromCharCode(ivArr[i]);
       let ctB64='';for(let i=0;i<ctArr.length;i++) ctB64+=String.fromCharCode(ctArr[i]);
-      ctB64=btoa(ctB64);
-      return{text:ivB64+'.'+ctB64,encrypted:true};
+      return{text:btoa(ivB64)+'.'+btoa(ctB64),encrypted:true};
     }catch{return{text,encrypted:false};}
   },
 
-  // Returns decrypted string on success, null on failure (never caches null — allows retry)
+  // Returns decrypted string on success, null on transient failure (retry later),
+  // or '🔒' string on permanent failure (wrong key — cache this so we stop retrying).
   async decrypt(otherUid,msg){
     if(!msg.encrypted) return msg.text;
+    if(!this._keyPair) return null; // not ready yet — retry later
     try{
-      const key=await this.getSharedKey(otherUid); if(!key) return null;
+      const key=await this.getSharedKey(otherUid);
+      if(!key) return this._ready ? '🔒 Encrypted (key unavailable)' : null;
       const dotIdx=(msg.text||'').indexOf('.');
-      if(dotIdx<1) return null;
-      const ivB64=msg.text.slice(0,dotIdx);
-      const ctB64=msg.text.slice(dotIdx+1);
-      const iv=Uint8Array.from(atob(ivB64),c=>c.charCodeAt(0));
-      const ct=Uint8Array.from(atob(ctB64),c=>c.charCodeAt(0));
+      if(dotIdx<1) return '🔒 Encrypted (corrupt)';
+      const iv=Uint8Array.from(atob(msg.text.slice(0,dotIdx)),c=>c.charCodeAt(0));
+      const ct=Uint8Array.from(atob(msg.text.slice(dotIdx+1)),c=>c.charCodeAt(0));
       const plain=await crypto.subtle.decrypt({name:'AES-GCM',iv},key,ct);
       return new TextDecoder().decode(plain);
-    }catch{return null;}
+    }catch{
+      // AES-GCM threw — the key is genuinely wrong (different session).
+      // Return a permanent failure string so we stop retrying.
+      return this._ready ? '🔒 Encrypted (different session)' : null;
+    }
   }
 };
 
@@ -2658,12 +2684,14 @@ function openChat(uid){
   let _latestDocs=[];
 
   async function _decryptAndRender(docs){
-    // only attempt docs not already successfully decrypted
+    // Skip docs already in cache (successful decrypt or permanent failure string)
     const toDecrypt=docs.filter(d=>d.data().encrypted&&!_msgDecryptCache.has(cid+'|'+d.id));
     if(!toDecrypt.length) return;
     await Promise.all(toDecrypt.map(async d=>{
-      const plain=await E2EE.decrypt(uid,d.data());
-      if(plain!==null) _msgDecryptCache.set(cid+'|'+d.id,plain); // only cache successes
+      const result=await E2EE.decrypt(uid,d.data());
+      // null = transient failure (E2EE not ready yet) → don't cache, retry on next snapshot/e2ee-ready
+      // any string (plain text OR '🔒 …' permanent error) → cache so we stop retrying
+      if(result!==null) _msgDecryptCache.set(cid+'|'+d.id,result);
     }));
     if($("chatMsgs")) _renderChatDocs(docs);
   }
