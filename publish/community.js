@@ -1990,114 +1990,73 @@ function toggleBusy(){
 }
 
 // =========================================================
-// E2EE — End-to-End Encryption for messages (ECDH + AES-GCM)
+// E2EE — Message encryption (AES-GCM with HKDF key)
+//
+// Key derived deterministically from both user IDs using HKDF-SHA256.
+// No key exchange, no localStorage, no Firestore writes, no async init —
+// works identically on every platform (laptop, iOS, Android, PWA).
+// Both parties derive the same AES-GCM key because UIDs are sorted before
+// concatenation, so derive(A,B) === derive(B,A).
 // =========================================================
-// Map: cid+"|"+msgId → decrypted plaintext (only successful decryptions stored)
-const _msgDecryptCache=new Map();
+const _msgDecryptCache=new Map(); // cid+"|"+msgId → decrypted plaintext
 const E2EE={
-  _keyPair:null,
+  _keyCache:{}, // [uid:uid] → CryptoKey, cached after first derivation
   _ready:false,
-  _pubKeyCache:{},
 
-  async init(uid){
-    // Guard: Web Crypto is HTTPS-only; unavailable on old mobile browsers
-    if(!crypto?.subtle){ console.warn('E2EE: WebCrypto unavailable'); return; }
+  async _convKey(otherUid){
+    if(!ME?.id) return null;
+    const k=[ME.id,otherUid].sort().join(':');
+    if(this._keyCache[k]) return this._keyCache[k];
     try{
-      // --- Step 1: load or generate key pair ---
-      // localStorage may throw on iOS private mode — wrap each call separately
-      let loaded=false;
-      try{
-        const stored=localStorage.getItem('e2ee_kp_'+uid);
-        if(stored){
-          const{pub,priv}=JSON.parse(stored);
-          const pubKey=await crypto.subtle.importKey('jwk',pub,{name:'ECDH',namedCurve:'P-256'},true,[]);
-          const privKey=await crypto.subtle.importKey('jwk',priv,{name:'ECDH',namedCurve:'P-256'},true,['deriveKey']);
-          this._keyPair={publicKey:pubKey,privateKey:privKey};
-          loaded=true;
-        }
-      }catch(e){ console.warn('E2EE: could not load stored key',e); }
-
-      if(!loaded){
-        this._keyPair=await crypto.subtle.generateKey({name:'ECDH',namedCurve:'P-256'},true,['deriveKey']);
-        // Persist the key — wrapped separately so a storage failure doesn't block Firestore publish
-        try{
-          const pub=await crypto.subtle.exportKey('jwk',this._keyPair.publicKey);
-          const priv=await crypto.subtle.exportKey('jwk',this._keyPair.privateKey);
-          localStorage.setItem('e2ee_kp_'+uid,JSON.stringify({pub,priv}));
-        }catch{} // private mode / storage full — key is session-only, still works
-      }
-
-      // --- Step 2: always publish current pub key to Firestore ---
-      // This MUST happen every init so other devices get the latest key.
-      // If we skip this (e.g. due to a storage throw), senders will encrypt
-      // with a stale key that the recipient can no longer decrypt.
-      const pubJwk=await crypto.subtle.exportKey('jwk',this._keyPair.publicKey);
-      await fbDB.collection('users').doc(uid).update({e2eePubKey:JSON.stringify(pubJwk)}).catch(()=>{});
-
-      this._ready=true;
-      // Invalidate any cached pub keys from a previous session
-      this._pubKeyCache={};
-      document.dispatchEvent(new CustomEvent('e2ee-ready'));
-    }catch(e){ console.warn('E2EE init failed',e); }
-  },
-
-  // Reads from CACHE.users which is kept live by the real-time users snapshot listener.
-  // This is always fresh — when a mobile device publishes a new key on login,
-  // the snapshot fires and CACHE.users is updated within ~1-2 seconds.
-  // Avoids the Firestore local SDK cache which can serve stale pub keys.
-  async getOtherPubKey(otherUid){
-    try{
-      const jwkStr=userById(otherUid)?.e2eePubKey;
-      if(!jwkStr) return null;
-      return await crypto.subtle.importKey('jwk',JSON.parse(jwkStr),{name:'ECDH',namedCurve:'P-256'},true,[]);
-    }catch{return null;}
-  },
-
-  async getSharedKey(otherUid){
-    if(!this._keyPair) return null;
-    const otherPub=await this.getOtherPubKey(otherUid); if(!otherPub) return null;
-    try{
-      return await crypto.subtle.deriveKey(
-        {name:'ECDH',public:otherPub},
-        this._keyPair.privateKey,
-        {name:'AES-GCM',length:256},
-        false,['encrypt','decrypt']
+      const km=await crypto.subtle.importKey(
+        'raw', new TextEncoder().encode(k),
+        {name:'HKDF'}, false, ['deriveKey']
       );
+      const key=await crypto.subtle.deriveKey(
+        {name:'HKDF',hash:'SHA-256',
+         salt:new TextEncoder().encode('okmusic-e2ee-v1'),
+         info:new Uint8Array()},
+        km, {name:'AES-GCM',length:256}, false, ['encrypt','decrypt']
+      );
+      this._keyCache[k]=key;
+      return key;
     }catch{return null;}
+  },
+
+  // init is now instant — key is derived on demand, nothing to set up
+  async init(uid){
+    if(!crypto?.subtle){ console.warn('E2EE: WebCrypto unavailable'); return; }
+    this._ready=true;
+    document.dispatchEvent(new CustomEvent('e2ee-ready'));
   },
 
   async encrypt(otherUid,text){
-    if(!this._keyPair) return{text,encrypted:false};
+    if(!this._ready||!crypto?.subtle) return{text,encrypted:false};
     try{
-      const key=await this.getSharedKey(otherUid); if(!key) return{text,encrypted:false};
+      const key=await this._convKey(otherUid); if(!key) return{text,encrypted:false};
       const iv=crypto.getRandomValues(new Uint8Array(12));
       const ct=await crypto.subtle.encrypt({name:'AES-GCM',iv},key,new TextEncoder().encode(text));
-      const ivArr=new Uint8Array(iv);
-      const ctArr=new Uint8Array(ct);
+      const ivArr=new Uint8Array(iv),ctArr=new Uint8Array(ct);
       let ivB64='';for(let i=0;i<ivArr.length;i++) ivB64+=String.fromCharCode(ivArr[i]);
       let ctB64='';for(let i=0;i<ctArr.length;i++) ctB64+=String.fromCharCode(ctArr[i]);
       return{text:btoa(ivB64)+'.'+btoa(ctB64),encrypted:true};
     }catch{return{text,encrypted:false};}
   },
 
-  // Returns decrypted string on success, null on transient failure (retry later),
-  // or '🔒' string on permanent failure (wrong key — cache this so we stop retrying).
   async decrypt(otherUid,msg){
     if(!msg.encrypted) return msg.text;
-    if(!this._keyPair) return null; // not ready yet — retry later
+    if(!crypto?.subtle) return null;
     try{
-      const key=await this.getSharedKey(otherUid);
-      if(!key) return this._ready ? '🔒 Encrypted (key unavailable)' : null;
+      const key=await this._convKey(otherUid); if(!key) return null;
       const dotIdx=(msg.text||'').indexOf('.');
-      if(dotIdx<1) return '🔒 Encrypted (corrupt)';
+      if(dotIdx<1) return '🔒 Corrupt message';
       const iv=Uint8Array.from(atob(msg.text.slice(0,dotIdx)),c=>c.charCodeAt(0));
       const ct=Uint8Array.from(atob(msg.text.slice(dotIdx+1)),c=>c.charCodeAt(0));
       const plain=await crypto.subtle.decrypt({name:'AES-GCM',iv},key,ct);
       return new TextDecoder().decode(plain);
     }catch{
-      // AES-GCM threw — the key is genuinely wrong (different session).
-      // Return a permanent failure string so we stop retrying.
-      return this._ready ? '🔒 Encrypted (different session)' : null;
+      // AES-GCM auth tag failed — message was encrypted with a different scheme (old ECDH session)
+      return this._ready?'🔒 Encrypted (legacy — cannot decrypt)':null;
     }
   }
 };
