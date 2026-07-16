@@ -2041,12 +2041,14 @@ const E2EE={
     }catch(e){ console.warn('E2EE init failed',e); }
   },
 
-  // Always fetches from Firestore (no in-memory cache) so key changes are picked up immediately.
-  // Firestore's local SDK cache makes this fast after the first fetch.
+  // Reads from CACHE.users which is kept live by the real-time users snapshot listener.
+  // This is always fresh — when a mobile device publishes a new key on login,
+  // the snapshot fires and CACHE.users is updated within ~1-2 seconds.
+  // Avoids the Firestore local SDK cache which can serve stale pub keys.
   async getOtherPubKey(otherUid){
     try{
-      const snap=await fbDB.collection('users').doc(otherUid).get();
-      const jwkStr=snap.data()?.e2eePubKey; if(!jwkStr) return null;
+      const jwkStr=userById(otherUid)?.e2eePubKey;
+      if(!jwkStr) return null;
       return await crypto.subtle.importKey('jwk',JSON.parse(jwkStr),{name:'ECDH',namedCurve:'P-256'},true,[]);
     }catch{return null;}
   },
