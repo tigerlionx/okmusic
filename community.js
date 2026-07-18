@@ -1136,7 +1136,14 @@ function toggleFollow(uid){
     sendFollowRequest(uid);
     return;
   }
-  fbDB.collection("follows").doc(ME.id).set({following:F.arrayUnion(uid)},{merge:true}).then(()=>{ toast("You're now a fan ✓"); WALLET.credit(uid,5,'new_fan',`${ME.name} is now your fan`); checkFanMilestone(uid); }).catch(e=>toast(e.code||e.message));
+  fbDB.collection("follows").doc(ME.id).set({following:F.arrayUnion(uid)},{merge:true}).then(()=>{
+    toast("You're now a fan ✓");
+    const rewardRef=fbDB.collection('followRewards').doc(ME.id+'_'+uid);
+    fbDB.runTransaction(async t=>{
+      if((await t.get(rewardRef)).exists) throw new Error('already rewarded');
+      t.set(rewardRef,{followerId:ME.id,followeeId:uid,createdAt:Date.now()});
+    }).then(()=>{ WALLET.credit(uid,5,'new_fan',`${ME.name} is now your fan`); checkFanMilestone(uid); }).catch(()=>{});
+  }).catch(e=>toast(e.code||e.message));
   notify(uid,"follow",`${ME.name} is now one of your fans 🎉`);
 }
 function logout(){ fbAuth.signOut(); }
@@ -2223,16 +2230,27 @@ async function checkLoginReward(uid){
 async function checkFanMilestone(uid){
   const fans=followersOf(uid).filter(id=>!String(id).startsWith('u_')).length;
   const milestones=[10,100,1000,10000]; const rewards={10:100,100:500,1000:2000,10000:10000};
+  const F=firebase.firestore.FieldValue;
+  const wRef=fbDB.collection('wallets').doc(uid);
+  let rewarded=null;
   try{
-    const snap=await fbDB.collection('wallets').doc(uid).get();
-    const lastM=snap.exists?(snap.data().lastMilestone||0):0;
-    for(const m of milestones){
-      if(fans>=m&&lastM<m){
-        await WALLET.credit(uid,rewards[m],'fan_milestone',`Reached ${nfmt(m)} fans!`);
-        await fbDB.collection('wallets').doc(uid).update({lastMilestone:m}).catch(()=>{});
-        if(uid===ME?.id) toast(`+${rewards[m]} 🦁 You reached ${nfmt(m)} fans! 🎉`);
-        break;
+    await fbDB.runTransaction(async t=>{
+      rewarded=null;
+      const snap=await t.get(wRef);
+      const lastM=snap.exists?(snap.data().lastMilestone||0):0;
+      for(const m of milestones){
+        if(fans>=m&&lastM<m){
+          const amount=rewards[m];
+          if(!snap.exists) t.set(wRef,{balance:amount,totalEarned:amount,totalSpent:0,isPublic:false,streak:0,lastLoginDate:'',lastMilestone:m,createdAt:Date.now()});
+          else t.update(wRef,{balance:F.increment(amount),totalEarned:F.increment(amount),lastMilestone:m});
+          rewarded={m,amount};
+          break;
+        }
       }
+    });
+    if(rewarded){
+      fbDB.collection('wallets').doc(uid).collection('transactions').add({type:'fan_milestone',amount:rewarded.amount,description:`Reached ${nfmt(rewarded.m)} fans!`,ref:'',createdAt:Date.now()}).catch(()=>{});
+      if(uid===ME?.id) toast(`+${rewarded.amount} 🦁 You reached ${nfmt(rewarded.m)} fans! 🎉`);
     }
   }catch{}
 }
@@ -2264,14 +2282,29 @@ async function confirmLncBuy(productId){
   if(!ME) return;
   const p=CACHE.products.find(x=>x.id===productId); if(!p||!p.lncPrice) return;
   const lncPrice=parseInt(p.lncPrice); const fee=Math.round(lncPrice*0.05); const sellerAmount=lncPrice-fee;
-  const ok=await WALLET.debit(ME.id,lncPrice,'marketplace_buy',`Bought: ${p.title}`,productId);
-  if(!ok) return toast('Not enough LionCoins or transaction failed');
-  WALLET.credit(p.sellerId,sellerAmount,'marketplace_sale',`Sold: ${p.title}`,productId);
-  fbDB.collection('orders').add({buyerId:ME.id,buyerName:ME.name,buyerEmail:fbAuth.currentUser?.email||'',buyerAddress:'LNC purchase',
-    items:[{productId:p.id,title:p.title,price:0,shipping:0,sellerId:p.sellerId,lncPrice}],
-    subtotal:0,shipping:0,platformFee:0,total:0,lncAmount:lncPrice,status:'lnc_paid',createdAt:Date.now()
-  }).catch(()=>{});
-  closeOverlay(); toast(`Purchase complete! ${sellerAmount} LNC sent to seller 🦁`);
+  const F=firebase.firestore.FieldValue;
+  const buyerRef=fbDB.collection('wallets').doc(ME.id);
+  const sellerRef=fbDB.collection('wallets').doc(p.sellerId);
+  const now=Date.now(); let ok=false;
+  try{
+    await fbDB.runTransaction(async t=>{
+      const buyerSnap=await t.get(buyerRef); const sellerSnap=await t.get(sellerRef);
+      if(!buyerSnap.exists||(buyerSnap.data().balance||0)<lncPrice) throw new Error('Insufficient balance');
+      t.update(buyerRef,{balance:F.increment(-lncPrice),totalSpent:F.increment(lncPrice)});
+      if(!sellerSnap.exists) t.set(sellerRef,{balance:sellerAmount,totalEarned:sellerAmount,totalSpent:0,isPublic:false,streak:0,lastLoginDate:'',lastMilestone:0,createdAt:now});
+      else t.update(sellerRef,{balance:F.increment(sellerAmount),totalEarned:F.increment(sellerAmount)});
+      ok=true;
+    });
+    if(ok){
+      fbDB.collection('wallets').doc(ME.id).collection('transactions').add({type:'marketplace_buy',amount:-lncPrice,description:`Bought: ${p.title}`,ref:productId,createdAt:now}).catch(()=>{});
+      fbDB.collection('wallets').doc(p.sellerId).collection('transactions').add({type:'marketplace_sale',amount:sellerAmount,description:`Sold: ${p.title}`,ref:productId,createdAt:now}).catch(()=>{});
+      fbDB.collection('orders').add({buyerId:ME.id,buyerName:ME.name,buyerEmail:fbAuth.currentUser?.email||'',buyerAddress:'LNC purchase',
+        items:[{productId:p.id,title:p.title,price:0,shipping:0,sellerId:p.sellerId,lncPrice}],
+        subtotal:0,shipping:0,platformFee:0,total:0,lncAmount:lncPrice,status:'lnc_paid',createdAt:now
+      }).catch(()=>{});
+      closeOverlay(); toast(`Purchase complete! ${sellerAmount} LNC sent to seller 🦁`);
+    }
+  }catch(e){ toast('Not enough LionCoins or transaction failed'); }
 }
 
 function renderWallet(){
@@ -2312,6 +2345,7 @@ function renderWallet(){
       <div class="wallet-earn-row"><span>🏅 Reach 10 fans</span><span class="wallet-earn-amt">+100 LNC</span></div>
       <div class="wallet-earn-row"><span>🏅 Reach 100 fans</span><span class="wallet-earn-amt">+500 LNC</span></div>
       <div class="wallet-earn-row"><span>🏅 Reach 1,000 fans</span><span class="wallet-earn-amt">+2,000 LNC</span></div>
+      <div class="wallet-earn-row"><span>🏅 Reach 10,000 fans</span><span class="wallet-earn-amt">+10,000 LNC</span></div>
     </div>
     <div class="h-title" style="margin-top:24px">Transaction History</div>
     ${txs.length?`<div class="tx-list">${txs.map(tx=>`
@@ -2324,7 +2358,7 @@ function renderWallet(){
     :'<div class="empty">No transactions yet — start posting and uploading to earn LionCoins! 🦁</div>'}`;
   setTimeout(()=>{
     const chk=$('walletPublicChk');
-    if(chk) chk.onchange=async()=>{ await fbDB.collection('wallets').doc(ME.id).update({isPublic:chk.checked}).catch(()=>{}); toast(chk.checked?'Balance is now public 👁️':'Balance is now private 🔒'); };
+    if(chk) chk.onchange=async()=>{ await fbDB.collection('wallets').doc(ME.id).set({isPublic:chk.checked},{merge:true}).catch(()=>{}); toast(chk.checked?'Balance is now public 👁️':'Balance is now private 🔒'); };
   },0);
 }
 async function transferLNC(toUid,amount,note){

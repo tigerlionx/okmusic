@@ -612,8 +612,8 @@ body.has-page-bg .topbar{background:rgba(255,221,191,.45)}
 /* =========================================================
    LIONCOIN WALLET
    ========================================================= */
-.lnc-chip{display:inline-flex;align-items:center;gap:4px;background:rgba(251,122,40,.12);color:var(--orange);border-radius:99px;padding:4px 12px;font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap;transition:background .15s;}
-.lnc-chip:hover{background:rgba(251,122,40,.22);}
+.lnc-chip{display:inline-flex;align-items:center;gap:4px;background:rgba(255,255,255,.88);color:var(--orange-deep);border-radius:99px;padding:4px 12px;font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap;transition:background .15s;box-shadow:0 1px 4px rgba(180,100,30,.18);}
+.lnc-chip:hover{background:#fff;}
 .wallet-card{background:var(--card);border:1px solid var(--border);border-radius:18px;padding:28px 24px;text-align:center;margin-bottom:8px;}
 .wallet-coin-icon{font-size:48px;margin-bottom:8px;}
 .wallet-balance-num{font-size:52px;font-weight:800;color:var(--orange);line-height:1;}

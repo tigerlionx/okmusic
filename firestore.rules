@@ -134,8 +134,10 @@ service cloud.firestore {
         && request.resource.data.totalEarned >= resource.data.totalEarned
         && request.resource.data.totalSpent == resource.data.totalSpent;
       // Allow creating a wallet for a user who has none (first-time credit)
+      // balance must equal totalEarned — prevents minting arbitrary initial balances
       allow create: if signedIn() && request.auth.uid != uid
-        && request.resource.data.totalSpent == 0;
+        && request.resource.data.totalSpent == 0
+        && request.resource.data.balance == request.resource.data.totalEarned;
 
       match /transactions/{txId} {
         allow read: if signedIn() && request.auth.uid == uid;
@@ -150,6 +152,12 @@ service cloud.firestore {
         resource.data.fromUid == request.auth.uid ||
         resource.data.toUid == request.auth.uid
       );
+      allow update, delete: if false;
+    }
+
+    match /followRewards/{id} {
+      allow read: if signedIn();
+      allow create: if signedIn() && request.resource.data.followerId == request.auth.uid;
       allow update, delete: if false;
     }
 
