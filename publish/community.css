@@ -608,3 +608,32 @@ body.has-page-bg .topbar{background:rgba(255,221,191,.45)}
    FOLLOW REQUESTS
    ========================================================= */
 .tab .bell-badge{background:var(--orange);color:#fff;font-size:10px;font-weight:800;padding:1px 5px;border-radius:99px;}
+
+/* =========================================================
+   LIONCOIN WALLET
+   ========================================================= */
+.lnc-chip{display:inline-flex;align-items:center;gap:4px;background:rgba(251,122,40,.12);color:var(--orange);border-radius:99px;padding:4px 12px;font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap;transition:background .15s;}
+.lnc-chip:hover{background:rgba(251,122,40,.22);}
+.wallet-card{background:var(--card);border:1px solid var(--border);border-radius:18px;padding:28px 24px;text-align:center;margin-bottom:8px;}
+.wallet-coin-icon{font-size:48px;margin-bottom:8px;}
+.wallet-balance-num{font-size:52px;font-weight:800;color:var(--orange);line-height:1;}
+.wallet-balance-label{font-size:13px;color:var(--muted);margin-top:4px;margin-bottom:22px;}
+.wallet-stats-row{display:flex;align-items:center;gap:0;justify-content:center;}
+.wallet-stat{flex:1;}
+.wallet-stat-val{font-size:20px;font-weight:700;color:var(--text);}
+.wallet-stat-lbl{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-top:2px;}
+.wallet-stat-sep{width:1px;height:40px;background:var(--border);}
+.wallet-earn-grid{background:var(--card);border:1px solid var(--border);border-radius:12px;overflow:hidden;}
+.wallet-earn-row{display:flex;justify-content:space-between;align-items:center;padding:10px 16px;border-bottom:1px solid var(--border);font-size:13px;}
+.wallet-earn-row:last-child{border-bottom:none;}
+.wallet-earn-amt{font-weight:700;color:var(--orange);}
+.tx-list{border:1px solid var(--border);border-radius:12px;overflow:hidden;}
+.tx-row{display:flex;align-items:center;gap:10px;padding:10px 14px;border-bottom:1px solid var(--border);font-size:13px;}
+.tx-row:last-child{border-bottom:none;}
+.tx-icon{font-size:18px;flex-shrink:0;}
+.tx-desc{flex:1;color:var(--text);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.tx-time{color:var(--muted);font-size:11px;flex-shrink:0;}
+.tx-amount{font-weight:700;flex-shrink:0;margin-left:4px;}
+.tx-amount.pos{color:#22c55e;}
+.tx-amount.neg{color:#e74c3c;}
+.lnc-badge{display:inline-flex;align-items:center;gap:4px;background:rgba(251,122,40,.12);color:var(--orange);border-radius:20px;padding:3px 10px;font-size:12px;font-weight:700;}

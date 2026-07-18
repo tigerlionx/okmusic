@@ -104,7 +104,7 @@ let toastTimer; function toast(m){ const e=$("toast"); e.textContent=m; e.hidden
 // ---------- state ----------
 let ME=null;                                   // the signed-in user's profile (Firebase)
 // live shared data, kept in sync by Firestore listeners
-const CACHE={ users:{}, tracks:[], statuses:[], follows:{}, reactions:{}, comments:[], notifications:[], products:[], sellers:{}, orders:[], convos:{}, suggestions:[], followRequests:[] };
+const CACHE={ users:{}, tracks:[], statuses:[], follows:{}, reactions:{}, comments:[], notifications:[], products:[], sellers:{}, orders:[], convos:{}, suggestions:[], followRequests:[], wallet:null, walletTxs:[] };
 let state={ view:"discover", profileId:null, query:"", cart:JSON.parse(localStorage.getItem("okmusic_cart")||"[]") };
 function persistCart(){ try{ localStorage.setItem("okmusic_cart",JSON.stringify(state.cart||[])); }catch(e){} }
 let playMode="continuous"; // "continuous" | "repeat" | "shuffle"
@@ -320,6 +320,7 @@ function renderApp(){
     <div class="topbar">
       <div class="brand" data-action="nav" data-view="discover"><span class="l">◎</span><b>OK&nbsp;Music</b></div>
       <input class="search" id="search" placeholder="Search artists & tracks…" value="${esc(state.query)}" />
+      <div class="lnc-chip" data-action="nav" data-view="wallet" title="LionCoin balance">🦁 ${(CACHE.wallet?.balance||0).toLocaleString()} LNC</div>
       <div class="bell" data-action="nav" data-view="notifs" title="Notifications">🔔${(()=>{const n=(CACHE.notifications||[]).filter(x=>!x.read).length;return n?`<span class="bell-badge">${n>9?'9+':n}</span>`:'';})()}</div>
       <div class="me" data-action="profile" data-uid="${u.id}"><div class="avatar" style="${avatarStyle(u,34)}">${u.avatarImg?'':initials(u.name)}</div></div>
     </div>
@@ -332,6 +333,7 @@ function renderApp(){
         ${(()=>{const un=Object.values(CACHE.convos||{}).reduce((s,c)=>s+((c.unread||{})[ME?.id]||0),0);return`<div class="side-item ${state.view==='msgs'||state.view==='chat'?'active':''}" data-action="nav" data-view="msgs"><span class="ic">💬</span>Messages${un?`<span class="bell-badge" style="position:static;margin-left:6px">${un>9?'9+':un}</span>`:''}</div>`})()}
         <div class="side-item" data-action="profile" data-uid="${u.id}"><span class="ic">😊</span>My Page</div>
         ${item("fans","🫂","My Fans")}
+        ${item("wallet","🦁",`LionCoin${CACHE.wallet?.balance?` · ${(CACHE.wallet.balance).toLocaleString()}`:''}`)}
         ${item("mymusic","🎵","My Music")}
         <div class="side-sep"></div>
         <div class="side-item" data-action="sharefolder"><span class="ic">📁</span>Add a folder</div>
@@ -388,6 +390,7 @@ function renderMain(){
   if(state.view==="mystore") return renderSellerStore();
   if(state.view==="cart") return renderCart();
   if(state.view==="myorders") return renderMyOrders();
+  if(state.view==="wallet") return renderWallet();
   if(state.view==="admin"&&isAdmin()) return renderAdmin();
   renderDiscover();
 }
@@ -559,17 +562,18 @@ function statusCard(s){
 function postStatus(){
   const t=($("statusText").value||"").trim(); if(!t) return toast("Write something to share");
   if(!ME) return openEmailAuth();
-  fbDB.collection("statuses").add({ userId:ME.id, text:t, time:Date.now() }).then(()=>toast("Posted to your wall 📣")).catch(e=>toast("Couldn't post: "+(e.code||e.message)));
+  fbDB.collection("statuses").add({ userId:ME.id, text:t, time:Date.now() }).then(()=>{ toast("Posted to your wall 📣"); WALLET.credit(ME.id,3,'status_post','Status post'); }).catch(e=>toast("Couldn't post: "+(e.code||e.message)));
 }
 function stLike(id){ if(!ME) return openEmailAuth(); const F=firebase.firestore.FieldValue; const has=(CACHE.reactions["s_"+id]?.likes||[]).includes(ME.id);
   fbDB.collection("reactions").doc("s_"+id).set({ likes: has?F.arrayRemove(ME.id):F.arrayUnion(ME.id), dislikes:F.arrayRemove(ME.id) },{merge:true}).catch(e=>toast(e.code||e.message));
-  if(!has){ const s=allStatuses().find(x=>x.id===id); if(s) notify(s.userId,"like",`${ME.name} liked your post 👍`); } }
+  if(!has){ const s=allStatuses().find(x=>x.id===id); if(s){ notify(s.userId,"like",`${ME.name} liked your post 👍`); if(s.userId!==ME.id) WALLET.credit(s.userId,0.5,'reaction_received','Reaction on your post'); } } }
 function stDislike(id){ if(!ME) return openEmailAuth(); const F=firebase.firestore.FieldValue; const has=(CACHE.reactions["s_"+id]?.dislikes||[]).includes(ME.id);
   fbDB.collection("reactions").doc("s_"+id).set({ dislikes: has?F.arrayRemove(ME.id):F.arrayUnion(ME.id), likes:F.arrayRemove(ME.id) },{merge:true}).catch(e=>toast(e.code||e.message)); }
 function stComment(id){ const el=$("sc_"+id); const t=(el?.value||"").trim(); if(!t) return toast("Write a comment first");
   if(!ME) return openEmailAuth();
   fbDB.collection("comments").add({ statusId:id, uid:ME.id, name:ME.name, text:t, time:Date.now() }).catch(e=>toast(e.code||e.message));
-  const s=allStatuses().find(x=>x.id===id); if(s) notify(s.userId,"comment",`${ME.name} commented: "${t.slice(0,50)}"`); }
+  const s=allStatuses().find(x=>x.id===id);
+  if(s){ notify(s.userId,"comment",`${ME.name} commented: "${t.slice(0,50)}"`); WALLET.credit(ME.id,1,'comment_sent','Comment written'); if(s.userId!==ME.id) WALLET.credit(s.userId,2,'comment_received','Comment on your post'); } }
 function editComment(cid){
   const c=CACHE.comments.find(x=>x.id===cid); if(!c) return; if(!ME||c.uid!==ME.id) return;
   openOverlay(`<h2>✏️ Edit comment</h2>
@@ -600,7 +604,7 @@ function doDeleteComment(cid){ fbDB.collection("comments").doc(cid).delete().the
 // ---------- track like/dislike (music = reactions only) ----------
 function toggleLike(id){ if(!ME) return openEmailAuth(); const F=firebase.firestore.FieldValue; const has=(CACHE.reactions["t_"+id]?.likes||[]).includes(ME.id);
   fbDB.collection("reactions").doc("t_"+id).set({ likes: has?F.arrayRemove(ME.id):F.arrayUnion(ME.id), dislikes:F.arrayRemove(ME.id) },{merge:true}).catch(e=>toast(e.code||e.message));
-  if(!has){ const t=allTracks().find(x=>x.id===id); if(t) notify(t.userId,"like",`${ME.name} liked your track "${t.title}" 👍`); } }
+  if(!has){ const t=allTracks().find(x=>x.id===id); if(t){ notify(t.userId,"like",`${ME.name} liked your track "${t.title}" 👍`); if(t.userId!==ME.id) WALLET.credit(t.userId,0.5,'reaction_received','Reaction on your track'); } } }
 function toggleDislike(id){ if(!ME) return openEmailAuth(); const F=firebase.firestore.FieldValue; const has=(CACHE.reactions["t_"+id]?.dislikes||[]).includes(ME.id);
   fbDB.collection("reactions").doc("t_"+id).set({ dislikes: has?F.arrayRemove(ME.id):F.arrayUnion(ME.id), likes:F.arrayRemove(ME.id) },{merge:true}).catch(e=>toast(e.code||e.message)); }
 
@@ -789,6 +793,7 @@ async function doPublish(){
     .then(()=>{
       closeOverlay(); window._trackCover=null; window._audioFile=null;
       toast(isPublic?"Published! 🎵":"Saved private 🔒"); go("mymusic");
+      WALLET.credit(ME.id,10,'track_upload','Track uploaded: '+title);
       // Notify all followers about the new public track
       if(isPublic){
         const fans=followersOf(ME.id).filter(uid=>!String(uid).startsWith("u_"));
@@ -1097,7 +1102,7 @@ function toggleFollow(uid){
     sendFollowRequest(uid);
     return;
   }
-  fbDB.collection("follows").doc(ME.id).set({following:F.arrayUnion(uid)},{merge:true}).then(()=>toast("You're now a fan ✓")).catch(e=>toast(e.code||e.message));
+  fbDB.collection("follows").doc(ME.id).set({following:F.arrayUnion(uid)},{merge:true}).then(()=>{ toast("You're now a fan ✓"); WALLET.credit(uid,5,'new_fan',`${ME.name} is now your fan`); checkFanMilestone(uid); }).catch(e=>toast(e.code||e.message));
   notify(uid,"follow",`${ME.name} is now one of your fans 🎉`);
 }
 function logout(){ fbAuth.signOut(); }
@@ -1119,7 +1124,7 @@ function closeOverlay(){ if(activePc){endCall();return;} $("overlay").hidden=tru
 let hasSrc=false;
 function showPlayer(title,artist,accent,src){ $("miniplayer").classList.add("show"); $("mpArt").style.background=grad(accent); $("mpArt").textContent="◎"; $("mpTitle").textContent=title; $("mpArtist").textContent=artist;
   if(src){ hasSrc=true; audio.src=src; audio.play().then(()=>setPlaying(true)).catch(()=>setPlaying(false)); } else { hasSrc=false; setPlaying(true); } }
-async function playTrack(id){ const t=allTracks().find(x=>x.id===id); if(!t) return; const u=userById(t.userId); const d=db(); d.plays[id]=(d.plays[id]||0)+1; commit(d);
+async function playTrack(id){ const t=allTracks().find(x=>x.id===id); if(!t) return; const u=userById(t.userId); const d=db(); d.plays[id]=(d.plays[id]||0)+1; commit(d); logTrackView(id,t.userId);
   nowPlayingId=id;
   // Lock queue to the viewed profile or My Music — prevents bleed across users
   if(state.view==="profile"&&state.profileId) nowPlayingContext={uid:state.profileId};
@@ -1289,6 +1294,7 @@ function openProductForm(productId){
     <div class="field"><label>Category</label><select class="fb-field" id="prodCat">${MP_CATEGORIES.map(c=>`<option value="${c}" ${(p?.category||'Other')===c?'selected':''}>${c}</option>`).join("")}</select></div>
     <div class="field"><label>Price (USD)</label><input class="fb-field" id="prodPrice" type="number" min="0.01" step="0.01" placeholder="0.00" value="${p?.price||''}" /></div>
     <div class="field"><label>Shipping cost (USD)</label><input class="fb-field" id="prodShip" type="number" min="0" step="0.01" placeholder="0.00" value="${p?.shipping||''}" /></div>
+    <div class="field"><label>🦁 LionCoin price <span style="font-weight:400;color:var(--muted)">(optional — lets buyers pay with LNC)</span></label><input class="fb-field" id="prodLnc" type="number" min="1" step="1" placeholder="e.g. 500" value="${p?.lncPrice||''}" /></div>
     <div class="field"><label>Product photo</label>
       <div class="covup"><div class="covprev" id="prodPhotoPrev" style="${prevStyle}">${window._mpPhoto?'':'📦'}</div>
         <div><input type="file" id="prodPhotoFile" accept="image/*,.heic,.heif,.avif,.webp,.tiff,.bmp,.svg" /><div class="note" style="margin-top:4px">All photo formats supported (JPG, PNG, WEBP, HEIC, RAW…)</div></div></div></div>
@@ -1311,7 +1317,9 @@ async function doSaveProduct(productId){
       return toast("Photo upload failed: "+(e.message||e));
     }
   }
-  const data={ sellerId:ME.id, title, description, category, price, shipping, photos, updatedAt:Date.now() };
+  const lncPriceRaw=parseInt(($("prodLnc")||{value:""}).value)||0;
+  const lncPrice=lncPriceRaw>0?lncPriceRaw:null;
+  const data={ sellerId:ME.id, title, description, category, price, shipping, photos, ...(lncPrice?{lncPrice}:{lncPrice:null}), updatedAt:Date.now() };
   try{
     if(productId){ await fbDB.collection("products").doc(productId).update(data); closeOverlay(); toast("Product updated ✓"); }
     else{ data.createdAt=Date.now(); await fbDB.collection("products").add(data); closeOverlay(); toast("Product listed! 🎉"); }
@@ -1356,7 +1364,9 @@ function mpBuyerCard(p){
       <div class="mp-title" data-action="viewproduct" data-id="${p.id}">${esc(p.title)}</div>
       <div class="mp-seller-name">${esc(seller?.name||'Seller')} · ${esc(seller?.location||'')}</div>
       <div class="mp-price">$${parseFloat(p.price).toFixed(2)} <span class="mp-ship">+ $${parseFloat(p.shipping||0).toFixed(2)} ship</span></div>
+      ${p.lncPrice?`<div class="lnc-badge" style="margin:4px 0">🦁 ${p.lncPrice} LNC</div>`:''}
       <button class="btn sm ${inCart?'':'primary'}" data-action="addtocart" data-id="${p.id}" style="margin-top:8px;width:100%">${inCart?'In cart ✓':'Add to cart'}</button>
+      ${p.lncPrice?`<button class="btn sm" data-action="buywithlioncoin" data-id="${p.id}" style="margin-top:4px;width:100%">🦁 Buy with LNC</button>`:''}
     </div>
   </div>`;
 }
@@ -1372,6 +1382,7 @@ function viewProduct(id){
     <div class="mp-seller-card">👤 <b>${esc(seller?.name||'Unknown')}</b> · 📍 ${esc(seller?.location||'')}</div>
     <button class="btn ${inCart?'':'primary'} block" data-action="addtocart" data-id="${id}" style="margin-top:14px">${inCart?'✓ In cart — remove':'🛒 Add to cart'}</button>
     ${inCart?`<button class="btn primary block" data-action="nav" data-view="cart" style="margin-top:8px">Go to cart →</button>`:''}
+    ${p.lncPrice?`<div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border)"><div class="lnc-badge" style="margin-bottom:8px">🦁 ${p.lncPrice} LNC</div><button class="btn block" data-action="buywithlioncoin" data-id="${id}" style="margin-top:4px">🦁 Buy with LionCoin</button></div>`:''}
   </div>`);
 }
 function zoomPhoto(src){
@@ -2082,6 +2093,8 @@ async function acceptFollowRequest(fromUid,reqId){
     await fbDB.collection('follows').doc(fromUid).set({following:F.arrayUnion(ME.id)},{merge:true});
     await fbDB.collection('followRequests').doc(reqId).delete();
     notify(fromUid,'follow',`${ME.name} accepted your fan request 🎉`);
+    WALLET.credit(ME.id,5,'new_fan',`New fan: ${userById(fromUid)?.name||fromUid}`);
+    checkFanMilestone(ME.id);
     toast('Fan request accepted ✓');
   }catch(e){toast(e.message||'Error');}
 }
@@ -2101,6 +2114,185 @@ async function removeFan(fanUid){
     toast('Fan removed');
   }catch(e){toast(e.message||'Error');}
 }
+
+// ============ LIONCOIN WALLET ============
+const WALLET={
+  async credit(uid,amount,type,description,ref=''){
+    if(!uid||amount<=0) return;
+    const F=firebase.firestore.FieldValue;
+    const wRef=fbDB.collection('wallets').doc(uid);
+    try{
+      await fbDB.runTransaction(async t=>{
+        const snap=await t.get(wRef);
+        if(!snap.exists) t.set(wRef,{balance:amount,totalEarned:amount,totalSpent:0,isPublic:false,streak:0,lastLoginDate:'',lastMilestone:0,createdAt:Date.now()});
+        else t.update(wRef,{balance:F.increment(amount),totalEarned:F.increment(amount)});
+      });
+      fbDB.collection('wallets').doc(uid).collection('transactions').add({type,amount,description,ref,createdAt:Date.now()}).catch(()=>{});
+    }catch(e){console.warn('WALLET.credit',e);}
+  },
+  async debit(uid,amount,type,description,ref=''){
+    if(!uid||amount<=0) return false;
+    const F=firebase.firestore.FieldValue;
+    const wRef=fbDB.collection('wallets').doc(uid);
+    let ok=false;
+    try{
+      await fbDB.runTransaction(async t=>{
+        const snap=await t.get(wRef);
+        if(!snap.exists||(snap.data().balance||0)<amount) throw new Error('Insufficient balance');
+        t.update(wRef,{balance:F.increment(-amount),totalSpent:F.increment(amount)});
+        ok=true;
+      });
+      if(ok) fbDB.collection('wallets').doc(uid).collection('transactions').add({type,amount:-amount,description,ref,createdAt:Date.now()}).catch(()=>{});
+    }catch(e){console.warn('WALLET.debit',e);}
+    return ok;
+  }
+};
+
+async function logTrackView(trackId,authorUid){
+  if(!ME||!authorUid||ME.id===authorUid) return;
+  const today=new Date().toISOString().slice(0,10);
+  const logRef=fbDB.collection('viewLogs').doc(trackId+'_'+ME.id+'_'+today);
+  try{
+    await fbDB.runTransaction(async t=>{
+      if((await t.get(logRef)).exists) throw new Error('already viewed');
+      t.set(logRef,{trackId,viewerUid:ME.id,authorUid,date:today,createdAt:Date.now()});
+    });
+    WALLET.credit(authorUid,1,'track_view','Track view',trackId);
+  }catch{}
+}
+
+async function checkLoginReward(uid){
+  const today=new Date().toISOString().slice(0,10);
+  const F=firebase.firestore.FieldValue;
+  const wRef=fbDB.collection('wallets').doc(uid);
+  try{
+    let newStreak=1; let credited=false;
+    await fbDB.runTransaction(async t=>{
+      const snap=await t.get(wRef); const d=snap.exists?snap.data():{};
+      if(d.lastLoginDate===today) return;
+      const yesterday=new Date(Date.now()-86400000).toISOString().slice(0,10);
+      newStreak=d.lastLoginDate===yesterday?(d.streak||0)+1:1;
+      const upd={balance:F.increment(2),totalEarned:F.increment(2),streak:newStreak,lastLoginDate:today};
+      if(snap.exists) t.update(wRef,upd);
+      else t.set(wRef,{...upd,totalSpent:0,isPublic:false,lastMilestone:0,createdAt:Date.now()});
+      credited=true;
+    });
+    if(credited){
+      fbDB.collection('wallets').doc(uid).collection('transactions').add({type:'daily_login',amount:2,description:'Daily login',ref:'',createdAt:Date.now()}).catch(()=>{});
+      setTimeout(()=>toast('+2 🦁 Daily login!'),1200);
+      if(newStreak===7){ await WALLET.credit(uid,50,'streak_7','7-day streak bonus 🔥'); setTimeout(()=>toast('+50 🦁 7-day streak! 🔥'),2000); }
+      else if(newStreak===30){ await WALLET.credit(uid,300,'streak_30','30-day streak bonus 🏆'); setTimeout(()=>toast('+300 🦁 30-day streak! 🏆'),2000); }
+    }
+  }catch(e){console.warn('login reward',e);}
+}
+
+async function checkFanMilestone(uid){
+  const fans=followersOf(uid).filter(id=>!String(id).startsWith('u_')).length;
+  const milestones=[10,100,1000,10000]; const rewards={10:100,100:500,1000:2000,10000:10000};
+  try{
+    const snap=await fbDB.collection('wallets').doc(uid).get();
+    const lastM=snap.exists?(snap.data().lastMilestone||0):0;
+    for(const m of milestones){
+      if(fans>=m&&lastM<m){
+        await WALLET.credit(uid,rewards[m],'fan_milestone',`Reached ${nfmt(m)} fans!`);
+        await fbDB.collection('wallets').doc(uid).update({lastMilestone:m}).catch(()=>{});
+        if(uid===ME?.id) toast(`+${rewards[m]} 🦁 You reached ${nfmt(m)} fans! 🎉`);
+        break;
+      }
+    }
+  }catch{}
+}
+
+async function buyWithLNC(productId){
+  if(!ME) return openEmailAuth();
+  const p=CACHE.products.find(x=>x.id===productId); if(!p||!p.lncPrice) return;
+  const lncPrice=parseInt(p.lncPrice); const bal=CACHE.wallet?.balance||0;
+  if(bal<lncPrice) return toast(`Not enough LionCoins — need ${lncPrice} LNC, you have ${Math.floor(bal)} LNC`);
+  const fee=Math.round(lncPrice*0.05); const sellerAmount=lncPrice-fee;
+  openOverlay(`<div style="text-align:center;padding:8px">
+    <div style="font-size:40px;margin-bottom:8px">🦁</div>
+    <h2>Buy with LionCoin</h2>
+    <p class="sub" style="margin:10px 0">${esc(p.title)}</p>
+    <div class="cart-summary" style="margin:14px 0">
+      <div class="cart-line"><span>Price</span><span>${lncPrice} LNC</span></div>
+      <div class="cart-line"><span>Platform fee (5%)</span><span>${fee} LNC</span></div>
+      <div class="cart-line cart-total"><span>Total</span><span>${lncPrice} LNC</span></div>
+    </div>
+    <p class="sub" style="margin-bottom:16px">Your balance: <b>${Math.floor(bal)} LNC</b></p>
+    <div style="display:flex;gap:10px">
+      <button class="btn block" data-action="close">Cancel</button>
+      <button class="btn primary block" data-action="confirmlncbuy" data-id="${productId}">Confirm purchase</button>
+    </div>
+  </div>`);
+}
+
+async function confirmLncBuy(productId){
+  if(!ME) return;
+  const p=CACHE.products.find(x=>x.id===productId); if(!p||!p.lncPrice) return;
+  const lncPrice=parseInt(p.lncPrice); const fee=Math.round(lncPrice*0.05); const sellerAmount=lncPrice-fee;
+  const ok=await WALLET.debit(ME.id,lncPrice,'marketplace_buy',`Bought: ${p.title}`,productId);
+  if(!ok) return toast('Not enough LionCoins or transaction failed');
+  WALLET.credit(p.sellerId,sellerAmount,'marketplace_sale',`Sold: ${p.title}`,productId);
+  fbDB.collection('orders').add({buyerId:ME.id,buyerName:ME.name,buyerEmail:fbAuth.currentUser?.email||'',buyerAddress:'LNC purchase',
+    items:[{productId:p.id,title:p.title,price:0,shipping:0,sellerId:p.sellerId,lncPrice}],
+    subtotal:0,shipping:0,platformFee:0,total:0,lncAmount:lncPrice,status:'lnc_paid',createdAt:Date.now()
+  }).catch(()=>{});
+  closeOverlay(); toast(`Purchase complete! ${sellerAmount} LNC sent to seller 🦁`);
+}
+
+function renderWallet(){
+  const w=CACHE.wallet||{}; const bal=w.balance||0; const earned=w.totalEarned||0; const spent=w.totalSpent||0; const streak=w.streak||0;
+  const txs=CACHE.walletTxs||[];
+  const typeIcon={track_view:'🎵',track_upload:'⬆️',status_post:'📝',comment_sent:'💬',comment_received:'💬',reaction_received:'👍',new_fan:'🫂',fan_milestone:'🏆',daily_login:'🌅',streak_7:'🔥',streak_30:'🏆',marketplace_buy:'🛍️',marketplace_sale:'💰'};
+  $("page").innerHTML=`
+    <div class="h-title">🦁 LionCoin Wallet</div>
+    <div class="wallet-card">
+      <div class="wallet-coin-icon">🦁</div>
+      <div class="wallet-balance-num">${Math.floor(bal).toLocaleString()}</div>
+      <div class="wallet-balance-label">LionCoins</div>
+      <div class="wallet-stats-row">
+        <div class="wallet-stat"><div class="wallet-stat-val">${Math.floor(earned).toLocaleString()}</div><div class="wallet-stat-lbl">Earned</div></div>
+        <div class="wallet-stat-sep"></div>
+        <div class="wallet-stat"><div class="wallet-stat-val">${Math.floor(spent).toLocaleString()}</div><div class="wallet-stat-lbl">Spent</div></div>
+        <div class="wallet-stat-sep"></div>
+        <div class="wallet-stat"><div class="wallet-stat-val">${streak}</div><div class="wallet-stat-lbl">Day streak 🔥</div></div>
+      </div>
+      <div class="sset-row" style="padding-top:14px;border-top:1px solid var(--border);margin-top:14px">
+        <div><div class="sset-name" style="font-size:13px">Make balance public</div><div class="sset-hint">Others can see your balance on your profile</div></div>
+        <label class="stoggle"><input type="checkbox" id="walletPublicChk" ${w.isPublic?'checked':''}><span class="stoggle-sl"></span></label>
+      </div>
+    </div>
+    <div class="h-title" style="margin-top:24px">How to earn LionCoins</div>
+    <div class="wallet-earn-grid">
+      <div class="wallet-earn-row"><span>🎵 Track view (unique per day)</span><span class="wallet-earn-amt">+1 LNC</span></div>
+      <div class="wallet-earn-row"><span>⬆️ Upload a track</span><span class="wallet-earn-amt">+10 LNC</span></div>
+      <div class="wallet-earn-row"><span>📝 Post a status</span><span class="wallet-earn-amt">+3 LNC</span></div>
+      <div class="wallet-earn-row"><span>💬 Write a comment</span><span class="wallet-earn-amt">+1 LNC</span></div>
+      <div class="wallet-earn-row"><span>💬 Receive a comment</span><span class="wallet-earn-amt">+2 LNC</span></div>
+      <div class="wallet-earn-row"><span>👍 Receive a reaction</span><span class="wallet-earn-amt">+0.5 LNC</span></div>
+      <div class="wallet-earn-row"><span>🫂 New fan follows you</span><span class="wallet-earn-amt">+5 LNC</span></div>
+      <div class="wallet-earn-row"><span>🌅 Daily login</span><span class="wallet-earn-amt">+2 LNC</span></div>
+      <div class="wallet-earn-row"><span>🔥 7-day login streak</span><span class="wallet-earn-amt">+50 LNC</span></div>
+      <div class="wallet-earn-row"><span>🏆 30-day login streak</span><span class="wallet-earn-amt">+300 LNC</span></div>
+      <div class="wallet-earn-row"><span>🏅 Reach 10 fans</span><span class="wallet-earn-amt">+100 LNC</span></div>
+      <div class="wallet-earn-row"><span>🏅 Reach 100 fans</span><span class="wallet-earn-amt">+500 LNC</span></div>
+      <div class="wallet-earn-row"><span>🏅 Reach 1,000 fans</span><span class="wallet-earn-amt">+2,000 LNC</span></div>
+    </div>
+    <div class="h-title" style="margin-top:24px">Transaction History</div>
+    ${txs.length?`<div class="tx-list">${txs.map(tx=>`
+      <div class="tx-row">
+        <span class="tx-icon">${typeIcon[tx.type]||'🦁'}</span>
+        <span class="tx-desc">${esc(tx.description)}</span>
+        <span class="tx-time">${timeAgo(tx.createdAt)}</span>
+        <span class="tx-amount ${tx.amount>0?'pos':'neg'}">${tx.amount>0?'+':''}${tx.amount} LNC</span>
+      </div>`).join('')}</div>`
+    :'<div class="empty">No transactions yet — start posting and uploading to earn LionCoins! 🦁</div>'}`;
+  setTimeout(()=>{
+    const chk=$('walletPublicChk');
+    if(chk) chk.onchange=async()=>{ await fbDB.collection('wallets').doc(ME.id).update({isPublic:chk.checked}).catch(()=>{}); toast(chk.checked?'Balance is now public 👁️':'Balance is now private 🔒'); };
+  },0);
+}
+// ============ END LIONCOIN ============
 
 async function blockUser(targetUid){
   if(!ME||targetUid===ME.id) return;
@@ -2355,7 +2547,9 @@ document.addEventListener("click",e=>{
     togglebusy:toggleBusy,
     acceptfollow:()=>acceptFollowRequest(el.dataset.fromuid,el.dataset.reqid),
     rejectfollow:()=>rejectFollowRequest(el.dataset.fromuid,el.dataset.reqid),
-    removefan:()=>removeFan(el.dataset.uid)
+    removefan:()=>removeFan(el.dataset.uid),
+    buywithlioncoin:()=>buyWithLNC(el.dataset.id),
+    confirmlncbuy:()=>confirmLncBuy(el.dataset.id)
   };
   if(M[a]) M[a]();
 });
@@ -3060,6 +3254,10 @@ function startAuthListeners(uid){
   // follow requests (incoming: someone wants to follow me)
   fbDB.collection("followRequests").where("toUid","==",uid).where("status","==","pending")
     .onSnapshot(s=>{ CACHE.followRequests=s.docs.map(d=>({ id:d.id, ...d.data() })); scheduleRender(); }, e=>console.warn("followRequests",e.code));
+  // LionCoin wallet
+  fbDB.collection("wallets").doc(uid).onSnapshot(s=>{ CACHE.wallet=s.exists?{ id:s.id,...s.data() }:null; scheduleRender(); }, e=>console.warn("wallet",e.code));
+  fbDB.collection("wallets").doc(uid).collection("transactions").orderBy("createdAt","desc").limit(60)
+    .onSnapshot(s=>{ CACHE.walletTxs=s.docs.map(d=>({ id:d.id,...d.data() })); scheduleRender(); }, e=>console.warn("walletTxs",e.code));
   // suggestions (admin only)
   if(fbAuth.currentUser?.email===ADMIN_EMAIL){
     fbDB.collection("suggestions").orderBy("time","desc").limit(50).onSnapshot(s=>{ CACHE.suggestions=s.docs.map(d=>({ id:d.id, ...d.data() })); scheduleRender(); }, e=>console.warn("suggestions",e.code));
@@ -3090,7 +3288,7 @@ fbAuth.onAuthStateChanged(async (user)=>{
   if(user){
     const prof=await loadProfile(user.uid);
     startAuthListeners(user.uid);
-    if(prof){ ME=prof; syncME(); startMyNotifications(); listenForIncomingCalls(); initPushNotifications(); render(); handleLoginSecurity(user.uid); initPresence(user.uid); E2EE.init(user.uid); }
+    if(prof){ ME=prof; syncME(); startMyNotifications(); listenForIncomingCalls(); initPushNotifications(); render(); handleLoginSecurity(user.uid); initPresence(user.uid); E2EE.init(user.uid); checkLoginReward(user.uid); }
     else { ME={ id:user.uid, name:user.displayName||"" }; render(); }   // no profile yet → onboarding
   } else {
     if(_presenceInterval){clearInterval(_presenceInterval);_presenceInterval=null;}
