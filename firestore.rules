@@ -125,13 +125,32 @@ service cloud.firestore {
 
     match /wallets/{uid} {
       allow read: if signedIn() && (request.auth.uid == uid || resource.data.isPublic == true);
+      // Owner has full control of their own wallet
       allow create, update: if signedIn() && request.auth.uid == uid;
+      // Any signed-in user can credit another wallet (P2P transfer / rewards)
+      // Guard: balance & totalEarned can only increase; totalSpent must stay the same
+      allow update: if signedIn() && request.auth.uid != uid
+        && request.resource.data.balance >= resource.data.balance
+        && request.resource.data.totalEarned >= resource.data.totalEarned
+        && request.resource.data.totalSpent == resource.data.totalSpent;
+      // Allow creating a wallet for a user who has none (first-time credit)
+      allow create: if signedIn() && request.auth.uid != uid
+        && request.resource.data.totalSpent == 0;
 
       match /transactions/{txId} {
         allow read: if signedIn() && request.auth.uid == uid;
         allow create: if signedIn();
         allow update, delete: if false;
       }
+    }
+
+    match /transfers/{id} {
+      allow create: if signedIn() && request.resource.data.fromUid == request.auth.uid;
+      allow read: if signedIn() && (
+        resource.data.fromUid == request.auth.uid ||
+        resource.data.toUid == request.auth.uid
+      );
+      allow update, delete: if false;
     }
 
     match /viewLogs/{logId} {

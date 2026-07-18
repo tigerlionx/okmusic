@@ -449,6 +449,7 @@ function renderProfile(uid){
     ? `<button class="btn primary" data-action="customize">🎨 Edit profile</button><button class="btn" data-action="invite">✉️ Invite</button><button class="btn" data-action="settings">⚙️ Settings</button>`
     : `${(()=>{const following=isFollowing(uid);const requested=!following&&(CACHE.followRequests||[]).some(r=>r.fromUid===ME?.id&&r.toUid===uid&&r.status==='pending');return`<button class="btn ${following?'':'primary'}" data-action="follow" data-uid="${uid}">${following?'Following ✓':requested?'Requested ↗':'Follow'}</button>`;})()}
        ${!blocked&&canMessage(uid)?`<button class="btn" data-action="openchat" data-uid="${uid}">💬 Message</button>`:''}
+       ${!blocked?`<button class="btn" data-action="sendlnc" data-uid="${uid}">🦁 Send LNC</button>`:''}
        <button class="btn" data-action="blockuser" data-uid="${uid}" style="${blocked?'background:#e2554f;color:#fff;border-color:#e2554f':''}">${blocked?'🚫 Blocked':'🚫 Block'}</button>
        <button class="btn" data-action="reportuser" data-uid="${uid}">⚑ Report</button>`;
   // Private profile gate
@@ -2243,7 +2244,7 @@ async function confirmLncBuy(productId){
 function renderWallet(){
   const w=CACHE.wallet||{}; const bal=w.balance||0; const earned=w.totalEarned||0; const spent=w.totalSpent||0; const streak=w.streak||0;
   const txs=CACHE.walletTxs||[];
-  const typeIcon={track_view:'🎵',track_upload:'⬆️',status_post:'📝',comment_sent:'💬',comment_received:'💬',reaction_received:'👍',new_fan:'🫂',fan_milestone:'🏆',daily_login:'🌅',streak_7:'🔥',streak_30:'🏆',marketplace_buy:'🛍️',marketplace_sale:'💰'};
+  const typeIcon={track_view:'🎵',track_upload:'⬆️',status_post:'📝',comment_sent:'💬',comment_received:'💬',reaction_received:'👍',new_fan:'🫂',fan_milestone:'🏆',daily_login:'🌅',streak_7:'🔥',streak_30:'🏆',marketplace_buy:'🛍️',marketplace_sale:'💰',transfer_sent:'💸',transfer_received:'💰'};
   $("page").innerHTML=`
     <div class="h-title">🦁 LionCoin Wallet</div>
     <div class="wallet-card">
@@ -2261,6 +2262,7 @@ function renderWallet(){
         <div><div class="sset-name" style="font-size:13px">Make balance public</div><div class="sset-hint">Others can see your balance on your profile</div></div>
         <label class="stoggle"><input type="checkbox" id="walletPublicChk" ${w.isPublic?'checked':''}><span class="stoggle-sl"></span></label>
       </div>
+      <button class="btn primary block" data-action="sendlnc" style="margin-top:16px;font-size:15px">💸 Send LionCoins</button>
     </div>
     <div class="h-title" style="margin-top:24px">How to earn LionCoins</div>
     <div class="wallet-earn-grid">
@@ -2291,6 +2293,85 @@ function renderWallet(){
     const chk=$('walletPublicChk');
     if(chk) chk.onchange=async()=>{ await fbDB.collection('wallets').doc(ME.id).update({isPublic:chk.checked}).catch(()=>{}); toast(chk.checked?'Balance is now public 👁️':'Balance is now private 🔒'); };
   },0);
+}
+async function transferLNC(toUid,amount,note){
+  if(!ME||!toUid||ME.id===toUid||amount<=0) return false;
+  const F=firebase.firestore.FieldValue;
+  const fromRef=fbDB.collection('wallets').doc(ME.id);
+  const toRef=fbDB.collection('wallets').doc(toUid);
+  const now=Date.now(); let ok=false;
+  try{
+    await fbDB.runTransaction(async t=>{
+      const fromSnap=await t.get(fromRef); const toSnap=await t.get(toRef);
+      if(!fromSnap.exists||(fromSnap.data().balance||0)<amount) throw new Error('Insufficient balance');
+      t.update(fromRef,{balance:F.increment(-amount),totalSpent:F.increment(amount)});
+      if(!toSnap.exists) t.set(toRef,{balance:amount,totalEarned:amount,totalSpent:0,isPublic:false,streak:0,lastLoginDate:'',lastMilestone:0,createdAt:now});
+      else t.update(toRef,{balance:F.increment(amount),totalEarned:F.increment(amount)});
+      ok=true;
+    });
+    if(ok){
+      const toUser=userById(toUid);
+      const sendDesc=`Sent to ${toUser?.name||toUid}${note?' — '+note:''}`;
+      const recvDesc=`From ${ME.name}${note?' — '+note:''}`;
+      fbDB.collection('wallets').doc(ME.id).collection('transactions').add({type:'transfer_sent',amount:-amount,description:sendDesc,ref:toUid,createdAt:now}).catch(()=>{});
+      fbDB.collection('wallets').doc(toUid).collection('transactions').add({type:'transfer_received',amount,description:recvDesc,ref:ME.id,createdAt:now}).catch(()=>{});
+      fbDB.collection('transfers').add({fromUid:ME.id,toUid,amount,note:note||'',createdAt:now}).catch(()=>{});
+      notify(toUid,'transfer',`🦁 ${ME.name} sent you ${amount} LionCoin${amount>1?'s':''}${note?' — "'+note+'"':''}`);
+    }
+  }catch(e){console.warn('transferLNC',e);}
+  return ok;
+}
+
+function openSendLNC(toUid){
+  if(!ME) return openEmailAuth();
+  const myBal=Math.floor(CACHE.wallet?.balance||0);
+  if(toUid){
+    const u=userById(toUid); if(!u) return toast('User not found');
+    openOverlay(`<h2>🦁 Send LionCoins</h2>
+      <div class="mrow2" style="padding:12px 0;border-bottom:1px solid var(--border);margin-bottom:14px">
+        <div style="display:flex;align-items:center;gap:10px">
+          <div class="avatar" style="${avatarStyle(u,40)}">${u.avatarImg?'':initials(u.name)}</div>
+          <div><div style="font-weight:700">${esc(u.name)}</div><div style="font-size:12px;color:var(--muted)">@${esc(u.handle||'')}</div></div>
+        </div>
+        <div style="text-align:right"><div class="lnc-badge">🦁 ${myBal} LNC</div><div style="font-size:11px;color:var(--muted);margin-top:2px">your balance</div></div>
+      </div>
+      <div class="field"><label>Amount (LNC)</label><input class="fb-field" id="lncAmt" type="number" min="1" max="${myBal}" placeholder="e.g. 50" /></div>
+      <div class="field"><label>Note <span style="font-weight:400;color:var(--muted)">(optional)</span></label><input class="fb-field" id="lncNote" placeholder="Thanks for the collab!" maxlength="100" /></div>
+      <div style="display:flex;gap:10px;margin-top:8px">
+        <button class="btn block" data-action="close">Cancel</button>
+        <button class="btn primary block" data-action="confirmsendlnc" data-uid="${toUid}">Send 🦁</button>
+      </div>`);
+    setTimeout(()=>$('lncAmt')?.focus(),50);
+  } else {
+    const following=followingOf(ME.id).map(id=>userById(id)).filter(u=>u&&!String(u.id).startsWith('u_'));
+    openOverlay(`<h2>🦁 Send LionCoins</h2>
+      <div class="lnc-badge" style="margin-bottom:14px">Your balance: ${myBal} LNC</div>
+      <div class="field"><input class="fb-field" id="lncUserSearch" placeholder="Search by name or @handle…" /></div>
+      <div id="lncUserList" style="max-height:260px;overflow-y:auto;margin-top:4px">
+        ${following.length?following.map(u=>`
+          <div class="mrow2 lnc-pick" data-action="sendlnctouser" data-uid="${u.id}">
+            <div class="avatar" style="${avatarStyle(u,38)}">${u.avatarImg?'':initials(u.name)}</div>
+            <div class="minfo"><div class="mt">${esc(u.name)}</div><div class="ms">@${esc(u.handle||'')}</div></div>
+            <span style="color:var(--orange);font-size:12px">Select →</span>
+          </div>`).join(''):'<div class="empty">Follow someone to send them LNC</div>'}
+      </div>`);
+    setTimeout(()=>{
+      const s=$('lncUserSearch');
+      if(s) s.oninput=()=>{ const q=s.value.toLowerCase(); document.querySelectorAll('.lnc-pick').forEach(el=>{ const t=el.innerText.toLowerCase(); el.style.display=t.includes(q)?'':'none'; }); };
+    },50);
+  }
+}
+
+async function confirmSendLNC(toUid){
+  const amount=parseInt($('lncAmt')?.value||'0');
+  const note=($('lncNote')?.value||'').trim();
+  if(!amount||amount<1) return toast('Enter an amount');
+  if(amount>Math.floor(CACHE.wallet?.balance||0)) return toast('Not enough LionCoins');
+  const btn=document.querySelector('[data-action="confirmsendlnc"]');
+  if(btn){btn.disabled=true;btn.textContent='Sending…';}
+  const ok=await transferLNC(toUid,amount,note);
+  if(ok){ closeOverlay(); toast(`🦁 ${amount} LNC sent to ${userById(toUid)?.name||'them'}!`); }
+  else{ if(btn){btn.disabled=false;btn.textContent='Send 🦁';} toast('Transfer failed — check your balance'); }
 }
 // ============ END LIONCOIN ============
 
@@ -2549,7 +2630,10 @@ document.addEventListener("click",e=>{
     rejectfollow:()=>rejectFollowRequest(el.dataset.fromuid,el.dataset.reqid),
     removefan:()=>removeFan(el.dataset.uid),
     buywithlioncoin:()=>buyWithLNC(el.dataset.id),
-    confirmlncbuy:()=>confirmLncBuy(el.dataset.id)
+    confirmlncbuy:()=>confirmLncBuy(el.dataset.id),
+    sendlnc:()=>openSendLNC(el.dataset.uid||null),
+    sendlnctouser:()=>{ closeOverlay(); openSendLNC(el.dataset.uid); },
+    confirmsendlnc:()=>confirmSendLNC(el.dataset.uid)
   };
   if(M[a]) M[a]();
 });

@@ -637,3 +637,5 @@ body.has-page-bg .topbar{background:rgba(255,221,191,.45)}
 .tx-amount.pos{color:#22c55e;}
 .tx-amount.neg{color:#e74c3c;}
 .lnc-badge{display:inline-flex;align-items:center;gap:4px;background:rgba(251,122,40,.12);color:var(--orange);border-radius:20px;padding:3px 10px;font-size:12px;font-weight:700;}
+.lnc-pick{cursor:pointer;padding:8px;border-radius:8px;transition:background .12s;}
+.lnc-pick:hover{background:var(--orange-1);}
