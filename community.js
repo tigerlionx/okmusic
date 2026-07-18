@@ -206,7 +206,7 @@ async function finishOnboard(){
     await fbDB.collection("users").doc(uid).set(prof);
     ME={ id:uid, ...prof }; syncME(); closeOverlay();
     // Send welcome notification
-    fbDB.collection("notifications").add({ forUid:uid, type:"welcome", fromUid:"platform", fromName:"OK Music", text:"👋 Welcome to OK Music! Tap here for your complete guide — music, chat, calls, marketplace & more.", time:Date.now(), read:false }).catch(()=>{});
+    fbDB.collection("notifications").add({ forUid:uid, type:"welcome", fromUid:"platform", fromName:"OK Music", text:"👋 Welcome to OK Music! Share your music, grow your fanbase, chat securely, call for free, sell in the Marketplace — and earn 🦁 LionCoins for everything you do. Tap to read the full guide.", time:Date.now(), read:false }).catch(()=>{});
     showWelcomeGuide(name);
   }catch(e){ toast("Couldn't save profile: "+(e.code||e.message)); }
 }
@@ -216,31 +216,31 @@ function showWelcomeGuide(name){
     <div class="wg-header">
       <div style="font-size:36px">🎵</div>
       <h2>Welcome to OK Music, ${esc(name)}!</h2>
-      <p class="sub">Your complete guide — everything you need to enjoy the platform.</p>
+      <p class="sub">Your complete guide — music, community, chat, calls, marketplace &amp; LionCoin.</p>
     </div>
 
     <div class="wg-section">
       <div class="wg-icon">🎵</div>
       <div><b>Share a single track</b><br>
-      Tap <b>"Add single track"</b> in the sidebar. Upload an audio file (MP3, M4A, WAV, FLAC…) from your phone or computer — it uploads to the cloud automatically so fans on <em>any</em> device can play it. Or paste a public streaming link (SoundCloud, Google Drive, Dropbox, etc.). Add a cover photo, pick a genre, set Public or Private, then publish.</div>
+      Tap <b>"Add single track"</b> in the sidebar. Upload an audio file (MP3, M4A, WAV, FLAC…) from your phone or computer — it goes to the cloud so fans on any device can play it instantly. Or paste a public streaming link (SoundCloud, Google Drive, Dropbox…). Add a cover photo, pick a genre, set Public or Private, then publish.</div>
     </div>
 
     <div class="wg-section">
       <div class="wg-icon">📁</div>
       <div><b>Share a folder / album / playlist</b><br>
-      Tap <b>"Add a folder"</b> to upload a whole set of tracks at once. On <b>mobile</b>: select multiple audio files and give them a playlist name. On <b>desktop</b> (Chrome / Edge): pick an entire folder from your computer, Google Drive, Dropbox, or iCloud. Every track uploads to the cloud so it plays on all devices — for you and your fans.</div>
+      Tap <b>"Add a folder"</b> to upload a whole set of tracks at once. On <b>mobile</b>: select multiple files and give them a playlist name. On <b>desktop</b> (Chrome / Edge): pick an entire folder from your computer, Google Drive, Dropbox, or iCloud. Every track uploads to the cloud for all your fans.</div>
     </div>
 
     <div class="wg-section">
-      <div class="wg-icon">☁️</div>
-      <div><b>Cloud storage — always in sync</b><br>
-      All uploaded audio is stored securely in the cloud. Your music plays on your phone, your laptop, your tablet — and on any fan's device — without re-uploading. If you have old tracks that say <b>"Local only"</b>, tap <b>"☁️ Move to cloud"</b> next to the track in <b>My Music</b> to migrate them.</div>
+      <div class="wg-icon">🖼️</div>
+      <div><b>Photos — all formats supported</b><br>
+      Upload photos in <em>any</em> format — JPG, PNG, WEBP, HEIC/HEIF (iPhone), BMP, TIFF, AVIF, and more. This applies to your profile photo, banner, page background, and marketplace product photos. No conversion needed — the platform handles it automatically.</div>
     </div>
 
     <div class="wg-section">
       <div class="wg-icon">▶️</div>
       <div><b>Playback &amp; mini-player</b><br>
-      Tap any track art or title to play. The <b>mini-player</b> stays at the bottom of the screen while you browse. Use the <b>🔁 mode button</b> to switch between:<br>
+      Tap any track art or title to play. The <b>mini-player</b> stays at the bottom while you browse. Use the <b>🔁 mode button</b> to switch between:<br>
       &nbsp;• <b>Continuous</b> — plays the whole playlist in order<br>
       &nbsp;• <b>🔀 Shuffle</b> — random order<br>
       &nbsp;• <b>🔂 Repeat one</b> — loops the current track<br>
@@ -250,62 +250,95 @@ function showWelcomeGuide(name){
     <div class="wg-section">
       <div class="wg-icon">🎨</div>
       <div><b>Personalise your page</b><br>
-      Go to <b>"Edit profile"</b> (sidebar or your page) to:<br>
-      &nbsp;• Upload a <b>profile photo</b> or paste a photo link<br>
-      &nbsp;• Write your <b>bio</b><br>
-      &nbsp;• Set a <b>banner image</b> at the top of your page — concert photo, album art, anything wide and bold<br>
-      &nbsp;• Set a <b>page background image</b> that fills the whole page for every visitor<br>
-      &nbsp;• Choose a <b>colour theme</b> or a solid colour for the banner if you prefer<br>
-      All changes are saved to the cloud and visible to every fan on every device instantly.</div>
+      Go to <b>"Edit profile"</b> to upload a profile photo, write your bio, set a banner image, and set a full-page background. Choose a colour theme or solid colour for the banner. All changes are saved instantly and visible to every fan on every device.</div>
     </div>
 
     <div class="wg-section">
       <div class="wg-icon">👥</div>
       <div><b>Discover, follow &amp; grow your fanbase</b><br>
-      Go to <b>Discover</b> to browse all artists and tracks. Use the search bar to find someone by name. Click <b>Follow</b> on any profile to become a fan — they'll get a notification. Post <b>statuses</b> on your Wall to talk directly to your followers. Share your <b>invite link</b> (Invite Friends in the sidebar) on social media to bring more fans in. Fans can <b>like, dislike, and comment</b> on your tracks and posts.</div>
+      Go to <b>Discover</b> to browse all artists and tracks. Search by name. Click <b>Follow</b> on any profile — they'll get a notification.<br><br>
+      <b>Privacy option:</b> In <b>⚙️ Settings → Privacy</b>, enable <b>"Approve fans manually"</b>. New followers must send a request — you accept or decline. You can also <b>remove a fan</b> at any time from <b>🫂 My Fans</b>. Post statuses on your Wall to talk to your followers. Fans can <b>like, dislike, and comment</b> on your tracks and posts.</div>
+    </div>
+
+    <div class="wg-section">
+      <div class="wg-icon">🟢</div>
+      <div><b>Presence status</b><br>
+      Your status is shown to your connections — <b>🟢 Online</b> when you're active, <b>⚫ Offline</b> when you close the tab, and <b>🟡 Busy</b> when you want to signal you're unavailable. Toggle <b>Busy</b> from the <b>🫂 My Fans</b> page. Status updates automatically within minutes.</div>
     </div>
 
     <div class="wg-section">
       <div class="wg-icon">🔥</div>
       <div><b>Buzzing &amp; My Feed</b><br>
-      <b>🔥 Buzzing</b> shows the hottest tracks on the platform right now, ranked by plays and likes — great for discovering new music.<br>
-      <b>🏠 My Feed</b> shows the latest posts and statuses from artists you follow, so you never miss an update from your favourite creators.</div>
+      <b>🔥 Buzzing</b> shows the hottest tracks right now, ranked by plays and likes.<br>
+      <b>🏠 My Feed</b> shows the latest posts from artists you follow.</div>
     </div>
 
     <div class="wg-section">
       <div class="wg-icon">💬</div>
-      <div><b>Private Messenger</b><br>
-      Go to any artist's profile and tap <b>💬 Message</b> to open a private chat. All your conversations are in the <b>💬 Messages</b> tab — new messages show an unread badge.<br><br>
+      <div><b>Private Messenger — end-to-end encrypted</b><br>
+      Go to any profile and tap <b>💬 Message</b>. All messages are <b>end-to-end encrypted</b> — only you and the other person can read them. Nobody else, not even the platform, can access the content.<br><br>
       Inside a chat you can:<br>
       &nbsp;• <b>Edit</b> a message you sent (tap ✏️)<br>
-      &nbsp;• <b>Delete for me</b> — removes it from your view only<br>
-      &nbsp;• <b>Delete for everyone</b> — removes it for both sides<br>
-      You hear a <b>ping sound</b> when a new message arrives.</div>
+      &nbsp;• <b>Delete for me</b> or <b>Delete for everyone</b><br>
+      &nbsp;• Send <b>photos, audio, and files</b><br>
+      &nbsp;• See the other person's <b>live presence status</b><br>
+      You hear a ping when a new message arrives. Privacy settings let you control who can message you.</div>
     </div>
 
     <div class="wg-section">
       <div class="wg-icon">📞</div>
       <div><b>Free voice calls</b><br>
-      Inside any chat, tap <b>📞 Call</b> to start a free real-time voice call. The other person hears a <b>ring tone</b> and sees an incoming call screen — they can tap <b>✅ Accept</b> or <b>❌ Decline</b>. During the call you can <b>mute</b> yourself and see a live call timer. Calls work peer-to-peer over the internet — completely free.</div>
+      Inside any chat, tap <b>📞 Call</b> to start a free real-time voice call. The other person hears a ring tone and can tap <b>✅ Accept</b> or <b>❌ Decline</b>. Mute yourself, see the call timer. Completely free, peer-to-peer.</div>
+    </div>
+
+    <div class="wg-section wg-lion">
+      <div class="wg-icon">🦁</div>
+      <div><b>LionCoin (LNC) — the OK Music loyalty token</b><br>
+      <b>LionCoin is the platform's internal reward currency.</b> Every meaningful action you take on OK Music earns you LNC automatically:<br><br>
+      &nbsp;• 🎵 <b>+1 LNC</b> every time someone plays your track (unique per listener per day)<br>
+      &nbsp;• ⬆️ <b>+10 LNC</b> when you upload a track<br>
+      &nbsp;• 📝 <b>+3 LNC</b> when you post a status<br>
+      &nbsp;• 💬 <b>+2 LNC</b> when someone comments on your content, <b>+1 LNC</b> when you write a comment<br>
+      &nbsp;• 👍 <b>+0.5 LNC</b> for every reaction your content receives<br>
+      &nbsp;• 🫂 <b>+5 LNC</b> for every new fan, plus milestone bonuses at 10, 100, 1 000, and 10 000 fans<br>
+      &nbsp;• 🌅 <b>+2 LNC</b> daily login — <b>+50 LNC</b> at a 7-day streak, <b>+300 LNC</b> at 30 days<br><br>
+      <b>Your wallet</b> is at <b>🦁 LionCoin</b> in the sidebar. It shows your live balance, total earned, total spent, current streak, and a full transaction history. Your balance is <b>private by default</b> — you can make it public in wallet settings.<br><br>
+      <b>Spend LNC:</b><br>
+      &nbsp;• In the <b>Marketplace</b>: sellers can set a LNC price on their products. Pay instantly from your wallet — no shipping address needed, no Payoneer. The seller receives 95% and the platform retains a 5% fee.<br>
+      &nbsp;• <b>Send directly to any user:</b> tap <b>🦁 Send LNC</b> on their profile, or use <b>💸 Send LionCoins</b> in your wallet to search and send. Enter any amount, add an optional note, and confirm. The transfer is instant and atomic — coins leave your account and arrive in theirs simultaneously. Both parties receive a full transaction record.<br><br>
+      <b>The value of LionCoin</b> is entirely determined by users. The platform does not set an exchange rate. When two users agree to exchange goods, services, or collaborations for LNC, the price is theirs to negotiate freely. The more the community values LNC, the more it is worth.<br><br>
+      <b>What LionCoin can become:</b> Today it is a loyalty and exchange token within OK Music. As the community grows, LionCoin is designed to evolve — potential future directions include redemption with affiliated external partners (studios, distributors, equipment suppliers), a creator economy where top artists earn meaningful income purely from fan engagement, and a community-governed rate that reflects the real demand for music on the platform. The coin's trajectory depends on you.</div>
     </div>
 
     <div class="wg-section wg-market">
       <div class="wg-icon">🛍️</div>
       <div><b>Marketplace — buy &amp; sell</b><br>
       Click <b>MARKETPLACE</b> in the sidebar.<br><br>
-      <b>🏪 Sell:</b> Open your store — enter a store name, location, and Payoneer email. List products with photos, description, and price. You set your own shipping &amp; handling costs. You receive <b>97% of every sale</b> (3% platform fee) paid to your Payoneer account within 1–2 business days.<br><br>
-      <b>🛒 Buy:</b> Browse all products, search by name or seller, tap any photo to zoom, add to cart. At checkout provide your shipping address. Payment goes via <b>Payoneer</b> and your order is forwarded to the seller.</div>
+      <b>🏪 Sell:</b> Open your store, list products with photos, description, USD price, and an optional <b>LNC price</b>. You receive 97% of each USD sale (3% fee), or 95% of each LNC sale (5% fee) paid instantly to your wallet.<br><br>
+      <b>🛒 Buy:</b> Browse all products, tap any photo to zoom, add to cart. Pay by Payoneer (USD) <em>or</em> by LionCoin if the seller accepts it. LNC purchases are instant — no checkout form needed.</div>
+    </div>
+
+    <div class="wg-section">
+      <div class="wg-icon">🔒</div>
+      <div><b>Privacy &amp; Security</b><br>
+      &nbsp;• <b>Private profile</b> — only followers see your tracks and posts<br>
+      &nbsp;• <b>Approve fans manually</b> — control who can follow you<br>
+      &nbsp;• <b>Who can message / call me</b> — Everyone, Followers only, or Nobody<br>
+      &nbsp;• <b>Hide from Discover &amp; Search</b> — stay invisible to browsing users<br>
+      &nbsp;• <b>Block &amp; Report</b> any user from their profile<br>
+      &nbsp;• <b>Security Centre</b> — see all active sessions, sign out remotely, view your activity log<br>
+      All settings in <b>⚙️ Settings</b> (sidebar or your profile).</div>
     </div>
 
     <div class="wg-section">
       <div class="wg-icon">💡</div>
       <div><b>Good to know</b><br>
-      • Tap any profile photo to view it full size<br>
-      • Your music is yours — only you can edit or delete your tracks<br>
-      • <b>🔒 Private</b> tracks are visible only to you<br>
-      • Add a streaming link to any existing track: go to <b>My Music</b>, tap the track menu, choose <b>🔗 Add streaming link</b><br>
-      • Use <b>💡 Suggest a Feature</b> in the sidebar to send us ideas — we read every one<br>
-      • Log in with Google or email on any device to access your full profile and music</div>
+      &nbsp;• Tap any profile photo to view it full size<br>
+      &nbsp;• Your music is yours — only you can edit or delete your tracks<br>
+      &nbsp;• <b>🔒 Private</b> tracks are visible only to you<br>
+      &nbsp;• Add a streaming link to any existing track: <b>My Music → track menu → 🔗 Add streaming link</b><br>
+      &nbsp;• Use <b>💡 Suggest a Feature</b> in the sidebar to send us ideas — we read every one<br>
+      &nbsp;• Sign in with Google or email on any device to access your full profile, music, and wallet</div>
     </div>
 
     <button class="btn primary block" data-action="close" style="margin-top:20px;font-size:16px;padding:14px">Let's go! 🚀</button>
@@ -1211,7 +1244,7 @@ async function broadcastWelcome(){
   if(!isAdmin()) return;
   const users=Object.values(CACHE.users).filter(u=>u.id&&!String(u.id).startsWith("u_"));
   if(!users.length) return toast("No users loaded yet — wait a moment and try again.");
-  const text="📖 OK Music Guide updated! Cloud music, custom banners & page backgrounds, private chat with edit/delete, free voice calls, Marketplace & more. Tap to read the full guide.";
+  const text="🦁 Big update! LionCoin (LNC) is now live — earn coins for every track play, upload, post, comment, reaction, and new fan. Send LNC to other users, spend it in the Marketplace, and watch your balance grow the more you create. Plus: 🔐 end-to-end encrypted messages, 🟢 presence status, fan request approvals, and all photo formats now supported. Tap to read the full guide.";
   let sent=0;
   for(const u of users){
     try{
