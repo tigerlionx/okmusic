@@ -2452,10 +2452,22 @@ function renderContests(){
     if(a.status!=='open'&&b.status==='open') return 1;
     return b.createdAt-a.createdAt;
   });
+  const openCount=(CACHE.contests||[]).filter(c=>c.status==='open').length;
+  const totalPrize=(CACHE.contests||[]).filter(c=>c.status==='open').reduce((s,c)=>s+(c.prize||0),0);
+  const myWins=(CACHE.contests||[]).filter(c=>c.winnerOptionId&&c.picks?.[ME?.id]?.optionId===c.winnerOptionId).length;
   $("page").innerHTML=`
-    <div class="h-title">🏆 Prediction Contests</div>
-    ${isAdmin()?`<button class="btn primary" data-action="createcontest" style="margin-bottom:20px">+ New Contest</button>`:''}
-    ${contests.length?contests.map(c=>renderContestCard(c)).join(''):'<div class="empty">No contests yet — check back soon! 🏆</div>'}
+    <div class="contests-hero">
+      <span class="contests-hero-icon">🏆</span>
+      <div class="contests-hero-title">Prediction Contests</div>
+      <div class="contests-hero-sub">Pick the winner · Win LionCoins</div>
+      <div class="contests-hero-pills">
+        <span class="contests-hero-pill">🟢 ${openCount} Open</span>
+        ${totalPrize?`<span class="contests-hero-pill">🦁 ${totalPrize.toLocaleString()} LNC up for grabs</span>`:''}
+        ${ME&&myWins?`<span class="contests-hero-pill">🎉 ${myWins} win${myWins!==1?'s':''} so far</span>`:''}
+      </div>
+    </div>
+    ${isAdmin()?`<button class="btn primary" data-action="createcontest" style="margin-bottom:18px">+ New Contest</button>`:''}
+    ${contests.length?contests.map(c=>renderContestCard(c)).join(''):`<div class="empty" style="text-align:center;padding:40px 20px"><div style="font-size:48px;margin-bottom:12px">🏆</div><div style="font-size:16px;font-weight:700;margin-bottom:6px">No contests yet</div><div style="color:var(--muted);font-size:14px">The first contest is coming soon — stay tuned!</div></div>`}
   `;
 }
 
@@ -2467,62 +2479,95 @@ function renderContestCard(c){
   const lastCorrection=(c.auditLog||[]).filter(l=>l.action==='corrected').slice(-1)[0];
   const pickCount=Object.keys(c.picks||{}).length;
 
+  // Stripe color: green if I won, orange if open, gray if resolved
+  const stripeClass=c.status==='open'?'open':myWon?'resolved-win':'resolved';
+
+  // Status badge
   const statusBadge=c.status==='open'
-    ?'<span class="contest-badge open">🟢 Open</span>'
+    ?'<span class="contest-badge open"><span class="contest-badge-dot"></span>Open</span>'
     :'<span class="contest-badge resolved">🏁 Resolved</span>';
 
+  // Options
   let optionsHtml='';
   if(c.status==='open'&&ME&&!myPick){
+    // Interactive pick buttons
     optionsHtml=`<div class="contest-opts">${(c.options||[]).map(o=>`
-      <button class="contest-opt" data-action="pickcontestoption" data-contestid="${c.id}" data-optionid="${o.id}">${esc(o.label)}</button>`).join('')}</div>`;
+      <button class="contest-opt" data-action="pickcontestoption" data-contestid="${c.id}" data-optionid="${o.id}">
+        <span class="contest-opt-circle"></span>
+        <span class="contest-opt-label">${esc(o.label)}</span>
+      </button>`).join('')}</div>`;
   } else {
+    // Display mode (after pick or resolved)
     optionsHtml=`<div class="contest-opts">${(c.options||[]).map(o=>{
+      const isPick=myPick?.optionId===o.id;
+      const isWinner=c.winnerOptionId===o.id;
       let cls='contest-opt display';
-      if(myPick?.optionId===o.id) cls+=' mypick';
-      if(c.winnerOptionId===o.id) cls+=' winner';
-      return `<div class="${cls}">${esc(o.label)}${myPick?.optionId===o.id?' <span style="opacity:.7;font-size:11px">✓ your pick</span>':''}${c.winnerOptionId===o.id?' 🏆':''}</div>`;
+      let badge='';
+      if(isPick&&isWinner){cls+=' mypick winner';badge='<span class="contest-opt-badge">✓ Won 🏆</span>';}
+      else if(isPick){cls+=' mypick';badge='<span class="contest-opt-badge">✓ Your pick</span>';}
+      else if(isWinner){cls+=' winner';badge='<span class="contest-opt-badge">🏆 Winner</span>';}
+      return `<div class="${cls}"><span class="contest-opt-label">${esc(o.label)}</span>${badge}</div>`;
     }).join('')}</div>`;
   }
 
+  // Result section
   let resultHtml='';
   if(c.status==='resolved'){
-    resultHtml=`<div class="contest-result">
-      <div style="font-size:13px">Winner: <b>${esc(winnerOpt?.label||'?')}</b></div>
-      ${myPick?(myWon
-        ?`<div class="contest-my-result win">🎉 You won +${c.prize.toLocaleString()} LNC!</div>`
-        :`<div class="contest-my-result loss">You picked ${esc(myOpt?.label||'?')} — better luck next time!</div>`)
-        :''}
-      ${lastCorrection?`<div class="contest-correction-note">📝 Corrected: ${esc(lastCorrection.reason)}</div>`:''}
-    </div>`;
+    if(myWon){
+      resultHtml=`<div class="contest-result-win">
+        <div class="contest-result-win-icon">🎉</div>
+        <div class="contest-result-win-title">You got it right!</div>
+        <div class="contest-result-win-amount">+${c.prize.toLocaleString()} LNC</div>
+      </div>`;
+    } else if(myPick){
+      resultHtml=`<div class="contest-result-loss">
+        <span style="font-size:22px">😔</span>
+        <div><div style="font-weight:700;color:#475569">Better luck next time!</div><div style="margin-top:2px">You picked <b>${esc(myOpt?.label||'?')}</b></div></div>
+      </div>`;
+    } else {
+      resultHtml=`<div class="contest-result-noplay">🏁 Winner: <b>${esc(winnerOpt?.label||'?')}</b></div>`;
+    }
+    if(lastCorrection) resultHtml+=`<div class="contest-correction-note">📝 Result corrected: ${esc(lastCorrection.reason)}</div>`;
+  } else if(c.status==='open'&&myPick){
+    resultHtml=`<div class="contest-result-noplay" style="background:rgba(251,122,40,.06);border-color:rgba(251,122,40,.25);color:#C2410C">🔒 Pick locked in — awaiting result</div>`;
   }
 
+  // Admin controls
   let adminHtml='';
   if(isAdmin()){
     if(c.status==='open'){
       adminHtml=`<div class="contest-admin">
-        <div style="font-size:11px;color:var(--muted);margin-bottom:6px;text-transform:uppercase;letter-spacing:.05em">RESOLVE — click the winning option</div>
-        ${(c.options||[]).map(o=>`<button class="btn sm" data-action="resolvecontest" data-contestid="${c.id}" data-optionid="${o.id}" style="margin:2px 4px 2px 0">✓ ${esc(o.label)}</button>`).join('')}
+        <div class="contest-admin-label">⚙️ Admin — resolve contest</div>
+        <div style="display:flex;flex-wrap:wrap;gap:6px">${(c.options||[]).map(o=>`<button class="btn sm" data-action="resolvecontest" data-contestid="${c.id}" data-optionid="${o.id}" style="background:#F0FDF4;border:1.5px solid #86EFAC;color:#15803D">✓ ${esc(o.label)}</button>`).join('')}</div>
       </div>`;
     } else {
       adminHtml=`<div class="contest-admin">
-        <button class="btn sm" data-action="correctcontest" data-contestid="${c.id}">🔧 Correct result</button>
-        ${(c.auditLog||[]).length?`<details style="margin-top:10px;font-size:12px"><summary style="cursor:pointer;color:var(--muted)">Audit log (${c.auditLog.length})</summary>
-          <div style="margin-top:6px">${(c.auditLog||[]).map(l=>`<div style="padding:6px 0;border-top:1px solid var(--border)">${l.action==='corrected'?'🔧':'🏁'} <b>${timeAgo(l.timestamp)}</b> — ${l.action==='corrected'?`Changed from "<i>${esc(l.prevWinnerLabel||'?')}</i>" to "<i>${esc(l.newWinnerLabel)}</i>" — ${esc(l.reason)}`:esc(l.newWinnerLabel)}</div>`).join('')}</div>
+        <div class="contest-admin-label">⚙️ Admin</div>
+        <button class="btn sm" data-action="correctcontest" data-contestid="${c.id}" style="background:#FEF9C3;border:1.5px solid #FCD34D;color:#92400E">🔧 Correct result</button>
+        ${(c.auditLog||[]).length?`<details style="margin-top:10px;font-size:12px"><summary style="cursor:pointer;color:#94A3B8">Audit log (${c.auditLog.length})</summary>
+          <div style="margin-top:6px">${(c.auditLog||[]).map(l=>`<div style="padding:6px 0;border-top:1px solid #F1F5F9;font-size:12px">${l.action==='corrected'?'🔧':'🏁'} <b>${timeAgo(l.timestamp)}</b> — ${l.action==='corrected'?`"${esc(l.prevWinnerLabel||'?')}" → "${esc(l.newWinnerLabel)}" — ${esc(l.reason)}`:esc(l.newWinnerLabel)}</div>`).join('')}</div>
         </details>`:''}
       </div>`;
     }
   }
 
   return `<div class="contest-card">
-    <div class="contest-card-top">
-      ${statusBadge}
-      <span class="contest-prize">🦁 ${c.prize.toLocaleString()} LNC prize</span>
+    <div class="contest-card-stripe ${stripeClass}"></div>
+    <div class="contest-card-body">
+      <div class="contest-card-top">
+        ${statusBadge}
+        <span class="contest-prize-chip">🦁 ${c.prize.toLocaleString()} LNC</span>
+      </div>
+      <h3 class="contest-title">${esc(c.title)}</h3>
+      ${optionsHtml}
+      ${resultHtml}
+      <div class="contest-meta">
+        <span>👥 ${pickCount} pick${pickCount!==1?'s':''}</span>
+        <span class="contest-meta-sep">·</span>
+        <span>${timeAgo(c.createdAt)}</span>
+      </div>
+      ${adminHtml}
     </div>
-    <h3 class="contest-title">${esc(c.title)}</h3>
-    <div style="font-size:12px;color:var(--muted);margin-bottom:12px">${pickCount} pick${pickCount!==1?'s':''} · ${timeAgo(c.createdAt)}</div>
-    ${optionsHtml}
-    ${resultHtml}
-    ${adminHtml}
   </div>`;
 }
 
