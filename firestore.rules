@@ -166,5 +166,19 @@ service cloud.firestore {
       allow read: if false;
       allow update, delete: if false;
     }
+
+    match /contests/{id} {
+      allow read: if signedIn();
+      allow create, delete: if signedIn() && request.auth.token.email == "trendai509@gmail.com";
+      // Admin can update anything; users can only add their own pick to an open contest
+      allow update: if signedIn() && (
+        request.auth.token.email == "trendai509@gmail.com" ||
+        (
+          resource.data.status == 'open' &&
+          !(request.auth.uid in resource.data.picks) &&
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['picks'])
+        )
+      );
+    }
   }
 }
