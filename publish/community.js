@@ -206,7 +206,7 @@ async function finishOnboard(){
     await fbDB.collection("users").doc(uid).set(prof);
     ME={ id:uid, ...prof }; syncME(); closeOverlay();
     // Send welcome notification
-    fbDB.collection("notifications").add({ forUid:uid, type:"welcome", fromUid:"platform", fromName:"OK Music", text:"👋 Welcome to OK Music! Share your music, grow your fanbase, chat securely, call for free, sell in the Marketplace — and earn 🦁 LionCoins for everything you do. Tap to read the full guide.", time:Date.now(), read:false }).catch(()=>{});
+    fbDB.collection("notifications").add({ forUid:uid, type:"welcome", fromUid:"platform", fromName:"OK Music", text:"👋 Welcome to OK Music! Share your music, grow your fanbase, chat & call for free, sell in the Marketplace, earn 🦁 LionCoins for everything you do, and win LNC in 🏆 Prediction Contests. Tap to read the full guide.", time:Date.now(), read:false }).catch(()=>{});
     showWelcomeGuide(name);
   }catch(e){ toast("Couldn't save profile: "+(e.code||e.message)); }
 }
@@ -308,6 +308,22 @@ function showWelcomeGuide(name){
       &nbsp;• <b>Send directly to any user:</b> tap <b>🦁 Send LNC</b> on their profile, or use <b>💸 Send LionCoins</b> in your wallet to search and send. Enter any amount, add an optional note, and confirm. The transfer is instant and atomic — coins leave your account and arrive in theirs simultaneously. Both parties receive a full transaction record.<br><br>
       <b>The value of LionCoin</b> is entirely determined by users. The platform does not set an exchange rate. When two users agree to exchange goods, services, or collaborations for LNC, the price is theirs to negotiate freely. The more the community values LNC, the more it is worth.<br><br>
       <b>What LionCoin can become:</b> Today it is a loyalty and exchange token within OK Music. As the community grows, LionCoin is designed to evolve — potential future directions include redemption with affiliated external partners (studios, distributors, equipment suppliers), a creator economy where top artists earn meaningful income purely from fan engagement, and a community-governed rate that reflects the real demand for music on the platform. The coin's trajectory depends on you.</div>
+    </div>
+
+    <div class="wg-section wg-lion">
+      <div class="wg-icon">🏆</div>
+      <div><b>Prediction Contests — win LionCoins</b><br>
+      Click <b>🏆 Contests</b> in the sidebar to see all active prediction contests. Each contest poses a question about music, the charts, or the OK Music community — and awards a <b>🦁 LNC prize to every user who picks the correct answer</b>.<br><br>
+      <b>How to play:</b><br>
+      &nbsp;• Browse open contests and read the question carefully<br>
+      &nbsp;• Tap the answer you believe is correct — a <b>"Validate your answer"</b> confirmation screen shows the prize before you commit<br>
+      &nbsp;• Your pick is <b>locked in permanently</b> — one pick per contest, no changes after confirming<br>
+      &nbsp;• Contests show a pulsing 🟢 <b>Open</b> badge while they are active<br><br>
+      <b>Winning:</b><br>
+      When the admin resolves a contest by selecting the correct answer, <b>every user who picked right receives the full prize instantly</b> — credited automatically to your 🦁 LionCoin wallet. Your contest card turns green and shows a 🎉 banner with the amount you won. The transaction appears in your wallet history as a <b>contest_win</b>.<br><br>
+      <b>If the result is corrected:</b><br>
+      If an error is discovered after resolution, the admin can correct the answer with a mandatory written reason. The correction and reason are logged publicly in the contest's audit trail. Coins are automatically reversed from incorrect winners and re-credited to the correct ones — everything is transparent.<br><br>
+      <b>Prizes:</b> Each contest card shows the prize amount in the gold <b>🦁 chip</b> at the top right. Prizes vary — the bigger the question, the bigger the reward. Keep an eye on the Contests page so you never miss an open contest!</div>
     </div>
 
     <div class="wg-section wg-market">
@@ -1253,7 +1269,7 @@ async function broadcastWelcome(){
   if(!isAdmin()) return;
   const users=Object.values(CACHE.users).filter(u=>u.id&&!String(u.id).startsWith("u_"));
   if(!users.length) return toast("No users loaded yet — wait a moment and try again.");
-  const text="🦁 Big update! LionCoin (LNC) is now live — earn coins for every track play, upload, post, comment, reaction, and new fan. Send LNC to other users, spend it in the Marketplace, and watch your balance grow the more you create. Plus: 🔐 end-to-end encrypted messages, 🟢 presence status, fan request approvals, and all photo formats now supported. Tap to read the full guide.";
+  const text="🏆 New on OK Music: Prediction Contests are live! Go to 🏆 Contests in the sidebar, pick your answer on music & culture questions, and win 🦁 LionCoins instantly when you're right — prizes credited automatically to your wallet. Every correct pick earns you the full prize. Plus: earn LNC for track plays, uploads, posts, comments, reactions, new fans, daily login streaks — and send or spend LNC freely with other users and in the Marketplace. Tap to read the full guide.";
   let sent=0;
   for(const u of users){
     try{
