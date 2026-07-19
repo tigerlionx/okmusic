@@ -104,7 +104,7 @@ let toastTimer; function toast(m){ const e=$("toast"); e.textContent=m; e.hidden
 // ---------- state ----------
 let ME=null;                                   // the signed-in user's profile (Firebase)
 // live shared data, kept in sync by Firestore listeners
-const CACHE={ users:{}, tracks:[], statuses:[], follows:{}, reactions:{}, comments:[], notifications:[], products:[], sellers:{}, orders:[], convos:{}, suggestions:[], followRequests:[], wallet:null, walletTxs:[] };
+const CACHE={ users:{}, tracks:[], statuses:[], follows:{}, reactions:{}, comments:[], notifications:[], products:[], sellers:{}, orders:[], convos:{}, suggestions:[], followRequests:[], wallet:null, walletTxs:[], contests:[] };
 let state={ view:"discover", profileId:null, query:"", cart:JSON.parse(localStorage.getItem("okmusic_cart")||"[]") };
 function persistCart(){ try{ localStorage.setItem("okmusic_cart",JSON.stringify(state.cart||[])); }catch(e){} }
 let playMode="continuous"; // "continuous" | "repeat" | "shuffle"
@@ -367,6 +367,7 @@ function renderApp(){
         <div class="side-item" data-action="profile" data-uid="${u.id}"><span class="ic">😊</span>My Page</div>
         ${item("fans","🫂","My Fans")}
         ${item("wallet","🦁",`LionCoin${CACHE.wallet?.balance?` · ${(CACHE.wallet.balance).toLocaleString()}`:''}`)}
+        ${item("contests","🏆","Contests")}
         ${item("mymusic","🎵","My Music")}
         <div class="side-sep"></div>
         <div class="side-item" data-action="sharefolder"><span class="ic">📁</span>Add a folder</div>
@@ -424,6 +425,7 @@ function renderMain(){
   if(state.view==="cart") return renderCart();
   if(state.view==="myorders") return renderMyOrders();
   if(state.view==="wallet") return renderWallet();
+  if(state.view==="contests") return renderContests();
   if(state.view==="admin"&&isAdmin()) return renderAdmin();
   renderDiscover();
 }
@@ -2308,7 +2310,7 @@ async function confirmLncBuy(productId){
 function renderWallet(){
   const w=CACHE.wallet||{}; const bal=w.balance||0; const earned=w.totalEarned||0; const spent=w.totalSpent||0; const streak=w.streak||0;
   const txs=CACHE.walletTxs||[];
-  const typeIcon={track_view:'🎵',track_upload:'⬆️',status_post:'📝',comment_sent:'💬',comment_received:'💬',reaction_received:'👍',new_fan:'🫂',fan_milestone:'🏆',daily_login:'🌅',streak_7:'🔥',streak_30:'🏆',marketplace_buy:'🛍️',marketplace_sale:'💰',transfer_sent:'💸',transfer_received:'💰'};
+  const typeIcon={track_view:'🎵',track_upload:'⬆️',status_post:'📝',comment_sent:'💬',comment_received:'💬',reaction_received:'👍',new_fan:'🫂',fan_milestone:'🏆',daily_login:'🌅',streak_7:'🔥',streak_30:'🏆',marketplace_buy:'🛍️',marketplace_sale:'💰',transfer_sent:'💸',transfer_received:'💰',contest_win:'🏆',contest_correction:'🔧'};
   $("page").innerHTML=`
     <div class="h-title">🦁 LionCoin Wallet</div>
     <div class="wallet-card">
@@ -2439,6 +2441,289 @@ async function confirmSendLNC(toUid){
   else{ if(btn){btn.disabled=false;btn.textContent='Send 🦁';} toast('Transfer failed — check your balance'); }
 }
 // ============ END LIONCOIN ============
+
+// ============ CONTESTS ============
+
+let _pendingCorrection=null;
+
+function renderContests(){
+  const contests=(CACHE.contests||[]).slice().sort((a,b)=>{
+    if(a.status==='open'&&b.status!=='open') return -1;
+    if(a.status!=='open'&&b.status==='open') return 1;
+    return b.createdAt-a.createdAt;
+  });
+  $("page").innerHTML=`
+    <div class="h-title">🏆 Prediction Contests</div>
+    ${isAdmin()?`<button class="btn primary" data-action="createcontest" style="margin-bottom:20px">+ New Contest</button>`:''}
+    ${contests.length?contests.map(c=>renderContestCard(c)).join(''):'<div class="empty">No contests yet — check back soon! 🏆</div>'}
+  `;
+}
+
+function renderContestCard(c){
+  const myPick=c.picks?.[ME?.id];
+  const winnerOpt=c.options?.find(o=>o.id===c.winnerOptionId);
+  const myOpt=c.options?.find(o=>o.id===myPick?.optionId);
+  const myWon=myPick&&c.winnerOptionId&&myPick.optionId===c.winnerOptionId;
+  const lastCorrection=(c.auditLog||[]).filter(l=>l.action==='corrected').slice(-1)[0];
+  const pickCount=Object.keys(c.picks||{}).length;
+
+  const statusBadge=c.status==='open'
+    ?'<span class="contest-badge open">🟢 Open</span>'
+    :'<span class="contest-badge resolved">🏁 Resolved</span>';
+
+  let optionsHtml='';
+  if(c.status==='open'&&ME&&!myPick){
+    optionsHtml=`<div class="contest-opts">${(c.options||[]).map(o=>`
+      <button class="contest-opt" data-action="pickcontestoption" data-contestid="${c.id}" data-optionid="${o.id}">${esc(o.label)}</button>`).join('')}</div>`;
+  } else {
+    optionsHtml=`<div class="contest-opts">${(c.options||[]).map(o=>{
+      let cls='contest-opt display';
+      if(myPick?.optionId===o.id) cls+=' mypick';
+      if(c.winnerOptionId===o.id) cls+=' winner';
+      return `<div class="${cls}">${esc(o.label)}${myPick?.optionId===o.id?' <span style="opacity:.7;font-size:11px">✓ your pick</span>':''}${c.winnerOptionId===o.id?' 🏆':''}</div>`;
+    }).join('')}</div>`;
+  }
+
+  let resultHtml='';
+  if(c.status==='resolved'){
+    resultHtml=`<div class="contest-result">
+      <div style="font-size:13px">Winner: <b>${esc(winnerOpt?.label||'?')}</b></div>
+      ${myPick?(myWon
+        ?`<div class="contest-my-result win">🎉 You won +${c.prize.toLocaleString()} LNC!</div>`
+        :`<div class="contest-my-result loss">You picked ${esc(myOpt?.label||'?')} — better luck next time!</div>`)
+        :''}
+      ${lastCorrection?`<div class="contest-correction-note">📝 Corrected: ${esc(lastCorrection.reason)}</div>`:''}
+    </div>`;
+  }
+
+  let adminHtml='';
+  if(isAdmin()){
+    if(c.status==='open'){
+      adminHtml=`<div class="contest-admin">
+        <div style="font-size:11px;color:var(--muted);margin-bottom:6px;text-transform:uppercase;letter-spacing:.05em">RESOLVE — click the winning option</div>
+        ${(c.options||[]).map(o=>`<button class="btn sm" data-action="resolvecontest" data-contestid="${c.id}" data-optionid="${o.id}" style="margin:2px 4px 2px 0">✓ ${esc(o.label)}</button>`).join('')}
+      </div>`;
+    } else {
+      adminHtml=`<div class="contest-admin">
+        <button class="btn sm" data-action="correctcontest" data-contestid="${c.id}">🔧 Correct result</button>
+        ${(c.auditLog||[]).length?`<details style="margin-top:10px;font-size:12px"><summary style="cursor:pointer;color:var(--muted)">Audit log (${c.auditLog.length})</summary>
+          <div style="margin-top:6px">${(c.auditLog||[]).map(l=>`<div style="padding:6px 0;border-top:1px solid var(--border)">${l.action==='corrected'?'🔧':'🏁'} <b>${timeAgo(l.timestamp)}</b> — ${l.action==='corrected'?`Changed from "<i>${esc(l.prevWinnerLabel||'?')}</i>" to "<i>${esc(l.newWinnerLabel)}</i>" — ${esc(l.reason)}`:esc(l.newWinnerLabel)}</div>`).join('')}</div>
+        </details>`:''}
+      </div>`;
+    }
+  }
+
+  return `<div class="contest-card">
+    <div class="contest-card-top">
+      ${statusBadge}
+      <span class="contest-prize">🦁 ${c.prize.toLocaleString()} LNC prize</span>
+    </div>
+    <h3 class="contest-title">${esc(c.title)}</h3>
+    <div style="font-size:12px;color:var(--muted);margin-bottom:12px">${pickCount} pick${pickCount!==1?'s':''} · ${timeAgo(c.createdAt)}</div>
+    ${optionsHtml}
+    ${resultHtml}
+    ${adminHtml}
+  </div>`;
+}
+
+function openCreateContest(){
+  if(!isAdmin()) return;
+  openOverlay(`<h2>🏆 New Contest</h2>
+    <div class="field"><label>Question / Title</label><input class="fb-field" id="ctTitle" placeholder="e.g. Who will win the World Cup?" /></div>
+    <div class="field"><label>Prize per winner (LNC)</label><input class="fb-field" id="ctPrize" type="number" min="1" step="1" placeholder="e.g. 5000" /></div>
+    <div class="field"><label>Answer options</label>
+      <div id="ctOpts">
+        <input class="fb-field ct-opt-in" placeholder="Option 1" style="margin-bottom:6px" />
+        <input class="fb-field ct-opt-in" placeholder="Option 2" style="margin-bottom:6px" />
+      </div>
+      <button class="btn sm" data-action="addctopt" style="margin-top:4px">+ Add option</button>
+    </div>
+    <div style="display:flex;gap:10px;margin-top:16px">
+      <button class="btn block" data-action="close">Cancel</button>
+      <button class="btn primary block" data-action="docreatecontest">Create Contest</button>
+    </div>`);
+}
+
+function addContestOption(){
+  const list=$('ctOpts'); if(!list) return;
+  const n=list.querySelectorAll('.ct-opt-in').length+1;
+  const inp=document.createElement('input');
+  inp.className='fb-field ct-opt-in'; inp.placeholder=`Option ${n}`; inp.style.marginBottom='6px';
+  list.appendChild(inp); inp.focus();
+}
+
+async function doCreateContest(){
+  if(!isAdmin()) return;
+  const title=($('ctTitle')?.value||'').trim();
+  const prize=parseInt($('ctPrize')?.value||'0');
+  const labels=[...document.querySelectorAll('.ct-opt-in')].map(i=>i.value.trim()).filter(Boolean);
+  if(!title) return toast('Enter a title');
+  if(!prize||prize<1) return toast('Enter a valid prize amount');
+  if(labels.length<2) return toast('Add at least 2 options');
+  try{
+    await fbDB.collection('contests').add({
+      title,prize,
+      options:labels.map((label,i)=>({id:'o'+i,label})),
+      status:'open',winnerOptionId:null,picks:{},auditLog:[],
+      createdAt:Date.now(),createdBy:ME.id,resolvedAt:null
+    });
+    closeOverlay(); toast('Contest created! 🏆');
+  }catch(e){ toast(e.message||'Failed to create contest'); }
+}
+
+function openPickOption(contestId,optionId){
+  if(!ME) return openEmailAuth();
+  const c=(CACHE.contests||[]).find(x=>x.id===contestId);
+  const opt=c?.options?.find(o=>o.id===optionId);
+  if(!c||!opt||c.status!=='open'||c.picks?.[ME.id]) return;
+  openOverlay(`<div style="text-align:center;padding:8px 0">
+    <div style="font-size:40px;margin-bottom:10px">🏆</div>
+    <h2 style="margin-bottom:8px">Validate your answer</h2>
+    <p class="sub" style="margin:0 0 12px">Picking <b>${esc(opt.label)}</b> for:</p>
+    <p style="font-weight:700;margin:0 0 14px">${esc(c.title)}</p>
+    <div style="display:inline-block;background:rgba(255,165,0,.12);border-radius:8px;padding:6px 16px;font-size:13px;margin-bottom:16px;color:var(--orange-deep)">Prize if correct: 🦁 ${c.prize.toLocaleString()} LNC</div>
+    <p style="font-size:13px;color:var(--muted);margin-bottom:22px">⚠️ This pick is <b>final</b> — you cannot change it after confirming.</p>
+    <div style="display:flex;gap:10px">
+      <button class="btn block" data-action="close">Cancel</button>
+      <button class="btn primary block" data-action="confirmcontestpick" data-contestid="${contestId}" data-optionid="${optionId}">Confirm Pick ✓</button>
+    </div>
+  </div>`);
+}
+
+async function doContestPick(contestId,optionId){
+  if(!ME) return;
+  const c=(CACHE.contests||[]).find(x=>x.id===contestId);
+  if(!c||c.status!=='open'||c.picks?.[ME.id]) return;
+  try{
+    await fbDB.collection('contests').doc(contestId).update({
+      [`picks.${ME.id}`]:{optionId,confirmedAt:Date.now(),credited:false,creditAmount:0}
+    });
+    closeOverlay(); toast('Pick locked in! Good luck 🍀');
+  }catch(e){ toast(e.message||'Failed to save pick'); }
+}
+
+function openResolveContest(contestId,optionId){
+  if(!isAdmin()) return;
+  const c=(CACHE.contests||[]).find(x=>x.id===contestId);
+  const opt=c?.options?.find(o=>o.id===optionId);
+  if(!c||!opt) return;
+  openOverlay(`<div style="text-align:center;padding:8px 0">
+    <div style="font-size:40px;margin-bottom:10px">🏆</div>
+    <h2 style="margin-bottom:8px">Validate your answer</h2>
+    <p class="sub" style="margin:0 0 12px">Setting <b>${esc(opt.label)}</b> as the winner for:</p>
+    <p style="font-weight:700;margin:0 0 16px">${esc(c.title)}</p>
+    <p style="font-size:13px;color:var(--muted);margin-bottom:22px">All users who picked this option will receive <b>🦁 ${c.prize.toLocaleString()} LNC</b> each.</p>
+    <div style="display:flex;gap:10px">
+      <button class="btn block" data-action="close">Cancel</button>
+      <button class="btn primary block" data-action="confirmresolvecontest" data-contestid="${contestId}" data-optionid="${optionId}">Resolve Contest</button>
+    </div>
+  </div>`);
+}
+
+async function doResolveContest(contestId,optionId){
+  if(!isAdmin()) return;
+  const c=(CACHE.contests||[]).find(x=>x.id===contestId);
+  if(!c||c.status==='resolved') return;
+  const opt=c.options.find(o=>o.id===optionId);
+  try{
+    const auditEntry={timestamp:Date.now(),action:'resolved',prevOptionId:null,prevWinnerLabel:null,newOptionId:optionId,newWinnerLabel:opt?.label||'',reason:''};
+    await fbDB.collection('contests').doc(contestId).update({
+      status:'resolved',winnerOptionId:optionId,resolvedAt:Date.now(),
+      auditLog:firebase.firestore.FieldValue.arrayUnion(auditEntry)
+    });
+    const picks=c.picks||{};
+    const winners=Object.entries(picks).filter(([uid,p])=>p.optionId===optionId&&!p.credited);
+    for(const [uid] of winners){
+      await WALLET.credit(uid,c.prize,'contest_win',`Won: ${c.title}`,contestId);
+      await fbDB.collection('contests').doc(contestId).update({[`picks.${uid}.credited`]:true,[`picks.${uid}.creditAmount`]:c.prize});
+    }
+    closeOverlay(); toast(`Resolved! ${winners.length} winner${winners.length!==1?'s':''} credited 🏆`);
+  }catch(e){ console.error('resolveContest',e); toast(e.message||'Failed to resolve'); }
+}
+
+function openCorrectContest(contestId){
+  if(!isAdmin()) return;
+  const c=(CACHE.contests||[]).find(x=>x.id===contestId);
+  if(!c||c.status!=='resolved') return;
+  const winnerOpt=c.options.find(o=>o.id===c.winnerOptionId);
+  openOverlay(`<h2>🔧 Correct Contest Result</h2>
+    <p class="sub" style="margin:8px 0 14px">${esc(c.title)}</p>
+    <div style="padding:10px 12px;background:var(--surface-2);border-radius:8px;font-size:13px;margin-bottom:14px">
+      Current winner: <b>${esc(winnerOpt?.label||'?')}</b>
+    </div>
+    <div class="field"><label>Select the correct winner</label>
+      <div style="margin-top:8px">
+        ${(c.options||[]).map(o=>`<label style="display:flex;align-items:center;gap:10px;padding:10px 12px;border:1px solid var(--border);border-radius:8px;margin-bottom:6px;cursor:pointer">
+          <input type="radio" name="corrOpt" value="${o.id}" ${o.id===c.winnerOptionId?'checked':''} />
+          ${esc(o.label)}${o.id===c.winnerOptionId?' <span style="color:var(--muted);font-size:11px">(current)</span>':''}
+        </label>`).join('')}
+      </div>
+    </div>
+    <div class="field"><label>Reason for correction <span style="color:#e55;font-weight:400">(required)</span></label>
+      <textarea class="fb-field" id="corrReason" rows="3" placeholder="e.g. Wrong option selected by mistake" style="margin-top:4px"></textarea>
+    </div>
+    <div style="display:flex;gap:10px;margin-top:16px">
+      <button class="btn block" data-action="close">Cancel</button>
+      <button class="btn primary block" data-action="submitcorrection" data-contestid="${contestId}">Review Correction →</button>
+    </div>`);
+}
+
+function submitCorrection(contestId){
+  const selOpt=document.querySelector('input[name="corrOpt"]:checked');
+  const reason=($('corrReason')?.value||'').trim();
+  if(!selOpt) return toast('Select the correct winner');
+  if(!reason) return toast('Reason is required');
+  const newOptionId=selOpt.value;
+  const c=(CACHE.contests||[]).find(x=>x.id===contestId);
+  if(!c) return;
+  if(newOptionId===c.winnerOptionId) return toast('This is already the current winner');
+  const oldOpt=c.options.find(o=>o.id===c.winnerOptionId);
+  const newOpt=c.options.find(o=>o.id===newOptionId);
+  _pendingCorrection={contestId,newOptionId,reason};
+  openOverlay(`<div style="text-align:center;padding:8px 0">
+    <div style="font-size:40px;margin-bottom:10px">⚠️</div>
+    <h2 style="margin-bottom:8px">Validate your answer</h2>
+    <p class="sub" style="margin:0 0 12px">Changing winner from <b>${esc(oldOpt?.label||'?')}</b> → <b>${esc(newOpt?.label||'?')}</b></p>
+    <div style="background:var(--surface-2);border-radius:8px;padding:10px 12px;font-size:13px;margin:12px 0;text-align:left">Reason: <i>${esc(reason)}</i></div>
+    <p style="font-size:13px;color:#e55;margin-bottom:22px">LNC will be reversed from previous winners and re-credited to the correct winners.</p>
+    <div style="display:flex;gap:10px">
+      <button class="btn block" data-action="close">Cancel</button>
+      <button class="btn primary block" data-action="confirmcorrection">Confirm Correction</button>
+    </div>
+  </div>`);
+}
+
+async function doCorrectContest(){
+  if(!isAdmin()||!_pendingCorrection) return;
+  const {contestId,newOptionId,reason}=_pendingCorrection;
+  _pendingCorrection=null;
+  const c=(CACHE.contests||[]).find(x=>x.id===contestId);
+  if(!c||c.status!=='resolved') return;
+  const oldOptionId=c.winnerOptionId;
+  const oldOpt=c.options.find(o=>o.id===oldOptionId);
+  const newOpt=c.options.find(o=>o.id===newOptionId);
+  try{
+    const auditEntry={timestamp:Date.now(),action:'corrected',prevOptionId:oldOptionId,prevWinnerLabel:oldOpt?.label||'',newOptionId,newWinnerLabel:newOpt?.label||'',reason};
+    await fbDB.collection('contests').doc(contestId).update({
+      winnerOptionId:newOptionId,
+      auditLog:firebase.firestore.FieldValue.arrayUnion(auditEntry)
+    });
+    const picks=c.picks||{};
+    const oldWinners=Object.entries(picks).filter(([uid,p])=>p.optionId===oldOptionId&&p.credited);
+    const newWinners=Object.entries(picks).filter(([uid,p])=>p.optionId===newOptionId&&!p.credited);
+    for(const [uid,pick] of oldWinners){
+      await WALLET.debit(uid,pick.creditAmount||c.prize,'contest_correction',`Correction: ${c.title}`,contestId);
+      await fbDB.collection('contests').doc(contestId).update({[`picks.${uid}.credited`]:false,[`picks.${uid}.creditAmount`]:0});
+    }
+    for(const [uid] of newWinners){
+      await WALLET.credit(uid,c.prize,'contest_win',`Correction win: ${c.title}`,contestId);
+      await fbDB.collection('contests').doc(contestId).update({[`picks.${uid}.credited`]:true,[`picks.${uid}.creditAmount`]:c.prize});
+    }
+    closeOverlay(); toast(`Corrected — ${oldWinners.length} reversed, ${newWinners.length} credited ✓`);
+  }catch(e){ console.error('correctContest',e); toast(e.message||'Correction failed'); }
+}
+
+// ============ END CONTESTS ============
 
 async function blockUser(targetUid){
   if(!ME||targetUid===ME.id) return;
@@ -2698,7 +2983,17 @@ document.addEventListener("click",e=>{
     confirmlncbuy:()=>confirmLncBuy(el.dataset.id),
     sendlnc:()=>openSendLNC(el.dataset.uid||null),
     sendlnctouser:()=>{ closeOverlay(); openSendLNC(el.dataset.uid); },
-    confirmsendlnc:()=>confirmSendLNC(el.dataset.uid)
+    confirmsendlnc:()=>confirmSendLNC(el.dataset.uid),
+    createcontest:()=>openCreateContest(),
+    addctopt:()=>addContestOption(),
+    docreatecontest:()=>doCreateContest(),
+    pickcontestoption:()=>openPickOption(el.dataset.contestid,el.dataset.optionid),
+    confirmcontestpick:()=>doContestPick(el.dataset.contestid,el.dataset.optionid),
+    resolvecontest:()=>openResolveContest(el.dataset.contestid,el.dataset.optionid),
+    confirmresolvecontest:()=>doResolveContest(el.dataset.contestid,el.dataset.optionid),
+    correctcontest:()=>openCorrectContest(el.dataset.contestid),
+    submitcorrection:()=>submitCorrection(el.dataset.contestid),
+    confirmcorrection:()=>doCorrectContest()
   };
   if(M[a]) M[a]();
 });
@@ -3407,6 +3702,9 @@ function startAuthListeners(uid){
   fbDB.collection("wallets").doc(uid).onSnapshot(s=>{ CACHE.wallet=s.exists?{ id:s.id,...s.data() }:null; scheduleRender(); }, e=>console.warn("wallet",e.code));
   fbDB.collection("wallets").doc(uid).collection("transactions").orderBy("createdAt","desc").limit(60)
     .onSnapshot(s=>{ CACHE.walletTxs=s.docs.map(d=>({ id:d.id,...d.data() })); scheduleRender(); }, e=>console.warn("walletTxs",e.code));
+  // contests
+  fbDB.collection("contests").orderBy("createdAt","desc")
+    .onSnapshot(s=>{ CACHE.contests=s.docs.map(d=>({ id:d.id,...d.data() })); scheduleRender(); }, e=>console.warn("contests",e.code));
   // suggestions (admin only)
   if(fbAuth.currentUser?.email===ADMIN_EMAIL){
     fbDB.collection("suggestions").orderBy("time","desc").limit(50).onSnapshot(s=>{ CACHE.suggestions=s.docs.map(d=>({ id:d.id, ...d.data() })); scheduleRender(); }, e=>console.warn("suggestions",e.code));
