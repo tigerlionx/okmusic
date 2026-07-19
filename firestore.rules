@@ -124,7 +124,7 @@ service cloud.firestore {
     }
 
     match /wallets/{uid} {
-      allow read: if signedIn() && (request.auth.uid == uid || resource.data.isPublic == true);
+      allow read: if signedIn();
       // Owner has full control of their own wallet
       allow create, update: if signedIn() && request.auth.uid == uid;
       // Any signed-in user can credit another wallet (P2P transfer / rewards)
@@ -136,7 +136,7 @@ service cloud.firestore {
       // Allow creating a wallet for a user who has none (first-time credit)
       // balance must equal totalEarned — prevents minting arbitrary initial balances
       allow create: if signedIn() && request.auth.uid != uid
-        && request.resource.data.totalSpent == 0
+        && request.resource.data.get('totalSpent', 0) == 0
         && request.resource.data.balance == request.resource.data.totalEarned;
 
       match /transactions/{txId} {

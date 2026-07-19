@@ -2164,9 +2164,8 @@ const WALLET={
     const wRef=fbDB.collection('wallets').doc(uid);
     try{
       await fbDB.runTransaction(async t=>{
-        const snap=await t.get(wRef);
-        if(!snap.exists) t.set(wRef,{balance:amount,totalEarned:amount,totalSpent:0,isPublic:false,streak:0,lastLoginDate:'',lastMilestone:0,createdAt:Date.now()});
-        else t.update(wRef,{balance:F.increment(amount),totalEarned:F.increment(amount)});
+        // F.increment on a missing field treats it as 0 — no read needed for new or existing wallets
+        t.set(wRef,{balance:F.increment(amount),totalEarned:F.increment(amount)},{merge:true});
       });
       fbDB.collection('wallets').doc(uid).collection('transactions').add({type,amount,description,ref,createdAt:Date.now()}).catch(()=>{});
     }catch(e){console.warn('WALLET.credit',e);}
@@ -2288,11 +2287,10 @@ async function confirmLncBuy(productId){
   const now=Date.now(); let ok=false;
   try{
     await fbDB.runTransaction(async t=>{
-      const buyerSnap=await t.get(buyerRef); const sellerSnap=await t.get(sellerRef);
+      const buyerSnap=await t.get(buyerRef);
       if(!buyerSnap.exists||(buyerSnap.data().balance||0)<lncPrice) throw new Error('Insufficient balance');
       t.update(buyerRef,{balance:F.increment(-lncPrice),totalSpent:F.increment(lncPrice)});
-      if(!sellerSnap.exists) t.set(sellerRef,{balance:sellerAmount,totalEarned:sellerAmount,totalSpent:0,isPublic:false,streak:0,lastLoginDate:'',lastMilestone:0,createdAt:now});
-      else t.update(sellerRef,{balance:F.increment(sellerAmount),totalEarned:F.increment(sellerAmount)});
+      t.set(sellerRef,{balance:F.increment(sellerAmount),totalEarned:F.increment(sellerAmount)},{merge:true});
       ok=true;
     });
     if(ok){
@@ -2369,11 +2367,11 @@ async function transferLNC(toUid,amount,note){
   const now=Date.now(); let ok=false;
   try{
     await fbDB.runTransaction(async t=>{
-      const fromSnap=await t.get(fromRef); const toSnap=await t.get(toRef);
+      const fromSnap=await t.get(fromRef);
       if(!fromSnap.exists||(fromSnap.data().balance||0)<amount) throw new Error('Insufficient balance');
       t.update(fromRef,{balance:F.increment(-amount),totalSpent:F.increment(amount)});
-      if(!toSnap.exists) t.set(toRef,{balance:amount,totalEarned:amount,totalSpent:0,isPublic:false,streak:0,lastLoginDate:'',lastMilestone:0,createdAt:now});
-      else t.update(toRef,{balance:F.increment(amount),totalEarned:F.increment(amount)});
+      // set+merge avoids reading the recipient wallet — F.increment handles new and existing docs
+      t.set(toRef,{balance:F.increment(amount),totalEarned:F.increment(amount)},{merge:true});
       ok=true;
     });
     if(ok){
