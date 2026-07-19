@@ -423,7 +423,6 @@ function openMobMenu(){
   const old=$('mobSheet'); if(old) old.remove();
   const backdrop=$('mobBackdrop'); if(backdrop) backdrop.remove();
 
-  const u=currentUser();
   const myOrders=(CACHE.orders||[]).filter(o=>o.buyerId===ME?.id);
   const lnc=(CACHE.wallet?.balance||0).toLocaleString();
 
@@ -443,7 +442,7 @@ function openMobMenu(){
     {ic:'📁',label:'Add folder',fn:()=>{ closeMobMenu(); shareMusicFolder(); }},
     {ic:'🎨',label:'Edit profile',fn:()=>{ closeMobMenu(); openCustomize(); }},
     {ic:'💡',label:'Suggest a feature',fn:()=>{ closeMobMenu(); openSuggest(); }},
-    {ic:'↩️',label:'Log out',fn:()=>{ closeMobMenu(); doLogout(); }},
+    {ic:'↩️',label:'Log out',fn:()=>{ closeMobMenu(); logout(); }},
   ];
 
   // Backdrop
@@ -459,7 +458,7 @@ function openMobMenu(){
     <div class="mob-sheet-handle"></div>
     <div class="mob-sheet-title">Menu</div>
     <div class="mob-sheet-grid">
-      ${items.map((it,i)=>`<div class="mob-sheet-item" data-idx="${i}">${it.ic}<span>${it.label}</span></div>`).join('')}
+      ${items.map((it,i)=>`<div class="mob-sheet-item" data-idx="${i}"><span class="ms-ic">${it.ic}</span><span class="ms-lb">${it.label}</span></div>`).join('')}
     </div>
   `;
   document.body.appendChild(sheet);

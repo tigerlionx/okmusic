@@ -509,12 +509,17 @@ body.has-page-bg .topbar{background:rgba(255,221,191,.45)}
 .mob-sheet-item{
   display:flex;flex-direction:column;align-items:center;gap:5px;
   padding:14px 6px 12px;border-radius:14px;cursor:pointer;
-  font-size:11px;font-weight:700;color:#4a3020;
+  font-size:10.5px;font-weight:700;color:#4a3020;
   -webkit-tap-highlight-color:transparent;user-select:none;
   transition:background .15s;
+  min-width:0;overflow:hidden;text-align:center;
+}
+.mob-sheet-item .ms-lb{
+  display:block;overflow-wrap:break-word;
+  text-align:center;line-height:1.25;width:100%;
 }
 .mob-sheet-item:active,.mob-sheet-item:hover{background:#FEF3E2;}
-.mob-sheet-item > :first-child{font-size:26px;line-height:1;}
+.mob-sheet-item .ms-ic{font-size:26px;line-height:1;display:block;}
 @media(prefers-color-scheme:dark){
   .mob-sheet{background:#1e1208;}
   .mob-sheet-item{color:#f0dfc0;}
