@@ -405,17 +405,81 @@ function renderApp(){
       const isChat=state.view==='msgs'||state.view==='chat';
       const isProfile=state.view==='profile'&&state.profileId===u.id;
       const nb=(n)=>n?`<span class="mobnav-badge">${n>9?'9+':n}</span>`:'';
+      const isMore=['wallet','contests','mymusic','fans','marketplace','mystore','cart','myorders','admin','buzzing'].includes(state.view);
       return`<nav class="mobnav" id="mobnav">
         <div class="mobnav-item ${state.view==='discover'?'active':''}" data-action="nav" data-view="discover"><span class="mn-ic">🧭</span>Discover</div>
         <div class="mobnav-item ${state.view==='home'?'active':''}" data-action="nav" data-view="home"><span class="mn-ic">🏠</span>Feed</div>
         <div class="mobnav-item ${isChat?'active':''}" data-action="nav" data-view="msgs">${nb(unMsgs)}<span class="mn-ic">💬</span>Chat</div>
         <div class="mobnav-item ${state.view==='notifs'?'active':''}" data-action="nav" data-view="notifs">${nb(unNotifs)}<span class="mn-ic">🔔</span>Alerts</div>
         <div class="mobnav-item ${isProfile?'active':''}" data-action="profile" data-uid="${u.id}"><span class="mn-ic">😊</span>Me</div>
+        <div class="mobnav-item ${isMore?'active':''}" data-action="mobmenu"><span class="mn-ic">⋯</span>More</div>
       </nav>`;
     })()}`;
   renderMain();
   setTimeout(()=>{ const s=$("search"); if(s) s.oninput=e=>{ state.query=e.target.value; if(state.view!=="discover") state.view="discover"; renderMain(); }; },0);
 }
+function openMobMenu(){
+  // Remove any existing sheet
+  const old=$('mobSheet'); if(old) old.remove();
+  const backdrop=$('mobBackdrop'); if(backdrop) backdrop.remove();
+
+  const u=currentUser();
+  const myOrders=(CACHE.orders||[]).filter(o=>o.buyerId===ME?.id);
+  const lnc=(CACHE.wallet?.balance||0).toLocaleString();
+
+  const go=(view)=>{ closeMobMenu(); state.view=view; renderApp(); };
+
+  // Build sheet items
+  const items=[
+    {ic:'🦁',label:`LionCoin · ${lnc}`,fn:()=>go('wallet')},
+    {ic:'🏆',label:'Contests',fn:()=>go('contests')},
+    {ic:'🎵',label:'My Music',fn:()=>go('mymusic')},
+    {ic:'🫂',label:'My Fans',fn:()=>go('fans')},
+    {ic:'🔥',label:'Buzzing',fn:()=>go('buzzing')},
+    {ic:'🛍️',label:'Marketplace',fn:()=>{ closeMobMenu(); openMarketplace(); }},
+    ...(myOrders.length?[{ic:'📦',label:`My Orders (${myOrders.length})`,fn:()=>go('myorders')}]:[]),
+    ...(isAdmin()?[{ic:'📊',label:'Admin Stats',fn:()=>go('admin')}]:[]),
+    {ic:'⬆️',label:'Add track',fn:()=>{ closeMobMenu(); openUpload(); }},
+    {ic:'📁',label:'Add folder',fn:()=>{ closeMobMenu(); shareMusicFolder(); }},
+    {ic:'🎨',label:'Edit profile',fn:()=>{ closeMobMenu(); openCustomize(); }},
+    {ic:'💡',label:'Suggest a feature',fn:()=>{ closeMobMenu(); openSuggest(); }},
+    {ic:'↩️',label:'Log out',fn:()=>{ closeMobMenu(); doLogout(); }},
+  ];
+
+  // Backdrop
+  const bd=document.createElement('div');
+  bd.id='mobBackdrop'; bd.className='mob-backdrop';
+  bd.onclick=closeMobMenu;
+  document.body.appendChild(bd);
+
+  // Sheet
+  const sheet=document.createElement('div');
+  sheet.id='mobSheet'; sheet.className='mob-sheet';
+  sheet.innerHTML=`
+    <div class="mob-sheet-handle"></div>
+    <div class="mob-sheet-title">Menu</div>
+    <div class="mob-sheet-grid">
+      ${items.map((it,i)=>`<div class="mob-sheet-item" data-idx="${i}">${it.ic}<span>${it.label}</span></div>`).join('')}
+    </div>
+  `;
+  document.body.appendChild(sheet);
+
+  // Attach click handlers after insertion
+  sheet.querySelectorAll('.mob-sheet-item').forEach(el=>{
+    const idx=parseInt(el.dataset.idx);
+    el.onclick=()=>items[idx].fn();
+  });
+
+  // Animate in
+  requestAnimationFrame(()=>{ sheet.classList.add('open'); bd.classList.add('open'); });
+}
+
+function closeMobMenu(){
+  const sheet=$('mobSheet'); const bd=$('mobBackdrop');
+  if(sheet){ sheet.classList.remove('open'); setTimeout(()=>sheet.remove(),260); }
+  if(bd){ bd.classList.remove('open'); setTimeout(()=>bd.remove(),260); }
+}
+
 function renderMain(){
   if(state.view!=="chat" && msgUnsub){ msgUnsub(); msgUnsub=null; }
   const _visU=state.view==="profile"?userById(state.profileId):null;
@@ -3054,7 +3118,8 @@ document.addEventListener("click",e=>{
     confirmresolvecontest:()=>doResolveContest(el.dataset.contestid,el.dataset.optionid),
     correctcontest:()=>openCorrectContest(el.dataset.contestid),
     submitcorrection:()=>submitCorrection(el.dataset.contestid),
-    confirmcorrection:()=>doCorrectContest()
+    confirmcorrection:()=>doCorrectContest(),
+    mobmenu:()=>openMobMenu()
   };
   if(M[a]) M[a]();
 });
