@@ -416,7 +416,12 @@ function renderApp(){
       </nav>`;
     })()}`;
   renderMain();
-  setTimeout(()=>{ const s=$("search"); if(s) s.oninput=e=>{ state.query=e.target.value; if(state.view!=="discover") state.view="discover"; renderMain(); }; },0);
+  setTimeout(()=>{
+    const s=$("search"); if(s) s.oninput=e=>{ state.query=e.target.value; if(state.view!=="discover") state.view="discover"; renderMain(); };
+    // Position miniplayer above actual mobnav height regardless of viewport-fit
+    const nav=$("mobnav"); const mp=$("miniplayer");
+    if(nav && mp){ const h=nav.getBoundingClientRect().height; if(h>0) mp.style.bottom=h+"px"; }
+  },0);
 }
 function openMobMenu(){
   // Remove any existing sheet
