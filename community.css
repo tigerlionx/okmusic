@@ -534,7 +534,8 @@ body.has-page-bg .topbar{background:rgba(255,221,191,.45)}
   .main{padding-bottom:72px;}
 
   /* move miniplayer above the bottom nav */
-  .miniplayer{bottom:calc(58px + env(safe-area-inset-bottom,0px));}
+  .miniplayer{bottom:calc(58px + env(safe-area-inset-bottom,0px));transform:translateY(200%);}
+  .miniplayer.show{transform:none;}
 
   /* topbar: shrink search on narrow phones */
   .topbar{gap:10px;padding:0 14px;}
