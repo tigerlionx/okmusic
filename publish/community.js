@@ -10,6 +10,7 @@
 const $ = (id) => document.getElementById(id);
 const audio = $("audio");
 let _linkCache = {};
+let _discAttach = {trackId:null, productId:null};
 let _preMusicVol = 1;
 
 // Seed data (incl. 100 demo creators) now lives in community-data.js:
@@ -104,8 +105,8 @@ let toastTimer; function toast(m){ const e=$("toast"); e.textContent=m; e.hidden
 // ---------- state ----------
 let ME=null;                                   // the signed-in user's profile (Firebase)
 // live shared data, kept in sync by Firestore listeners
-const CACHE={ users:{}, tracks:[], statuses:[], follows:{}, reactions:{}, comments:[], notifications:[], products:[], sellers:{}, orders:[], convos:{}, suggestions:[], followRequests:[], wallet:null, walletTxs:[], contests:[] };
-let state={ view:"discover", profileId:null, query:"", cart:JSON.parse(localStorage.getItem("okmusic_cart")||"[]") };
+const CACHE={ users:{}, tracks:[], statuses:[], follows:{}, reactions:{}, comments:[], notifications:[], products:[], sellers:{}, orders:[], convos:{}, suggestions:[], followRequests:[], wallet:null, walletTxs:[], contests:[], discoveryPosts:[] };
+let state={ view:"discover", profileId:null, query:"", cart:JSON.parse(localStorage.getItem("okmusic_cart")||"[]"), openFolders:new Set() };
 function persistCart(){ try{ localStorage.setItem("okmusic_cart",JSON.stringify(state.cart||[])); }catch(e){} }
 let playMode="continuous"; // "continuous" | "repeat" | "shuffle"
 let nowPlayingId=null;
@@ -514,22 +515,209 @@ function renderMain(){
   renderDiscover();
 }
 
-// ---------- discover (browse music) ----------
+// ---------- discover (browse music + promo feed) ----------
 function renderDiscover(){
-  const q=state.query.trim().toLowerCase(); const g=state.genre||"";
+  const q=state.query.trim().toLowerCase();
   const blockedList=ME?.blockedUsers||[];
-  let list=allTracks().filter(t=>t.visibility==="public"&&!blockedList.includes(t.userId)&&!getPrivacy(userById(t.userId)).hideFromDiscover);
-  if(g) list=list.filter(t=>(t.genre||"Other")===g);
-  if(q) list=list.filter(t=>t.title.toLowerCase().includes(q)||(t.genre||"").toLowerCase().includes(q)||userById(t.userId)?.name.toLowerCase().includes(q));
-  list.sort((a,b)=>b.createdAt-a.createdAt);
-  // artists matching the search (so any artist is findable, online or not)
-  let artists=[];
-  if(q) artists=allUsers().filter(u=>u&&!blockedList.includes(u.id)&&!getPrivacy(u).hideFromDiscover&&(u.name.toLowerCase().includes(q)||(u.handle||"").toLowerCase().includes(q))).slice(0,12);
-  const chips=`<div class="genre-chips"><button class="chip ${g===''?'on':''}" data-action="genre" data-g="">All genres</button>${GENRES.map(x=>`<button class="chip ${g===x?'on':''}" data-action="genre" data-g="${x}">${x}</button>`).join("")}</div>`;
-  const artistSec=artists.length?`<div class="section-title">Artists</div><div style="margin-bottom:20px">${artists.map(userCard).join("")}</div>`:"";
-  $("page").innerHTML=`<div class="h-title">Discover</div>${chips}${artistSec}
-    ${q||artists.length?'<div class="section-title">Tracks</div>':''}
-    ${list.length?`<div class="grid">${list.map(card).join("")}</div>`:'<div class="empty">No tracks found'+(q?' for "'+esc(state.query)+'"':'')+'.</div>'}`;
+  const publicTracks=allTracks().filter(t=>t.visibility==='public'&&!blockedList.includes(t.userId)&&!getPrivacy(userById(t.userId)).hideFromDiscover);
+
+  // Group by genre
+  const genreMap={};
+  publicTracks.forEach(t=>{
+    const g=(t.genre&&t.genre.trim())||'Unknown';
+    if(!genreMap[g]) genreMap[g]=[];
+    genreMap[g].push(t);
+  });
+  const knownOrder=[...GENRES,'Unknown'];
+  const sortedGenres=Object.keys(genreMap).sort((a,b)=>{
+    const ai=knownOrder.indexOf(a),bi=knownOrder.indexOf(b);
+    if(ai===-1&&bi===-1) return a.localeCompare(b);
+    return (ai===-1?999:ai)-(bi===-1?999:bi);
+  });
+
+  // Build folders (filter tracks if search active)
+  let foldersHtml='';
+  sortedGenres.forEach(g=>{
+    let tracks=genreMap[g].slice().sort((a,b)=>b.createdAt-a.createdAt);
+    if(q) tracks=tracks.filter(t=>t.title.toLowerCase().includes(q)||(userById(t.userId)?.name||'').toLowerCase().includes(q));
+    if(q&&!tracks.length) return;
+    const sid=g.replace(/[^a-zA-Z0-9]/g,'_');
+    foldersHtml+=discoverFolder(g,tracks,sid);
+  });
+
+  // Artist results for search
+  let artistSec='';
+  if(q){
+    const artists=allUsers().filter(u=>u&&!blockedList.includes(u.id)&&!getPrivacy(u).hideFromDiscover&&(u.name.toLowerCase().includes(q)||(u.handle||'').toLowerCase().includes(q))).slice(0,8);
+    if(artists.length) artistSec=`<div class="col-h" style="margin-top:0;margin-bottom:10px">🎤 Artists</div><div style="margin-bottom:16px">${artists.map(userCard).join('')}</div>`;
+  }
+
+  // Discovery feed posts
+  const discPosts=(CACHE.discoveryPosts||[]).filter(p=>!blockedList.includes(p.userId));
+
+  $('page').innerHTML=`<div class="h-title">Discover</div>
+    <div class="discover-layout">
+      <div class="discover-music">
+        <div class="col-h" style="margin-top:0">🎵 Music Library</div>
+        ${artistSec}
+        ${foldersHtml||'<div class="empty" style="padding:20px 0">No tracks found'+(q?` for "${esc(state.query)}"`:' yet')+'.</div>'}
+      </div>
+      <div class="discover-feed">
+        <div class="col-h" style="margin-top:0">📣 Discovery Feed</div>
+        ${discoverComposer()}
+        <div id="discFeedList">${discPosts.length?discPosts.map(discoverPostCard).join(''):'<div class="empty" style="padding:24px 0;text-align:center">No promotions yet.<br><span style="font-size:13px;color:var(--muted)">Be the first to showcase your music or items.</span></div>'}</div>
+      </div>
+    </div>`;
+}
+
+function discoverFolder(genre, tracks, sid){
+  const open=state.openFolders.has(sid);
+  const rows=tracks.map(t=>{
+    const u=userById(t.userId);
+    const artStyle=t.coverImg?`background-image:url('${t.coverImg}');background-size:cover;background-position:center`:`background:${grad(t.accent)}`;
+    return `<div class="mf-track">
+      <div class="mf-art" style="${artStyle}" data-action="play" data-id="${t.id}">${t.coverImg?'':'◎'}</div>
+      <div class="mf-info">
+        <div class="mf-title" data-action="play" data-id="${t.id}">${esc(t.title)}</div>
+        <div class="mf-artist" data-action="profile" data-uid="${u?.id||''}">${esc(u?.name||'Unknown')}</div>
+      </div>
+      <span class="mf-plays">▶ ${nfmt(playCount(t.id))}</span>
+      <button class="mf-play-btn" data-action="play" data-id="${t.id}">▶</button>
+    </div>`;
+  }).join('');
+  return `<div class="music-folder${open?' open':''}" id="mfolder-${sid}">
+    <div class="music-folder-hd" data-action="togglefolder" data-genre="${sid}">
+      <span class="mf-arrow" id="mfarrow-${sid}">${open?'▼':'▶'}</span>
+      <span class="mf-icon">📁</span>
+      <span class="mf-name">${esc(genre)}</span>
+      <span class="mf-count">${tracks.length}</span>
+    </div>
+    <div class="music-folder-body" id="mfbody-${sid}" style="display:${open?'block':'none'}">${rows}</div>
+  </div>`;
+}
+
+function discoverComposer(){
+  if(!ME) return `<div class="disc-composer" style="text-align:center">
+    <p style="color:var(--muted);font-size:14px;margin:0 0 10px">Sign in to promote your music & items here.</p>
+    <button class="btn primary sm" data-action="signin">Sign in</button>
+  </div>`;
+  return `<div class="disc-composer">
+    <textarea id="discoverText" placeholder="Promote your track, album or marketplace item… e.g. 'Just dropped my new EP — check it out!'"></textarea>
+    <div id="discAttachPreview"></div>
+    <div class="disc-composer-actions">
+      <button class="btn sm" data-action="attachdiscovertrack">🎵 Attach track</button>
+      <button class="btn sm" data-action="attachdiscoverproduct">🛒 Attach item</button>
+      <button class="btn sm primary" data-action="postdiscover" style="margin-left:auto">Post</button>
+    </div>
+  </div>`;
+}
+
+function discoverPostCard(p){
+  const u=userById(p.userId); if(!u) return '';
+  const {html:postHtml}=linkifyText(p.text||'');
+  const likeKey='dp_'+p.id;
+  const liked=(CACHE.reactions[likeKey]?.likes||[]).includes(ME?.id);
+  const lc=(CACHE.reactions[likeKey]?.likes||[]).length;
+  const canDelete=ME&&(ME.id===p.userId||isAdmin());
+
+  let trackHtml='';
+  if(p.trackId){
+    const t=CACHE.tracks.find(x=>x.id===p.trackId);
+    if(t){
+      const artStyle=t.coverImg?`background-image:url('${t.coverImg}');background-size:cover;background-position:center`:`background:${grad(t.accent)}`;
+      trackHtml=`<div class="disc-attach-track" data-action="play" data-id="${t.id}">
+        <div class="dat-art" style="${artStyle}">${t.coverImg?'':'◎'}</div>
+        <div class="dat-info"><div class="dat-title">${esc(t.title)}</div><div class="dat-sub">${esc(userById(t.userId)?.name||'')} · ${esc(t.genre||'Music')}</div></div>
+        <button class="dat-play" data-action="play" data-id="${t.id}">▶</button>
+      </div>`;
+    }
+  }
+  let productHtml='';
+  if(p.productId){
+    const prod=CACHE.products.find(x=>x.id===p.productId);
+    if(prod){
+      const photo=prod.photos&&prod.photos[0];
+      productHtml=`<div class="disc-attach-product" data-action="viewproduct" data-id="${prod.id}">
+        <div class="dap-photo" style="${photo?`background-image:url('${photo}');background-size:cover;background-position:center`:'background:var(--orange-1)'}">${photo?'':'📦'}</div>
+        <div class="dap-info"><div class="dap-title">${esc(prod.title)}</div><div class="dap-price">$${parseFloat(prod.price).toFixed(2)}</div></div>
+        <span class="dap-arrow">→</span>
+      </div>`;
+    }
+  }
+  return `<div class="disc-post">
+    <div class="disc-post-top">
+      <div class="avatar" style="${avatarStyle(u,36)};cursor:pointer" data-action="viewavatar" data-uid="${u.id}">${u.avatarImg?'':initials(u.name)}</div>
+      <div style="flex:1;min-width:0">
+        <div class="sname" data-action="profile" data-uid="${u.id}">${esc(u.name)}</div>
+        <div class="stime">${timeAgo(p.time)}</div>
+      </div>
+      ${canDelete?`<button class="btn sm" data-action="deletediscpost" data-id="${p.id}" style="color:#e2554f;border-color:#e2554f">🗑</button>`:''}
+    </div>
+    ${p.text?`<div class="disc-post-text">${postHtml}</div>`:''}
+    ${trackHtml}${productHtml}
+    <div class="disc-post-actions">
+      <button class="${liked?'on':''}" data-action="likediscpost" data-id="${p.id}">👍 ${nfmt(lc)}</button>
+    </div>
+  </div>`;
+}
+
+async function postToDiscover(){
+  if(!ME) return openEmailAuth();
+  const text=($('discoverText')?.value||'').trim();
+  const {trackId,productId}=_discAttach;
+  if(!text&&!trackId&&!productId) return toast('Write something or attach a track/item to post');
+  try{
+    await fbDB.collection('discoveryPosts').add({userId:ME.id,text:text||'',trackId:trackId||null,productId:productId||null,time:Date.now()});
+    _discAttach={trackId:null,productId:null};
+    toast('Posted to Discovery Feed 📣');
+    renderDiscover();
+  }catch(e){ toast(e.message||'Failed to post'); }
+}
+
+function openAttachTrack(){
+  if(!ME) return openEmailAuth();
+  const myTracks=allTracks().filter(t=>t.userId===ME.id&&t.visibility==='public').sort((a,b)=>b.createdAt-a.createdAt);
+  if(!myTracks.length) return toast('You have no public tracks to attach');
+  const rows=myTracks.map(t=>{
+    const artStyle=t.coverImg?`background-image:url('${t.coverImg}');background-size:cover;background-position:center`:`background:${grad(t.accent)}`;
+    return `<div class="mf-track" style="cursor:pointer" data-action="selectdisctrack" data-id="${t.id}">
+      <div class="mf-art" style="${artStyle}">${t.coverImg?'':'◎'}</div>
+      <div class="mf-info"><div class="mf-title">${esc(t.title)}</div><div class="mf-artist">${esc(t.genre||'')}</div></div>
+    </div>`;
+  }).join('');
+  openOverlay(`<h2>🎵 Select a track to attach</h2><div style="margin-top:12px">${rows}</div>`);
+}
+
+function openAttachProduct(){
+  if(!ME) return openEmailAuth();
+  const myProducts=CACHE.products.filter(p=>p.sellerId===ME.id).sort((a,b)=>b.createdAt-a.createdAt);
+  if(!myProducts.length) return toast('You have no products listed in the marketplace');
+  const rows=myProducts.map(p=>{
+    const photo=p.photos&&p.photos[0];
+    return `<div class="mf-track" style="cursor:pointer" data-action="selectdiscproduct" data-id="${p.id}">
+      <div class="mf-art" style="${photo?`background-image:url('${photo}');background-size:cover;background-position:center`:'background:var(--orange-1)'}">${photo?'':'📦'}</div>
+      <div class="mf-info"><div class="mf-title">${esc(p.title)}</div><div class="mf-artist">$${parseFloat(p.price).toFixed(2)}</div></div>
+    </div>`;
+  }).join('');
+  openOverlay(`<h2>🛒 Select an item to attach</h2><div style="margin-top:12px">${rows}</div>`);
+}
+
+function updateDiscAttachPreview(){
+  const preview=$('discAttachPreview'); if(!preview) return;
+  const {trackId,productId}=_discAttach;
+  if(trackId){
+    const t=CACHE.tracks.find(x=>x.id===trackId); if(!t){ preview.innerHTML=''; return; }
+    const artStyle=t.coverImg?`background-image:url('${t.coverImg}');background-size:cover;background-position:center`:`background:${grad(t.accent)}`;
+    preview.innerHTML=`<div class="disc-attach-preview"><div class="mf-art" style="${artStyle};width:36px;height:36px;border-radius:6px;flex-shrink:0">${t.coverImg?'':'◎'}</div><div class="mf-info"><div class="mf-title">${esc(t.title)}</div><div class="mf-artist">Track attached</div></div><button data-action="removediscattach" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:18px;line-height:1">✕</button></div>`;
+    return;
+  }
+  if(productId){
+    const p=CACHE.products.find(x=>x.id===productId); if(!p){ preview.innerHTML=''; return; }
+    const photo=p.photos&&p.photos[0];
+    preview.innerHTML=`<div class="disc-attach-preview"><div class="mf-art" style="${photo?`background-image:url('${photo}');background-size:cover;background-position:center`:'background:var(--orange-1)'};width:36px;height:36px;border-radius:6px;flex-shrink:0">${photo?'':'📦'}</div><div class="mf-info"><div class="mf-title">${esc(p.title)}</div><div class="mf-artist">Product attached</div></div><button data-action="removediscattach" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:18px;line-height:1">✕</button></div>`;
+    return;
+  }
+  preview.innerHTML='';
 }
 function card(t){
   const u=userById(t.userId);
@@ -3181,7 +3369,35 @@ document.addEventListener("click",e=>{
     confirmsetdeadline:()=>doSetDeadline(el.dataset.contestid),
     submitcorrection:()=>submitCorrection(el.dataset.contestid),
     confirmcorrection:()=>doCorrectContest(),
-    mobmenu:()=>openMobMenu()
+    mobmenu:()=>openMobMenu(),
+    togglefolder:()=>{
+      const sid=el.dataset.genre;
+      const body=$('mfbody-'+sid); const arrow=$('mfarrow-'+sid); const folder=$('mfolder-'+sid);
+      if(body){
+        const open=body.style.display!=='none';
+        body.style.display=open?'none':'block';
+        if(arrow) arrow.textContent=open?'▶':'▼';
+        if(folder) folder.classList.toggle('open',!open);
+        open?state.openFolders.delete(sid):state.openFolders.add(sid);
+      }
+    },
+    attachdiscovertrack:()=>openAttachTrack(),
+    attachdiscoverproduct:()=>openAttachProduct(),
+    selectdisctrack:()=>{ _discAttach={trackId:el.dataset.id,productId:null}; closeOverlay(); updateDiscAttachPreview(); },
+    selectdiscproduct:()=>{ _discAttach={trackId:null,productId:el.dataset.id}; closeOverlay(); updateDiscAttachPreview(); },
+    removediscattach:()=>{ _discAttach={trackId:null,productId:null}; updateDiscAttachPreview(); },
+    postdiscover:()=>postToDiscover(),
+    likediscpost:()=>{
+      if(!ME) return openEmailAuth();
+      const id=el.dataset.id; const F=firebase.firestore.FieldValue; const key='dp_'+id;
+      const has=(CACHE.reactions[key]?.likes||[]).includes(ME.id);
+      fbDB.collection('reactions').doc(key).set({likes:has?F.arrayRemove(ME.id):F.arrayUnion(ME.id)},{merge:true}).catch(e=>toast(e.message));
+    },
+    deletediscpost:()=>{
+      const id=el.dataset.id; const p=(CACHE.discoveryPosts||[]).find(x=>x.id===id);
+      if(!p||!ME) return; if(ME.id!==p.userId&&!isAdmin()) return;
+      fbDB.collection('discoveryPosts').doc(id).delete().catch(e=>toast(e.message));
+    }
   };
   if(M[a]) M[a]();
 });
@@ -3876,6 +4092,7 @@ function startListeners(){
   fbDB.collection("comments").onSnapshot(s=>{ CACHE.comments=s.docs.map(d=>({ id:d.id, ...d.data() })); scheduleRender(); }, e=>console.warn("comments",e.code));
   fbDB.collection("products").onSnapshot(s=>{ CACHE.products=s.docs.map(d=>({ id:d.id, ...d.data() })).sort((a,b)=>b.createdAt-a.createdAt); scheduleRender(); }, e=>console.warn("products",e.code));
   fbDB.collection("sellers").onSnapshot(s=>{ CACHE.sellers={}; s.forEach(d=>CACHE.sellers[d.id]={ id:d.id, ...d.data() }); scheduleRender(); }, e=>console.warn("sellers",e.code));
+  fbDB.collection("discoveryPosts").orderBy("time","desc").limit(100).onSnapshot(s=>{ CACHE.discoveryPosts=s.docs.map(d=>({ id:d.id, ...d.data() })); scheduleRender(); }, e=>console.warn("discoveryPosts",e.code));
 }
 function startAuthListeners(uid){
   // buyer orders (and admin gets all orders)

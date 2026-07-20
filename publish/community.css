@@ -233,6 +233,61 @@ body.has-page-bg .topbar{background:rgba(255,221,191,.45)}
 .folder-banner{background:#fff7f1;border:1px solid #ffe0c8;border-radius:12px;padding:13px 15px;font-size:13px;color:#8a6b50;margin-bottom:16px;line-height:1.5}
 .folder-note{margin-top:10px;padding:9px 12px;background:#fff3e0;border-left:3px solid var(--orange);border-radius:0 8px 8px 0;font-size:12px;color:#7a5c3a;line-height:1.6}
 
+/* ===== Discover page: two-column layout ===== */
+.discover-layout{display:grid;grid-template-columns:1fr 1fr;gap:24px;align-items:start}
+@media(max-width:820px){.discover-layout{grid-template-columns:1fr}}
+
+/* Music folders */
+.music-folder{border:1px solid var(--line);border-radius:12px;margin-bottom:10px;overflow:hidden;background:var(--card)}
+.music-folder-hd{display:flex;align-items:center;gap:8px;padding:11px 14px;cursor:pointer;user-select:none;background:var(--card);transition:background .15s}
+.music-folder-hd:hover{background:var(--orange-1)}
+.mf-arrow{font-size:9px;color:var(--muted);width:12px;flex-shrink:0;transition:transform .2s;display:inline-block}
+.music-folder.open .mf-arrow{transform:rotate(90deg)}
+.mf-icon{font-size:17px}
+.mf-name{font-weight:700;font-size:14px;flex:1}
+.mf-count{font-size:11px;color:var(--muted);background:var(--line);border-radius:20px;padding:2px 8px;font-weight:600}
+.music-folder-body{border-top:1px solid var(--line)}
+.mf-track{display:flex;align-items:center;gap:10px;padding:9px 14px;border-bottom:1px solid var(--line);transition:background .15s}
+.mf-track:last-child{border-bottom:none}
+.mf-track:hover{background:var(--orange-1)}
+.mf-art{width:40px;height:40px;border-radius:8px;flex-shrink:0;display:grid;place-items:center;font-size:14px;color:rgba(255,255,255,.9);cursor:pointer;background-size:cover;background-position:center}
+.mf-info{flex:1;min-width:0}
+.mf-title{font-weight:600;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer}
+.mf-artist{font-size:12px;color:var(--muted);cursor:pointer}
+.mf-plays{font-size:11px;color:var(--muted);white-space:nowrap;flex-shrink:0}
+.mf-play-btn{width:30px;height:30px;border-radius:50%;border:none;background:var(--orange);color:#fff;font-size:12px;display:grid;place-items:center;flex-shrink:0;cursor:pointer;opacity:0;transition:.15s}
+.mf-track:hover .mf-play-btn{opacity:1}
+
+/* Discovery feed composer */
+.disc-composer{border:1px solid var(--line);border-radius:14px;padding:12px 14px;margin-bottom:14px;background:#fff7f1}
+@media(prefers-color-scheme:dark){.disc-composer{background:rgba(251,122,40,.07)}}
+:root[data-theme="dark"] .disc-composer{background:rgba(251,122,40,.07)}
+.disc-composer textarea{width:100%;border:none;background:transparent;resize:vertical;min-height:62px;font-family:inherit;font-size:14px;outline:none;color:var(--ink)}
+.disc-composer-actions{display:flex;align-items:center;gap:8px;margin-top:8px;flex-wrap:wrap}
+.disc-attach-preview{display:flex;align-items:center;gap:8px;padding:8px 10px;background:var(--card);border:1px solid var(--line);border-radius:8px;margin:6px 0 2px}
+
+/* Discovery post cards */
+.disc-post{border:1px solid var(--line);border-radius:14px;padding:14px;margin-bottom:12px;background:var(--card)}
+.disc-post-top{display:flex;align-items:center;gap:10px;margin-bottom:10px}
+.disc-post-text{font-size:14px;margin-bottom:10px;white-space:pre-wrap;overflow-wrap:break-word;line-height:1.5}
+.disc-post-actions{display:flex;gap:14px;margin-top:8px;font-size:13px;padding-top:8px;border-top:1px solid var(--line)}
+.disc-post-actions button{background:none;border:none;color:var(--muted);display:inline-flex;align-items:center;gap:5px;font-size:13px;cursor:pointer;padding:0}
+.disc-post-actions button.on{color:var(--orange)}
+.disc-attach-track{display:flex;align-items:center;gap:10px;padding:10px 12px;background:var(--bg);border:1px solid var(--line);border-radius:10px;margin-bottom:10px;cursor:pointer;transition:background .15s}
+.disc-attach-track:hover{background:var(--orange-1)}
+.dat-art{width:46px;height:46px;border-radius:8px;flex-shrink:0;display:grid;place-items:center;font-size:18px;color:rgba(255,255,255,.9);background-size:cover;background-position:center}
+.dat-info{flex:1;min-width:0}
+.dat-title{font-weight:700;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.dat-sub{font-size:12px;color:var(--muted)}
+.dat-play{width:34px;height:34px;border-radius:50%;border:none;background:var(--orange);color:#fff;font-size:13px;display:grid;place-items:center;flex-shrink:0;cursor:pointer}
+.disc-attach-product{display:flex;align-items:center;gap:10px;padding:10px 12px;background:var(--bg);border:1px solid var(--line);border-radius:10px;margin-bottom:10px;cursor:pointer;transition:background .15s}
+.disc-attach-product:hover{background:var(--orange-1)}
+.dap-photo{width:46px;height:46px;border-radius:8px;flex-shrink:0;display:grid;place-items:center;font-size:20px;background-size:cover;background-position:center}
+.dap-info{flex:1;min-width:0}
+.dap-title{font-weight:700;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.dap-price{font-size:13px;color:var(--orange);font-weight:600}
+.dap-arrow{font-size:18px;color:var(--muted)}
+
 /* ===== streamer page: two columns (music | wall) ===== */
 .streamer-cols{display:grid;grid-template-columns:1fr 1fr;gap:24px;align-items:start;margin-top:8px}
 @media(max-width:760px){.streamer-cols{grid-template-columns:1fr}}
