@@ -366,6 +366,11 @@ body.has-page-bg .topbar{background:rgba(255,221,191,.45)}
 .cart-summary{background:var(--orange-1);border-radius:12px;padding:14px 16px}
 .cart-line{display:flex;justify-content:space-between;padding:5px 0;font-size:14px}
 .cart-total{font-weight:900;font-size:18px;border-top:1px solid var(--line);margin-top:4px;padding-top:8px}
+/* out of stock / stock info */
+.mp-oos-badge{display:block;margin-top:8px;padding:6px 12px;background:#FEF2F2;border:1px solid #FCA5A5;border-radius:8px;color:#DC2626;font-size:12px;font-weight:700;text-align:center;box-sizing:border-box}
+.mp-stock-info{display:inline-block;font-size:11px;font-weight:600;color:#15803D;margin:4px 0 2px;padding:2px 8px;border-radius:6px;background:#F0FDF4}
+.mp-stock-info.oos{color:#DC2626;background:#FEF2F2}
+
 /* payment box */
 .mp-payment-box{background:var(--orange-1);border-radius:12px;padding:16px;margin-top:16px;text-align:left}
 .mp-payoneer-email{background:#fff;border:2px solid var(--orange);border-radius:8px;padding:10px 14px;font-weight:800;font-size:15px;text-align:center;margin:8px 0;color:var(--ink);letter-spacing:.5px}

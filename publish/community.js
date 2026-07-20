@@ -1612,13 +1612,16 @@ function renderSellerStore(){
       ?`<div class="mp-grid">${products.map(mpSellerCard).join("")}</div>`
       :'<div class="empty" style="margin-top:24px">No products yet — click "Add product" to list your first item.</div>'}`;
 }
+function isOutOfStock(p){ return p && p.stock != null && Number(p.stock) <= 0; }
+
 function mpSellerCard(p){
-  const photo=p.photos&&p.photos[0];
+  const photo=p.photos&&p.photos[0]; const oos=isOutOfStock(p);
   return `<div class="mp-card">
     <div class="mp-photo" style="${photo?`background-image:url('${photo}');background-size:cover;background-position:center`:'background:var(--orange-1)'}" data-action="viewproduct" data-id="${p.id}">${photo?'':'📦'}</div>
     <div class="mp-card-body">
       <div class="mp-title">${esc(p.title)}</div>
       <div class="mp-price">$${parseFloat(p.price).toFixed(2)} <span class="mp-ship">+ $${parseFloat(p.shipping||0).toFixed(2)} ship</span></div>
+      ${p.stock!=null?`<div class="mp-stock-info${oos?' oos':''}">📦 ${oos?'Out of stock':`${p.stock} in stock`}</div>`:''}
       <div style="display:flex;gap:6px;margin-top:8px">
         <button class="btn sm" data-action="editproduct" data-id="${p.id}">Edit</button>
         <button class="btn sm" data-action="delproduct" data-id="${p.id}" style="color:#e2554f;border-color:#f0b3b3">Delete</button>
@@ -1639,6 +1642,7 @@ function openProductForm(productId){
     <div class="field"><label>Price (USD)</label><input class="fb-field" id="prodPrice" type="number" min="0.01" step="0.01" placeholder="0.00" value="${p?.price||''}" /></div>
     <div class="field"><label>Shipping cost (USD)</label><input class="fb-field" id="prodShip" type="number" min="0" step="0.01" placeholder="0.00" value="${p?.shipping||''}" /></div>
     <div class="field"><label>🦁 LionCoin price <span style="font-weight:400;color:var(--muted)">(optional — lets buyers pay with LNC)</span></label><input class="fb-field" id="prodLnc" type="number" min="1" step="1" placeholder="e.g. 500" value="${p?.lncPrice||''}" /></div>
+    <div class="field"><label>Stock quantity <span style="font-weight:400;color:var(--muted)">(optional — leave blank for unlimited)</span></label><input class="fb-field" id="prodStock" type="number" min="0" step="1" placeholder="e.g. 10" value="${p?.stock!=null?p.stock:''}" /></div>
     <div class="field"><label>Product photo</label>
       <div class="covup"><div class="covprev" id="prodPhotoPrev" style="${prevStyle}">${window._mpPhoto?'':'📦'}</div>
         <div><input type="file" id="prodPhotoFile" accept="image/*,.heic,.heif,.avif,.webp,.tiff,.bmp,.svg" /><div class="note" style="margin-top:4px">All photo formats supported (JPG, PNG, WEBP, HEIC, RAW…)</div></div></div></div>
@@ -1663,7 +1667,9 @@ async function doSaveProduct(productId){
   }
   const lncPriceRaw=parseInt(($("prodLnc")||{value:""}).value)||0;
   const lncPrice=lncPriceRaw>0?lncPriceRaw:null;
-  const data={ sellerId:ME.id, title, description, category, price, shipping, photos, ...(lncPrice?{lncPrice}:{lncPrice:null}), updatedAt:Date.now() };
+  const stockRaw=parseInt(($("prodStock")||{value:""}).value);
+  const stock=(!isNaN(stockRaw)&&stockRaw>=0)?stockRaw:null;
+  const data={ sellerId:ME.id, title, description, category, price, shipping, photos, ...(lncPrice?{lncPrice}:{lncPrice:null}), stock:stock!==null?stock:null, updatedAt:Date.now() };
   try{
     if(productId){ await fbDB.collection("products").doc(productId).update(data); closeOverlay(); toast("Product updated ✓"); }
     else{ data.createdAt=Date.now(); await fbDB.collection("products").add(data); closeOverlay(); toast("Product listed! 🎉"); }
@@ -1701,22 +1707,24 @@ function renderMarketplace(){
   setTimeout(()=>{ const s=$("mpSearch"); if(s) s.oninput=e=>{ state.mpSearch=e.target.value; renderMarketplace(); }; },0);
 }
 function mpBuyerCard(p){
-  const photo=p.photos&&p.photos[0]; const seller=CACHE.sellers[p.sellerId]; const inCart=(state.cart||[]).includes(p.id);
+  const photo=p.photos&&p.photos[0]; const seller=CACHE.sellers[p.sellerId]; const inCart=(state.cart||[]).includes(p.id); const oos=isOutOfStock(p);
   return `<div class="mp-card">
     <div class="mp-photo" style="${photo?`background-image:url('${photo}');background-size:cover;background-position:center`:'background:var(--orange-1)'}" data-action="viewproduct" data-id="${p.id}">${photo?'':'📦'}</div>
     <div class="mp-card-body">
       <div class="mp-title" data-action="viewproduct" data-id="${p.id}">${esc(p.title)}</div>
       <div class="mp-seller-name">${esc(seller?.name||'Seller')} · ${esc(seller?.location||'')}</div>
       <div class="mp-price">$${parseFloat(p.price).toFixed(2)} <span class="mp-ship">+ $${parseFloat(p.shipping||0).toFixed(2)} ship</span></div>
-      ${p.lncPrice?`<div class="lnc-badge" style="margin:4px 0">🦁 ${p.lncPrice} LNC</div>`:''}
-      <button class="btn sm ${inCart?'':'primary'}" data-action="addtocart" data-id="${p.id}" style="margin-top:8px;width:100%">${inCart?'In cart ✓':'Add to cart'}</button>
-      ${p.lncPrice?`<button class="btn sm" data-action="buywithlioncoin" data-id="${p.id}" style="margin-top:4px;width:100%">🦁 Buy with LNC</button>`:''}
+      ${p.lncPrice&&!oos?`<div class="lnc-badge" style="margin:4px 0">🦁 ${p.lncPrice} LNC</div>`:''}
+      ${oos
+        ?'<div class="mp-oos-badge">📦 Out of Stock</div>'
+        :`<button class="btn sm ${inCart?'':'primary'}" data-action="addtocart" data-id="${p.id}" style="margin-top:8px;width:100%">${inCart?'In cart ✓':'Add to cart'}</button>
+      ${p.lncPrice?`<button class="btn sm" data-action="buywithlioncoin" data-id="${p.id}" style="margin-top:4px;width:100%">🦁 Buy with LNC</button>`:''}`}
     </div>
   </div>`;
 }
 function viewProduct(id){
   const p=CACHE.products.find(x=>x.id===id); if(!p) return;
-  const seller=CACHE.sellers[p.sellerId]; const photo=p.photos&&p.photos[0]; const inCart=(state.cart||[]).includes(id);
+  const seller=CACHE.sellers[p.sellerId]; const photo=p.photos&&p.photos[0]; const inCart=(state.cart||[]).includes(id); const oos=isOutOfStock(p);
   openOverlay(`<div class="mp-detail">
     ${photo?`<div style="text-align:center;margin-bottom:12px"><img src="${photo}" class="mp-detail-img" data-action="zoomphoto" data-src="${photo}" /></div>`:''}
     <div class="mp-detail-title">${esc(p.title)}</div>
@@ -1724,9 +1732,11 @@ function viewProduct(id){
     <div class="mp-detail-price">$${parseFloat(p.price).toFixed(2)} <span class="mp-ship" style="font-size:14px;font-weight:400">+ $${parseFloat(p.shipping||0).toFixed(2)} shipping</span></div>
     <div class="mp-detail-desc">${esc(p.description)}</div>
     <div class="mp-seller-card">👤 <b>${esc(seller?.name||'Unknown')}</b> · 📍 ${esc(seller?.location||'')}</div>
-    <button class="btn ${inCart?'':'primary'} block" data-action="addtocart" data-id="${id}" style="margin-top:14px">${inCart?'✓ In cart — remove':'🛒 Add to cart'}</button>
+    ${oos
+      ?'<div class="mp-oos-badge" style="margin-top:14px;font-size:14px;padding:10px">📦 Out of Stock</div>'
+      :`<button class="btn ${inCart?'':'primary'} block" data-action="addtocart" data-id="${id}" style="margin-top:14px">${inCart?'✓ In cart — remove':'🛒 Add to cart'}</button>
     ${inCart?`<button class="btn primary block" data-action="nav" data-view="cart" style="margin-top:8px">Go to cart →</button>`:''}
-    ${p.lncPrice?`<div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border)"><div class="lnc-badge" style="margin-bottom:8px">🦁 ${p.lncPrice} LNC</div><button class="btn block" data-action="buywithlioncoin" data-id="${id}" style="margin-top:4px">🦁 Buy with LionCoin</button></div>`:''}
+    ${p.lncPrice?`<div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border)"><div class="lnc-badge" style="margin-bottom:8px">🦁 ${p.lncPrice} LNC</div><button class="btn block" data-action="buywithlioncoin" data-id="${id}" style="margin-top:4px">🦁 Buy with LionCoin</button></div>`:''}`}
   </div>`);
 }
 function zoomPhoto(src){
@@ -1737,7 +1747,9 @@ function zoomPhoto(src){
 function addToCart(id){
   if(!ME) return openEmailAuth();
   if(!state.cart) state.cart=[];
+  const p=CACHE.products.find(x=>x.id===id);
   const has=state.cart.includes(id);
+  if(!has&&isOutOfStock(p)) return toast("This item is out of stock 📦");
   state.cart=has?state.cart.filter(x=>x!==id):[...state.cart,id];
   persistCart();
   toast(has?"Removed from cart":"Added to cart 🛒");
@@ -1798,32 +1810,47 @@ async function doPlaceOrder(){
   if(!email.includes("@")) return toast("Enter a valid email");
   const items=state.cart.map(id=>CACHE.products.find(p=>p.id===id)).filter(Boolean);
   if(!items.length) return toast("Cart is empty");
+  const oosItem=items.find(isOutOfStock);
+  if(oosItem) return toast(`"${oosItem.title}" is out of stock — remove it from your cart`);
   const subtotal=items.reduce((s,p)=>s+parseFloat(p.price),0);
   const shippingTotal=items.reduce((s,p)=>s+parseFloat(p.shipping||0),0);
   const fee=+(subtotal*PLATFORM_FEE).toFixed(2);
   const total=+(subtotal+shippingTotal+fee).toFixed(2);
+  const F=firebase.firestore.FieldValue;
+  const orderRef=fbDB.collection("orders").doc();
   try{
-    const ref=await fbDB.collection("orders").add({
-      buyerId:ME.id, buyerName:name, buyerEmail:email, buyerAddress:address,
-      items:items.map(p=>({ productId:p.id, title:p.title, price:p.price, shipping:p.shipping||0, sellerId:p.sellerId })),
-      subtotal, shipping:shippingTotal, platformFee:fee, total, status:"pending_payment", createdAt:Date.now()
+    await fbDB.runTransaction(async t=>{
+      const productRefs=items.map(p=>fbDB.collection('products').doc(p.id));
+      const snaps=await Promise.all(productRefs.map(r=>t.get(r)));
+      for(const snap of snaps){
+        const d=snap.data();
+        if(d&&d.stock!=null&&d.stock<=0) throw new Error(`"${d.title}" is out of stock`);
+      }
+      t.set(orderRef,{
+        buyerId:ME.id, buyerName:name, buyerEmail:email, buyerAddress:address,
+        items:items.map(p=>({productId:p.id,title:p.title,price:p.price,shipping:p.shipping||0,sellerId:p.sellerId})),
+        subtotal, shipping:shippingTotal, platformFee:fee, total, status:"pending_payment", createdAt:Date.now()
+      });
+      snaps.forEach(snap=>{
+        if(snap.data()?.stock!=null) t.update(snap.ref,{stock:F.increment(-1)});
+      });
     });
     state.cart=[]; persistCart();
     closeOverlay();
     openOverlay(`<div style="text-align:center;padding:8px">
       <div style="font-size:44px;margin-bottom:12px">✅</div>
       <h2>Order placed!</h2>
-      <p class="sub">Order ID: <b>${ref.id.slice(0,8).toUpperCase()}</b></p>
+      <p class="sub">Order ID: <b>${orderRef.id.slice(0,8).toUpperCase()}</b></p>
       <div class="mp-payment-box">
         <div style="font-weight:800;font-size:15px;margin-bottom:10px">💳 Complete your payment via Payoneer</div>
         <p style="font-size:14px;margin-bottom:8px">Send <b>$${total.toFixed(2)} USD</b> to:</p>
         <div class="mp-payoneer-email">${PLATFORM_EMAIL}</div>
-        <p style="font-size:12px;color:var(--muted);margin-top:10px">Include order ID <b>${ref.id.slice(0,8).toUpperCase()}</b> in the payment note so we can match your order.</p>
+        <p style="font-size:12px;color:var(--muted);margin-top:10px">Include order ID <b>${orderRef.id.slice(0,8).toUpperCase()}</b> in the payment note so we can match your order.</p>
         <p style="font-size:12px;color:var(--muted);margin-top:6px">Your order will be confirmed and the seller notified within 1–2 business days after payment is received.</p>
       </div>
       <button class="btn primary block" data-action="close" style="margin-top:16px">Done</button>
     </div>`);
-  } catch(e){ toast("Couldn't place order: "+(e.code||e.message)); }
+  } catch(e){ toast(e.message||"Couldn't place order: "+(e.code||"")); }
 }
 
 // ---------- delegation ----------
@@ -2560,6 +2587,7 @@ async function checkFanMilestone(uid){
 async function buyWithLNC(productId){
   if(!ME) return openEmailAuth();
   const p=CACHE.products.find(x=>x.id===productId); if(!p||!p.lncPrice) return;
+  if(isOutOfStock(p)) return toast("This item is out of stock 📦");
   const lncPrice=parseInt(p.lncPrice); const bal=CACHE.wallet?.balance||0;
   if(bal<lncPrice) return toast(`Not enough LionCoins — need ${lncPrice} LNC, you have ${Math.floor(bal)} LNC`);
   const fee=Math.round(lncPrice*0.05); const sellerAmount=lncPrice-fee;
@@ -2587,13 +2615,17 @@ async function confirmLncBuy(productId){
   const F=firebase.firestore.FieldValue;
   const buyerRef=fbDB.collection('wallets').doc(ME.id);
   const sellerRef=fbDB.collection('wallets').doc(p.sellerId);
+  const productRef=fbDB.collection('products').doc(productId);
   const now=Date.now(); let ok=false;
   try{
     await fbDB.runTransaction(async t=>{
-      const buyerSnap=await t.get(buyerRef);
+      const [buyerSnap,productSnap]=await Promise.all([t.get(buyerRef),t.get(productRef)]);
+      const pd=productSnap.data();
+      if(pd&&pd.stock!=null&&pd.stock<=0) throw new Error('out_of_stock');
       if(!buyerSnap.exists||(buyerSnap.data().balance||0)<lncPrice) throw new Error('Insufficient balance');
       t.update(buyerRef,{balance:F.increment(-lncPrice),totalSpent:F.increment(lncPrice)});
       t.set(sellerRef,{balance:F.increment(sellerAmount),totalEarned:F.increment(sellerAmount)},{merge:true});
+      if(pd&&pd.stock!=null) t.update(productRef,{stock:F.increment(-1)});
       ok=true;
     });
     if(ok){
@@ -2605,7 +2637,10 @@ async function confirmLncBuy(productId){
       }).catch(()=>{});
       closeOverlay(); toast(`Purchase complete! ${sellerAmount} LNC sent to seller 🦁`);
     }
-  }catch(e){ toast('Not enough LionCoins or transaction failed'); }
+  }catch(e){
+    if(e.message==='out_of_stock') toast('This item is out of stock 📦');
+    else toast('Not enough LionCoins or transaction failed');
+  }
 }
 
 function renderWallet(){
