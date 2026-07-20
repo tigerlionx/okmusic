@@ -2636,6 +2636,7 @@ function renderContestCard(c){
       adminHtml=`<div class="contest-admin">
         <div class="contest-admin-label">⚙️ Admin — resolve contest</div>
         <div style="display:flex;flex-wrap:wrap;gap:6px">${(c.options||[]).map(o=>`<button class="btn sm" data-action="resolvecontest" data-contestid="${c.id}" data-optionid="${o.id}" style="background:#F0FDF4;border:1.5px solid #86EFAC;color:#15803D">✓ ${esc(o.label)}</button>`).join('')}</div>
+        <button class="btn sm" data-action="setdeadline" data-contestid="${c.id}" style="margin-top:8px;background:#EFF6FF;border:1.5px solid #93C5FD;color:#1D4ED8">⏰ ${c.deadline?'Change deadline':'Set deadline'}</button>
       </div>`;
     } else {
       adminHtml=`<div class="contest-admin">
@@ -2753,6 +2754,37 @@ async function doContestPick(contestId,optionId){
     });
     closeOverlay(); toast('Pick locked in! Good luck 🍀');
   }catch(e){ toast(e.message||'Failed to save pick'); }
+}
+
+function openSetDeadline(contestId){
+  if(!isAdmin()) return;
+  const c=(CACHE.contests||[]).find(x=>x.id===contestId);
+  if(!c) return;
+  const pad=n=>String(n).padStart(2,'0');
+  const toInputVal=ts=>{const d=new Date(ts);return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;};
+  const existing=c.deadline?toInputVal(c.deadline):'';
+  openOverlay(`<div style="padding:8px 0">
+    <h2 style="margin-bottom:6px">⏰ ${c.deadline?'Change':'Set'} voting deadline</h2>
+    <p class="sub" style="margin:0 0 16px">${esc(c.title)}</p>
+    <div class="field"><label>Deadline</label><input class="fb-field" id="dlInput" type="datetime-local" value="${existing}" /></div>
+    <p style="font-size:12px;color:var(--muted);margin:4px 0 18px">Leave blank to remove the deadline.</p>
+    <div style="display:flex;gap:10px">
+      <button class="btn block" data-action="close">Cancel</button>
+      <button class="btn primary block" data-action="confirmsetdeadline" data-contestid="${contestId}">Save deadline</button>
+    </div>
+  </div>`);
+}
+
+async function doSetDeadline(contestId){
+  if(!isAdmin()) return;
+  const val=($('dlInput')?.value||'').trim();
+  const deadline=val?new Date(val).getTime():null;
+  if(deadline&&deadline<=Date.now()) return toast('Deadline must be in the future');
+  try{
+    await db.collection('contests').doc(contestId).update({deadline:deadline||null});
+    closeOverlay();
+    toast(deadline?'Deadline saved':'Deadline removed');
+  }catch(e){ toast(e.message||'Failed to save deadline'); }
 }
 
 function openResolveContest(contestId,optionId){
@@ -3145,6 +3177,8 @@ document.addEventListener("click",e=>{
     resolvecontest:()=>openResolveContest(el.dataset.contestid,el.dataset.optionid),
     confirmresolvecontest:()=>doResolveContest(el.dataset.contestid,el.dataset.optionid),
     correctcontest:()=>openCorrectContest(el.dataset.contestid),
+    setdeadline:()=>openSetDeadline(el.dataset.contestid),
+    confirmsetdeadline:()=>doSetDeadline(el.dataset.contestid),
     submitcorrection:()=>submitCorrection(el.dataset.contestid),
     confirmcorrection:()=>doCorrectContest(),
     mobmenu:()=>openMobMenu()
