@@ -176,6 +176,7 @@ service cloud.firestore {
         (
           resource.data.status == 'open' &&
           !(request.auth.uid in resource.data.picks) &&
+          (!('deadline' in resource.data) || resource.data.deadline == null || request.time.toMillis() < resource.data.deadline) &&
           request.resource.data.diff(resource.data).affectedKeys().hasOnly(['picks'])
         )
       );

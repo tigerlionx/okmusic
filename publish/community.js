@@ -2562,18 +2562,29 @@ function renderContestCard(c){
   const myWon=myPick&&c.winnerOptionId&&myPick.optionId===c.winnerOptionId;
   const lastCorrection=(c.auditLog||[]).filter(l=>l.action==='corrected').slice(-1)[0];
   const pickCount=Object.keys(c.picks||{}).length;
+  const now=Date.now();
+  const isDeadlinePassed=c.deadline&&now>c.deadline;
+  const isVotingOpen=c.status==='open'&&!isDeadlinePassed;
 
   // Stripe color: green if I won, orange if open, gray if resolved
   const stripeClass=c.status==='open'?'open':myWon?'resolved-win':'resolved';
 
+  // Deadline display
+  const fmtDeadline=ts=>new Date(ts).toLocaleString(undefined,{month:'short',day:'numeric',year:'numeric',hour:'numeric',minute:'2-digit'});
+  const deadlineHtml=c.deadline&&c.status==='open'
+    ?`<div class="contest-deadline${isDeadlinePassed?' passed':''}">${isDeadlinePassed?'🕐 Voting ended':'⏰ Vote by'} <b>${fmtDeadline(c.deadline)}</b></div>`
+    :'';
+
   // Status badge
   const statusBadge=c.status==='open'
-    ?'<span class="contest-badge open"><span class="contest-badge-dot"></span>Open</span>'
+    ?(isDeadlinePassed
+      ?'<span class="contest-badge closed">🕐 Voting closed</span>'
+      :'<span class="contest-badge open"><span class="contest-badge-dot"></span>Open</span>')
     :'<span class="contest-badge resolved">🏁 Resolved</span>';
 
   // Options
   let optionsHtml='';
-  if(c.status==='open'&&ME&&!myPick){
+  if(isVotingOpen&&ME&&!myPick){
     // Interactive pick buttons
     optionsHtml=`<div class="contest-opts">${(c.options||[]).map(o=>`
       <button class="contest-opt" data-action="pickcontestoption" data-contestid="${c.id}" data-optionid="${o.id}">
@@ -2612,6 +2623,8 @@ function renderContestCard(c){
       resultHtml=`<div class="contest-result-noplay">🏁 Winner: <b>${esc(winnerOpt?.label||'?')}</b></div>`;
     }
     if(lastCorrection) resultHtml+=`<div class="contest-correction-note">📝 Result corrected: ${esc(lastCorrection.reason)}</div>`;
+  } else if(c.status==='open'&&isDeadlinePassed&&!myPick){
+    resultHtml=`<div class="contest-result-locked">🕐 Voting has closed — the admin will announce the result shortly</div>`;
   } else if(c.status==='open'&&myPick){
     resultHtml=`<div class="contest-result-noplay" style="background:rgba(251,122,40,.06);border-color:rgba(251,122,40,.25);color:#C2410C">🔒 Pick locked in — awaiting result</div>`;
   }
@@ -2642,6 +2655,7 @@ function renderContestCard(c){
         ${statusBadge}
         <span class="contest-prize-chip">🦁 ${c.prize.toLocaleString()} LNC</span>
       </div>
+      ${deadlineHtml}
       <h3 class="contest-title">${esc(c.title)}</h3>
       ${optionsHtml}
       ${resultHtml}
@@ -2657,9 +2671,14 @@ function renderContestCard(c){
 
 function openCreateContest(){
   if(!isAdmin()) return;
+  // Default deadline = 7 days from now, rounded to nearest hour
+  const def=new Date(Date.now()+7*864e5); def.setMinutes(0,0,0);
+  const pad=n=>String(n).padStart(2,'0');
+  const defStr=`${def.getFullYear()}-${pad(def.getMonth()+1)}-${pad(def.getDate())}T${pad(def.getHours())}:00`;
   openOverlay(`<h2>🏆 New Contest</h2>
     <div class="field"><label>Question / Title</label><input class="fb-field" id="ctTitle" placeholder="e.g. Who will win the World Cup?" /></div>
     <div class="field"><label>Prize per winner (LNC)</label><input class="fb-field" id="ctPrize" type="number" min="1" step="1" placeholder="e.g. 5000" /></div>
+    <div class="field"><label>Voting deadline</label><input class="fb-field" id="ctDeadline" type="datetime-local" value="${defStr}" /><div style="font-size:12px;color:var(--muted);margin-top:4px">Clear this field to have no deadline</div></div>
     <div class="field"><label>Answer options</label>
       <div id="ctOpts">
         <input class="fb-field ct-opt-in" placeholder="Option 1" style="margin-bottom:6px" />
@@ -2686,12 +2705,15 @@ async function doCreateContest(){
   const title=($('ctTitle')?.value||'').trim();
   const prize=parseInt($('ctPrize')?.value||'0');
   const labels=[...document.querySelectorAll('.ct-opt-in')].map(i=>i.value.trim()).filter(Boolean);
+  const deadlineVal=($('ctDeadline')?.value||'').trim();
+  const deadline=deadlineVal?new Date(deadlineVal).getTime():null;
   if(!title) return toast('Enter a title');
   if(!prize||prize<1) return toast('Enter a valid prize amount');
   if(labels.length<2) return toast('Add at least 2 options');
+  if(deadline&&deadline<=Date.now()) return toast('Deadline must be in the future');
   try{
     await fbDB.collection('contests').add({
-      title,prize,
+      title,prize,deadline:deadline||null,
       options:labels.map((label,i)=>({id:'o'+i,label})),
       status:'open',winnerOptionId:null,picks:{},auditLog:[],
       createdAt:Date.now(),createdBy:ME.id,resolvedAt:null
@@ -2705,6 +2727,7 @@ function openPickOption(contestId,optionId){
   const c=(CACHE.contests||[]).find(x=>x.id===contestId);
   const opt=c?.options?.find(o=>o.id===optionId);
   if(!c||!opt||c.status!=='open'||c.picks?.[ME.id]) return;
+  if(c.deadline&&Date.now()>c.deadline) return toast('⏰ Voting deadline has passed for this contest');
   openOverlay(`<div style="text-align:center;padding:8px 0">
     <div style="font-size:40px;margin-bottom:10px">🏆</div>
     <h2 style="margin-bottom:8px">Validate your answer</h2>
@@ -2723,6 +2746,7 @@ async function doContestPick(contestId,optionId){
   if(!ME) return;
   const c=(CACHE.contests||[]).find(x=>x.id===contestId);
   if(!c||c.status!=='open'||c.picks?.[ME.id]) return;
+  if(c.deadline&&Date.now()>c.deadline) return toast('⏰ Voting deadline has passed');
   try{
     await fbDB.collection('contests').doc(contestId).update({
       [`picks.${ME.id}`]:{optionId,confirmedAt:Date.now(),credited:false,creditAmount:0}
