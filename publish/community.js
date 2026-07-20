@@ -829,6 +829,14 @@ function lpTag(url){
   if(!url)return'';
   return`<div class="lp-pending" data-url="${esc(url)}"></div>`;
 }
+function _getYouTubeId(url){
+  const m=url.match(/(?:youtube\.com\/watch\?(?:[^#&?]*&)?v=|youtu\.be\/|youtube\.com\/embed\/)([A-Za-z0-9_-]{11})/);
+  return m?m[1]:null;
+}
+function _getVimeoId(url){
+  const m=url.match(/vimeo\.com\/(\d+)/);
+  return m?m[1]:null;
+}
 async function fetchLinkPreviews(){
   document.querySelectorAll('.lp-pending').forEach(async el=>{
     el.classList.remove('lp-pending');
@@ -836,6 +844,27 @@ async function fetchLinkPreviews(){
     if(_linkCache[url]===null)return;
     if(_linkCache[url]){el.innerHTML=_lpCard(_linkCache[url],url);return;}
     try{
+      // YouTube — use oEmbed (CORS-enabled, no API key needed)
+      const ytId=_getYouTubeId(url);
+      if(ytId){
+        const r=await fetch(`https://www.youtube.com/oembed?url=${encodeURIComponent(url)}&format=json`);
+        if(r.ok){
+          const j=await r.json();
+          const data={title:j.title,description:`${j.author_name} · YouTube`,image:{url:`https://img.youtube.com/vi/${ytId}/hqdefault.jpg`}};
+          _linkCache[url]=data;el.innerHTML=_lpCard(data,url);return;
+        }
+      }
+      // Vimeo — use oEmbed
+      const vimeoId=_getVimeoId(url);
+      if(vimeoId){
+        const r=await fetch(`https://vimeo.com/api/oembed.json?url=${encodeURIComponent(url)}`);
+        if(r.ok){
+          const j=await r.json();
+          const data={title:j.title,description:`${j.author_name} · Vimeo`,image:{url:j.thumbnail_url}};
+          _linkCache[url]=data;el.innerHTML=_lpCard(data,url);return;
+        }
+      }
+      // General pages — microlink.io
       const r=await fetch(`https://api.microlink.io/?url=${encodeURIComponent(url)}`);
       const j=await r.json();
       if(j.status==='success'&&j.data){_linkCache[url]=j.data;el.innerHTML=_lpCard(j.data,url);}
@@ -849,7 +878,7 @@ function _lpCard(data,url){
   const desc=(data.description||'').slice(0,120);
   let domain='';try{domain=new URL(url).hostname.replace(/^www\./,'');}catch(e){domain=url.slice(0,30);}
   if(!title&&!img)return'';
-  return`<a class="link-preview-card" href="${esc(url)}" target="_blank" rel="noopener noreferrer">${img?`<div class="lp-img" style="background-image:url('${esc(img)}')"></div>`:''}<div class="lp-info"><div class="lp-domain">${esc(domain)}</div>${title?`<div class="lp-title">${esc(title)}</div>`:''}${desc?`<div class="lp-desc">${esc(desc)}</div>`:''}</div></a>`;
+  return`<a class="link-preview-card" href="${esc(url)}" target="_blank" rel="noopener noreferrer">${img?`<div class="lp-img-top" style="background-image:url('${esc(img)}')"></div>`:''}<div class="lp-info"><div class="lp-domain">${esc(domain)}</div>${title?`<div class="lp-title">${esc(title)}</div>`:''}${desc?`<div class="lp-desc">${esc(desc)}</div>`:''}</div></a>`;
 }
 
 function statusCard(s){
