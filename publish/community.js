@@ -564,6 +564,7 @@ function renderDiscover(){
       </div>
       <div class="discover-feed">
         <div class="col-h" style="margin-top:0">📣 Discovery Feed</div>
+        ${pinnedContestBanner()}
         ${discoverComposer()}
         <div id="discFeedList">${discPosts.length?discPosts.map(discoverPostCard).join(''):'<div class="empty" style="padding:24px 0;text-align:center">No promotions yet.<br><span style="font-size:13px;color:var(--muted)">Be the first to showcase your music or items.</span></div>'}</div>
       </div>
@@ -593,6 +594,39 @@ function discoverFolder(genre, tracks, sid){
       <span class="mf-count">${tracks.length}</span>
     </div>
     <div class="music-folder-body" id="mfbody-${sid}" style="display:${open?'block':'none'}">${rows}</div>
+  </div>`;
+}
+
+function pinnedContestBanner(){
+  const now=Date.now();
+  const openContests=(CACHE.contests||[]).filter(c=>c.status==='open');
+  if(!openContests.length) return '';
+  const c=openContests.sort((a,b)=>b.createdAt-a.createdAt)[0];
+  const myPick=c.picks?.[ME?.id];
+  const deadlinePassed=c.deadline&&now>c.deadline;
+  const fmtDl=ts=>new Date(ts).toLocaleString(undefined,{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'});
+  let pickSection='';
+  if(myPick){
+    const myOpt=c.options?.find(o=>o.id===myPick.optionId);
+    pickSection=`<div class="disc-pin-locked">🔒 Your pick: <b>${esc(myOpt?.label||'?')}</b> — awaiting result</div>`;
+  } else if(deadlinePassed){
+    pickSection=`<div class="disc-pin-locked disc-pin-locked-wait">🕐 Voting closed — result coming soon</div>`;
+  } else if(!ME){
+    pickSection=`<div class="disc-pin-opts"><p class="disc-pin-signin">Sign in to submit your pick and win LNC</p></div>`;
+  } else {
+    pickSection=`<div class="disc-pin-opts">${(c.options||[]).map(o=>`<button class="disc-pin-opt-btn" data-action="pickcontestoption" data-contestid="${c.id}" data-optionid="${o.id}">${esc(o.label)}</button>`).join('')}</div>`;
+  }
+  const deadlineRow=c.deadline&&!deadlinePassed?`<div class="disc-pin-deadline">⏰ Vote by <b>${fmtDl(c.deadline)}</b></div>`
+    :deadlinePassed?`<div class="disc-pin-deadline" style="color:var(--muted)">🕐 Voting has closed</div>`:'';
+  return `<div class="disc-pinned-contest">
+    <div class="disc-pin-hd">
+      <span class="disc-pin-label">📌 Active Challenge</span>
+      <span class="disc-pin-prize">🦁 ${c.prize.toLocaleString()} LNC</span>
+    </div>
+    <div class="disc-pin-title">${esc(c.title)}</div>
+    ${deadlineRow}
+    ${pickSection}
+    <button class="btn sm" data-action="nav" data-view="contests" style="width:100%;margin-top:8px;font-size:12px">See all contests →</button>
   </div>`;
 }
 

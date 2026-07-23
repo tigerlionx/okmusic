@@ -259,6 +259,28 @@ body.has-page-bg .topbar{background:rgba(255,221,191,.45)}
 .mf-track:hover .mf-play-btn{opacity:1}
 
 /* Discovery feed composer */
+/* Pinned contest banner on Discovery Feed */
+.disc-pinned-contest{background:linear-gradient(135deg,var(--orange-1),var(--orange-2));border:2px solid var(--orange);border-radius:14px;padding:14px 16px;margin-bottom:14px}
+.disc-pin-hd{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;gap:8px}
+.disc-pin-label{font-size:10.5px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:var(--orange-deep)}
+.disc-pin-prize{font-size:12px;font-weight:800;background:var(--orange);color:#fff;padding:3px 10px;border-radius:99px;white-space:nowrap}
+.disc-pin-title{font-size:15px;font-weight:800;color:var(--ink);line-height:1.35;margin-bottom:6px}
+.disc-pin-deadline{font-size:12px;color:var(--orange-deep);margin-bottom:10px}
+.disc-pin-opts{display:flex;flex-direction:column;gap:6px;margin-bottom:4px}
+.disc-pin-opt-btn{width:100%;text-align:left;padding:9px 14px;background:#fff;border:1.5px solid var(--orange);border-radius:10px;font-size:13px;font-weight:600;color:var(--ink);cursor:pointer;transition:background .12s,color .12s}
+.disc-pin-opt-btn:hover{background:var(--orange);color:#fff}
+.disc-pin-locked{font-size:13px;font-weight:600;color:var(--orange-deep);background:rgba(255,255,255,.7);border-radius:8px;padding:8px 12px;margin-bottom:4px}
+.disc-pin-locked-wait{color:var(--muted);background:rgba(255,255,255,.5)}
+.disc-pin-signin{font-size:13px;color:var(--muted);text-align:center;margin:0;padding:6px 0}
+@media(prefers-color-scheme:dark){
+  .disc-pinned-contest{background:linear-gradient(135deg,rgba(251,122,40,.15),rgba(251,122,40,.08))}
+  .disc-pin-opt-btn{background:rgba(255,255,255,.08);color:var(--ink)}
+  .disc-pin-locked{background:rgba(255,255,255,.08)}
+}
+:root[data-theme="dark"] .disc-pinned-contest{background:linear-gradient(135deg,rgba(251,122,40,.15),rgba(251,122,40,.08))}
+:root[data-theme="dark"] .disc-pin-opt-btn{background:rgba(255,255,255,.08);color:var(--ink)}
+:root[data-theme="dark"] .disc-pin-locked{background:rgba(255,255,255,.08)}
+
 .disc-composer{border:1px solid var(--line);border-radius:14px;padding:12px 14px;margin-bottom:14px;background:#fff7f1}
 @media(prefers-color-scheme:dark){.disc-composer{background:rgba(251,122,40,.07)}}
 :root[data-theme="dark"] .disc-composer{background:rgba(251,122,40,.07)}
