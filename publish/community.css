@@ -284,14 +284,27 @@ body.has-page-bg .topbar{background:rgba(255,221,191,.45)}
 .disc-composer{border:1px solid var(--line);border-radius:14px;padding:12px 14px;margin-bottom:14px;background:#fff7f1}
 @media(prefers-color-scheme:dark){.disc-composer{background:rgba(251,122,40,.07)}}
 :root[data-theme="dark"] .disc-composer{background:rgba(251,122,40,.07)}
+.disc-composer-article{border-color:var(--orange)}
 .disc-composer textarea{width:100%;border:none;background:transparent;resize:vertical;min-height:62px;font-family:inherit;font-size:14px;outline:none;color:var(--ink)}
 .disc-composer-actions{display:flex;align-items:center;gap:8px;margin-top:8px;flex-wrap:wrap}
 .disc-attach-preview{display:flex;align-items:center;gap:8px;padding:8px 10px;background:var(--card);border:1px solid var(--line);border-radius:8px;margin:6px 0 2px}
+.disc-mode-tabs{display:flex;gap:6px;margin-bottom:10px;border-bottom:1px solid var(--line);padding-bottom:8px}
+.disc-mode-tab{background:none;border:none;font-size:13px;font-weight:600;color:var(--muted);cursor:pointer;padding:4px 10px;border-radius:8px;transition:background .12s,color .12s}
+.disc-mode-tab.active{background:var(--orange-1);color:var(--orange-deep)}
+.disc-mode-tab:hover:not(.active){background:var(--card)}
+.disc-title-input{width:100%;border:none;border-bottom:1px solid var(--line);background:transparent;font-size:17px;font-weight:800;color:var(--ink);padding:4px 0 8px;margin-bottom:8px;outline:none;font-family:inherit;box-sizing:border-box}
+.disc-title-input::placeholder{color:var(--muted);font-weight:400}
 
 /* Discovery post cards */
 .disc-post{border:1px solid var(--line);border-radius:14px;padding:14px;margin-bottom:12px;background:var(--card)}
+.disc-post-article{border-left:3px solid var(--orange)}
 .disc-post-top{display:flex;align-items:center;gap:10px;margin-bottom:10px}
-.disc-post-text{font-size:14px;margin-bottom:10px;white-space:pre-wrap;overflow-wrap:break-word;line-height:1.5}
+.disc-article-title{font-size:17px;font-weight:800;color:var(--ink);line-height:1.3;margin-bottom:8px}
+.disc-post-text{font-size:14px;margin-bottom:4px;white-space:pre-wrap;overflow-wrap:break-word;line-height:1.6}
+.disc-post-text.long{max-height:130px;overflow:hidden;-webkit-mask-image:linear-gradient(to bottom,black 55%,transparent 100%);mask-image:linear-gradient(to bottom,black 55%,transparent 100%)}
+.disc-post-text.long.expanded{max-height:none;-webkit-mask-image:none;mask-image:none}
+.disc-read-more-btn{background:none;border:none;color:var(--orange);font-size:13px;font-weight:600;cursor:pointer;padding:2px 0 10px;display:block}
+.disc-read-more-btn:hover{text-decoration:underline}
 .disc-post-actions{display:flex;gap:14px;margin-top:8px;font-size:13px;padding-top:8px;border-top:1px solid var(--line)}
 .disc-post-actions button{background:none;border:none;color:var(--muted);display:inline-flex;align-items:center;gap:5px;font-size:13px;cursor:pointer;padding:0}
 .disc-post-actions button.on{color:var(--orange)}

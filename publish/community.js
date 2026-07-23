@@ -11,6 +11,7 @@ const $ = (id) => document.getElementById(id);
 const audio = $("audio");
 let _linkCache = {};
 let _discAttach = {trackId:null, productId:null};
+let _discMode = 'short'; // 'short' | 'article'
 let _preMusicVol = 1;
 
 // Seed data (incl. 100 demo creators) now lives in community-data.js:
@@ -635,13 +636,19 @@ function discoverComposer(){
     <p style="color:var(--muted);font-size:14px;margin:0 0 10px">Sign in to promote your music & items here.</p>
     <button class="btn primary sm" data-action="signin">Sign in</button>
   </div>`;
-  return `<div class="disc-composer">
-    <textarea id="discoverText" placeholder="Promote your track, album or marketplace item… e.g. 'Just dropped my new EP — check it out!'"></textarea>
+  const art=_discMode==='article';
+  return `<div class="disc-composer${art?' disc-composer-article':''}">
+    <div class="disc-mode-tabs">
+      <button class="disc-mode-tab${!art?' active':''}" data-action="setdiscmode" data-mode="short">✏️ Quick post</button>
+      <button class="disc-mode-tab${art?' active':''}" data-action="setdiscmode" data-mode="article">📝 Article</button>
+    </div>
+    ${art?`<input id="discTitleInput" class="disc-title-input" placeholder="Article headline (optional)" maxlength="120" />`:''}
+    <textarea id="discoverText" placeholder="${art?'Write your article — share news, insights or a story about your music…':"Promote your track, album or marketplace item… e.g. 'Just dropped my new EP — check it out!'"}" style="min-height:${art?'200px':'62px'}"></textarea>
     <div id="discAttachPreview"></div>
     <div class="disc-composer-actions">
-      <button class="btn sm" data-action="attachdiscovertrack">🎵 Attach track</button>
-      <button class="btn sm" data-action="attachdiscoverproduct">🛒 Attach item</button>
-      <button class="btn sm primary" data-action="postdiscover" style="margin-left:auto">Post</button>
+      ${!art?`<button class="btn sm" data-action="attachdiscovertrack">🎵 Attach track</button>
+      <button class="btn sm" data-action="attachdiscoverproduct">🛒 Attach item</button>`:''}
+      <button class="btn sm primary" data-action="postdiscover" style="margin-left:auto">${art?'Publish Article':'Post'}</button>
     </div>
   </div>`;
 }
@@ -653,6 +660,8 @@ function discoverPostCard(p){
   const liked=(CACHE.reactions[likeKey]?.likes||[]).includes(ME?.id);
   const lc=(CACHE.reactions[likeKey]?.likes||[]).length;
   const canDelete=ME&&(ME.id===p.userId||isAdmin());
+  const isArticle=p.type==='article';
+  const isLong=(p.text||'').length>500;
 
   let trackHtml='';
   if(p.trackId){
@@ -678,16 +687,18 @@ function discoverPostCard(p){
       </div>`;
     }
   }
-  return `<div class="disc-post">
+  return `<div class="disc-post${isArticle?' disc-post-article':''}">
     <div class="disc-post-top">
       <div class="avatar" style="${avatarStyle(u,36)};cursor:pointer" data-action="viewavatar" data-uid="${u.id}">${u.avatarImg?'':initials(u.name)}</div>
       <div style="flex:1;min-width:0">
         <div class="sname" data-action="profile" data-uid="${u.id}">${esc(u.name)}</div>
-        <div class="stime">${timeAgo(p.time)}</div>
+        <div class="stime">${timeAgo(p.time)}${isArticle?' · 📝 Article':''}</div>
       </div>
       ${canDelete?`<button class="btn sm" data-action="deletediscpost" data-id="${p.id}" style="color:#e2554f;border-color:#e2554f">🗑</button>`:''}
     </div>
-    ${p.text?`<div class="disc-post-text">${postHtml}</div>`:''}
+    ${isArticle&&p.title?`<div class="disc-article-title">${esc(p.title)}</div>`:''}
+    ${p.text?`<div class="disc-post-text${isLong?' long':''}" id="dpt-${p.id}">${postHtml}</div>
+    ${isLong?`<button class="disc-read-more-btn" data-action="togglereadmore" data-pid="${p.id}">Read more →</button>`:''}`:''}
     ${trackHtml}${productHtml}
     <div class="disc-post-actions">
       <button class="${liked?'on':''}" data-action="likediscpost" data-id="${p.id}">👍 ${nfmt(lc)}</button>
@@ -698,12 +709,16 @@ function discoverPostCard(p){
 async function postToDiscover(){
   if(!ME) return openEmailAuth();
   const text=($('discoverText')?.value||'').trim();
+  const title=($('discTitleInput')?.value||'').trim();
   const {trackId,productId}=_discAttach;
+  const art=_discMode==='article';
   if(!text&&!trackId&&!productId) return toast('Write something or attach a track/item to post');
   try{
-    await fbDB.collection('discoveryPosts').add({userId:ME.id,text:text||'',trackId:trackId||null,productId:productId||null,time:Date.now()});
+    const doc={userId:ME.id,text:text||'',trackId:trackId||null,productId:productId||null,time:Date.now()};
+    if(art){ doc.type='article'; if(title) doc.title=title; }
+    await fbDB.collection('discoveryPosts').add(doc);
     _discAttach={trackId:null,productId:null};
-    toast('Posted to Discovery Feed 📣');
+    toast(art?'Article published! 📝':'Posted to Discovery Feed 📣');
     renderDiscover();
   }catch(e){ toast(e.message||'Failed to post'); }
 }
@@ -3485,6 +3500,12 @@ document.addEventListener("click",e=>{
     selectdiscproduct:()=>{ _discAttach={trackId:null,productId:el.dataset.id}; closeOverlay(); updateDiscAttachPreview(); },
     removediscattach:()=>{ _discAttach={trackId:null,productId:null}; updateDiscAttachPreview(); },
     postdiscover:()=>postToDiscover(),
+    setdiscmode:()=>{ _discMode=el.dataset.mode||'short'; renderDiscover(); },
+    togglereadmore:()=>{
+      const pid=el.dataset.pid;
+      const textEl=document.getElementById('dpt-'+pid);
+      if(textEl){ const exp=textEl.classList.toggle('expanded'); el.textContent=exp?'Show less ↑':'Read more →'; }
+    },
     likediscpost:()=>{
       if(!ME) return openEmailAuth();
       const id=el.dataset.id; const F=firebase.firestore.FieldValue; const key='dp_'+id;
