@@ -12,6 +12,7 @@ const audio = $("audio");
 let _linkCache = {};
 let _discAttach = {trackId:null, productId:null};
 let _discMode = 'short'; // 'short' | 'article'
+const _expandedPosts = new Set(); // post IDs the user has expanded — survives re-renders
 let _preMusicVol = 1;
 
 // Seed data (incl. 100 demo creators) now lives in community-data.js:
@@ -697,8 +698,8 @@ function discoverPostCard(p){
       ${canDelete?`<button class="btn sm" data-action="deletediscpost" data-id="${p.id}" style="color:#e2554f;border-color:#e2554f">🗑</button>`:''}
     </div>
     ${isArticle&&p.title?`<div class="disc-article-title">${esc(p.title)}</div>`:''}
-    ${p.text?`<div class="disc-post-text${isLong?' long':''}" id="dpt-${p.id}">${postHtml}</div>
-    ${isLong?`<button class="disc-read-more-btn" data-action="togglereadmore" data-pid="${p.id}">Read more →</button>`:''}`:''}
+    ${p.text?`<div class="disc-post-text${isLong?' long':''}${isLong&&_expandedPosts.has(p.id)?' expanded':''}" id="dpt-${p.id}">${postHtml}</div>
+    ${isLong?`<button class="disc-read-more-btn" data-action="togglereadmore" data-pid="${p.id}">${_expandedPosts.has(p.id)?'Show less ↑':'Read more →'}</button>`:''}`:''}
     ${trackHtml}${productHtml}
     <div class="disc-post-actions">
       <button class="${liked?'on':''}" data-action="likediscpost" data-id="${p.id}">👍 ${nfmt(lc)}</button>
@@ -3504,7 +3505,11 @@ document.addEventListener("click",e=>{
     togglereadmore:()=>{
       const pid=el.dataset.pid;
       const textEl=document.getElementById('dpt-'+pid);
-      if(textEl){ const exp=textEl.classList.toggle('expanded'); el.textContent=exp?'Show less ↑':'Read more →'; }
+      if(textEl){
+        const exp=textEl.classList.toggle('expanded');
+        if(exp) _expandedPosts.add(pid); else _expandedPosts.delete(pid);
+        el.textContent=exp?'Show less ↑':'Read more →';
+      }
     },
     likediscpost:()=>{
       if(!ME) return openEmailAuth();
