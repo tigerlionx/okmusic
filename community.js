@@ -1583,12 +1583,19 @@ function renderAdmin(){
       ${stat("📦","Products listed",products.length,"")}
       ${stat("🛒","Orders placed",orders.length,`${pendingOrders.length} pending payment`)}
       ${stat("💰","Platform fees earned","$"+totalRevenue.toFixed(2),"3% of completed sales")}
+      <div class="admin-stat">
+        <div class="admin-stat-icon">🦁</div>
+        <div class="admin-stat-val" id="lncCirculationStat" style="font-size:20px">…</div>
+        <div class="admin-stat-label">LNC in circulation</div>
+        <div class="admin-stat-sub">Sum of all wallets</div>
+      </div>
     </div>
-    <div class="section-title" style="margin-top:28px">Latest sign-ups</div>
-    ${recentUsers.length?recentUsers.map(u=>`<div class="mrow2">
+    <div class="section-title" style="margin-top:28px">Latest sign-ups <span style="font-size:12px;font-weight:400;color:var(--muted)">(tap a user for full stats)</span></div>
+    ${recentUsers.length?recentUsers.map(u=>`<div class="mrow2 admin-user-row" data-action="adminuserprofile" data-uid="${u.id}">
       <div class="avatar" style="${avatarStyle(u,40)}">${u.avatarImg?'':initials(u.name)}</div>
       <div class="minfo"><div class="mt">${esc(u.name)} <span style="font-size:12px;color:var(--muted)">@${esc(u.handle||'')}</span></div>
         <div class="ms">${u.createdAt?timeAgo(u.createdAt):'unknown'}</div></div>
+      <span style="color:var(--muted);font-size:20px;padding-right:2px">›</span>
       </div>`).join(''):'<div class="empty">No users yet.</div>'}
     <div class="section-title" style="margin-top:28px">Broadcast</div>
     <div style="background:#fff;border-radius:14px;padding:16px;box-shadow:0 2px 8px rgba(180,120,60,.08)">
@@ -1599,6 +1606,57 @@ function renderAdmin(){
     ${(CACHE.suggestions||[]).length?(CACHE.suggestions||[]).map(s=>`<div class="mrow2" style="padding:12px;background:#fff;border-radius:12px;margin-bottom:8px;box-shadow:0 2px 6px rgba(180,120,60,.06)">
       <div class="minfo"><div class="mt">${esc(s.text)}</div><div class="ms">${esc(s.name||'Anonymous')} · ${timeAgo(s.time)}</div></div>
     </div>`).join(''):'<div class="empty" style="margin-top:8px">No suggestions yet.</div>'}`;
+  fetchLncCirculation();
+}
+async function fetchLncCirculation(){
+  try{
+    const snap=await fbDB.collection('wallets').get();
+    let total=0;
+    snap.forEach(d=>{ total+=(d.data().balance||0); });
+    const el=$('lncCirculationStat');
+    if(el) el.textContent=Math.floor(total).toLocaleString()+' LNC';
+  }catch(e){ console.warn('fetchLncCirculation',e); }
+}
+async function openAdminUserProfile(uid){
+  if(!isAdmin()) return;
+  const u=CACHE.users[uid];
+  if(!u) return toast('User not in cache — try again in a moment');
+  const uTracks=(CACHE.tracks||[]).filter(t=>t.userId===uid);
+  const uStatuses=(CACHE.statuses||[]).filter(s=>s.userId===uid);
+  const uDisc=(CACHE.discoveryPosts||[]).filter(p=>p.userId===uid);
+  const uProducts=(CACHE.products||[]).filter(p=>p.sellerId===uid);
+  const uOrders=(CACHE.orders||[]).filter(o=>o.buyerId===uid);
+  const fans=followerCount(uid);
+  openOverlay(`<div style="display:flex;align-items:center;gap:12px;margin-bottom:14px">
+    <div class="avatar" style="${avatarStyle(u,52)}">${u.avatarImg?'':initials(u.name)}</div>
+    <div><div style="font-size:17px;font-weight:800">${esc(u.name)}</div>
+    <div style="font-size:13px;color:var(--muted)">@${esc(u.handle||'')} · ${u.createdAt?'Joined '+timeAgo(u.createdAt):'unknown'}</div></div>
+  </div>
+  <div class="admin-user-stats"><div style="text-align:center;color:var(--muted);font-size:13px;padding:12px 0">Loading wallet…</div></div>`);
+  let balance=0,totalEarned=0,totalSpent=0;
+  try{
+    const wSnap=await fbDB.collection('wallets').doc(uid).get();
+    if(wSnap.exists){ const d=wSnap.data(); balance=Math.floor(d.balance||0); totalEarned=Math.floor(d.totalEarned||0); totalSpent=Math.floor(d.totalSpent||0); }
+  }catch(e){ console.warn('adminUserProfile wallet',e); }
+  const row=(ic,label,val)=>`<div class="admin-user-stat-row"><span>${ic}</span><span class="admin-user-stat-label">${label}</span><b>${val}</b></div>`;
+  openOverlay(`<div style="display:flex;align-items:center;gap:12px;margin-bottom:14px">
+    <div class="avatar" style="${avatarStyle(u,52)}">${u.avatarImg?'':initials(u.name)}</div>
+    <div><div style="font-size:17px;font-weight:800">${esc(u.name)}</div>
+    <div style="font-size:13px;color:var(--muted)">@${esc(u.handle||'')}</div></div>
+  </div>
+  <div class="admin-user-stats">
+    ${row('🦁','LNC balance',balance.toLocaleString()+' LNC')}
+    ${row('📈','Total earned',totalEarned.toLocaleString()+' LNC')}
+    ${row('💸','Total spent',totalSpent.toLocaleString()+' LNC')}
+    ${row('🎵','Tracks posted',uTracks.length)}
+    ${row('💬','Wall posts',uStatuses.length)}
+    ${row('📣','Discovery posts',uDisc.length)}
+    ${row('🫂','Fans',fans.toLocaleString())}
+    ${row('📦','Products listed',uProducts.length)}
+    ${row('🛒','Orders placed',uOrders.length)}
+    ${row('🗓️','Member since',u.createdAt?new Date(u.createdAt).toLocaleDateString('en-US',{year:'numeric',month:'short',day:'numeric'}):'unknown')}
+  </div>
+  <button class="btn sm" style="margin-top:14px" data-action="profile" data-uid="${uid}">View Profile →</button>`);
 }
 async function broadcastWelcome(){
   if(!isAdmin()) return;
@@ -3426,6 +3484,7 @@ document.addEventListener("click",e=>{
     addlink:()=>openAddLink(el.dataset.id,el.dataset.title),
     savetracklink:()=>saveTrackLink(el.dataset.id),
     broadcastwelcome:broadcastWelcome,
+    adminuserprofile:()=>openAdminUserProfile(el.dataset.uid),
     showguide:()=>showWelcomeGuide(ME?.name||"there"),
     openchat:()=>{ state.chatUid=el.dataset.uid; state.view="chat"; renderApp(); },
     attachfile:()=>{ const fi=$("chatFileInput");if(fi)fi.click(); },
