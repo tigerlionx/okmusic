@@ -423,6 +423,13 @@ body.has-page-bg .topbar{background:rgba(255,221,191,.45)}
 .admin-user-stat-row{display:flex;align-items:center;gap:8px;padding:9px 10px;border-radius:10px;font-size:14px}
 .admin-user-stat-row:nth-child(odd){background:var(--card)}
 .admin-user-stat-label{flex:1;color:var(--muted)}
+.admin-folder{background:var(--card);border:1px solid var(--line);border-radius:14px;margin-top:28px;cursor:pointer;user-select:none}
+.admin-folder-header{display:flex;align-items:center;justify-content:space-between;padding:13px 16px;font-weight:700;font-size:14px}
+.admin-folder-header:hover{background:var(--orange-1);border-radius:14px}
+.admin-folder-count{background:var(--orange);color:#fff;border-radius:20px;padding:1px 8px;font-size:12px;margin-left:6px}
+.admin-folder-chevron{font-size:11px;color:var(--muted);transition:transform .18s}
+.admin-folder-body{padding:0 0 8px}
+.admin-folder-body.hidden{display:none}
 
 /* ===== WELCOME GUIDE ===== */
 .welcome-guide{max-width:540px;margin:0 auto}

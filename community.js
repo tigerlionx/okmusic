@@ -13,6 +13,7 @@ let _linkCache = {};
 let _discAttach = {trackId:null, productId:null};
 let _discMode = 'short'; // 'short' | 'article'
 const _expandedPosts = new Set(); // post IDs the user has expanded — survives re-renders
+let _adminUsersOpen = false;
 let _preMusicVol = 1;
 
 // Seed data (incl. 100 demo creators) now lives in community-data.js:
@@ -1572,7 +1573,7 @@ function renderAdmin(){
     ${sub?`<div class="admin-stat-sub">${sub}</div>`:''}
   </div>`;
 
-  const recentUsers=users.slice().sort((a,b)=>(b.createdAt||0)-(a.createdAt||0)).slice(0,10);
+  const sortedUsers=users.slice().sort((a,b)=>(b.createdAt||0)-(a.createdAt||0));
 
   $("page").innerHTML=`<div class="h-title">📊 Admin Stats</div>
     <div class="admin-grid">
@@ -1590,13 +1591,21 @@ function renderAdmin(){
         <div class="admin-stat-sub">Sum of all wallets</div>
       </div>
     </div>
-    <div class="section-title" style="margin-top:28px">Latest sign-ups <span style="font-size:12px;font-weight:400;color:var(--muted)">(tap a user for full stats)</span></div>
-    ${recentUsers.length?recentUsers.map(u=>`<div class="mrow2 admin-user-row" data-action="adminuserprofile" data-uid="${u.id}">
-      <div class="avatar" style="${avatarStyle(u,40)}">${u.avatarImg?'':initials(u.name)}</div>
-      <div class="minfo"><div class="mt">${esc(u.name)} <span style="font-size:12px;color:var(--muted)">@${esc(u.handle||'')}</span></div>
-        <div class="ms">${u.createdAt?timeAgo(u.createdAt):'unknown'}</div></div>
-      <span style="color:var(--muted);font-size:20px;padding-right:2px">›</span>
-      </div>`).join(''):'<div class="empty">No users yet.</div>'}
+    <div class="admin-folder" data-action="toggleadminusers">
+      <div class="admin-folder-header">
+        <span>👥 All Users <span class="admin-folder-count">${users.length}</span></span>
+        <span class="admin-folder-chevron${_adminUsersOpen?' open':''}">${_adminUsersOpen?'▲':'▼'}</span>
+      </div>
+    </div>
+    <div class="admin-folder-body${_adminUsersOpen?'':' hidden'}">
+      <div style="padding:8px 0 4px;font-size:12px;color:var(--muted)">Tap a name to view full statistics</div>
+      ${sortedUsers.length?sortedUsers.map(u=>`<div class="mrow2 admin-user-row" data-action="adminuserprofile" data-uid="${u.id}">
+        <div class="avatar" style="${avatarStyle(u,40)}">${u.avatarImg?'':initials(u.name)}</div>
+        <div class="minfo"><div class="mt">${esc(u.name)} <span style="font-size:12px;color:var(--muted)">@${esc(u.handle||'')}</span></div>
+          <div class="ms">${u.createdAt?timeAgo(u.createdAt):'unknown'}</div></div>
+        <span style="color:var(--muted);font-size:20px;padding-right:2px">›</span>
+        </div>`).join(''):'<div class="empty">No users yet.</div>'}
+    </div>
     <div class="section-title" style="margin-top:28px">Broadcast</div>
     <div style="background:#fff;border-radius:14px;padding:16px;box-shadow:0 2px 8px rgba(180,120,60,.08)">
       <p style="font-size:14px;margin:0 0 12px">Send the getting-started guide to every registered user as a notification they can read in the app.</p>
@@ -3484,6 +3493,7 @@ document.addEventListener("click",e=>{
     addlink:()=>openAddLink(el.dataset.id,el.dataset.title),
     savetracklink:()=>saveTrackLink(el.dataset.id),
     broadcastwelcome:broadcastWelcome,
+    toggleadminusers:()=>{ _adminUsersOpen=!_adminUsersOpen; renderAdmin(); },
     adminuserprofile:()=>openAdminUserProfile(el.dataset.uid),
     showguide:()=>showWelcomeGuide(ME?.name||"there"),
     openchat:()=>{ state.chatUid=el.dataset.uid; state.view="chat"; renderApp(); },
