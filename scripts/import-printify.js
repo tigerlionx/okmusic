@@ -106,11 +106,19 @@ async function main() {
   const shop = shops.find(s => String(s.id) === String(shopId)) || shops[0];
   console.log(`\n    Using shop: ${shop.title} (ID: ${shopId})`);
 
-  // ── 3. Fetch products ──────────────────────────────────────────────────────
+  // ── 3. Fetch products (paginated, max 50 per page) ────────────────────────
   console.log('\n📦  Fetching products…');
-  const data     = await printifyGet(`/shops/${shopId}/products.json?limit=100`, token);
-  const products = data.data || data;
-  const published = products.filter(p => p.visible !== false && p.is_locked !== true);
+  const allProducts = [];
+  let page = 1;
+  while (true) {
+    const data = await printifyGet(`/shops/${shopId}/products.json?limit=50&page=${page}`, token);
+    const chunk = data.data || data;
+    if (!Array.isArray(chunk) || !chunk.length) break;
+    allProducts.push(...chunk);
+    if (!data.last_page || page >= data.last_page) break;
+    page++;
+  }
+  const published = allProducts.filter(p => p.visible !== false && p.is_locked !== true);
   console.log(`    ${published.length} published product(s) found.\n`);
 
   if (!published.length) {
