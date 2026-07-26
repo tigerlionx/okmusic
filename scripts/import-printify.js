@@ -54,13 +54,16 @@ function printifyGet(apiPath, token) {
   return new Promise((resolve, reject) => {
     const req = https.request(
       { hostname: 'api.printify.com', path: `/v1${apiPath}`, method: 'GET',
-        headers: { Authorization: `Bearer ${token}`, 'User-Agent': 'OK-Music-Importer/1.0' } },
+        headers: { Authorization: `Bearer ${token}`, 'User-Agent': 'OK-Music-Importer/1.0', Accept: 'application/json' } },
       res => {
         let raw = '';
         res.on('data', c => raw += c);
         res.on('end', () => {
-          if (res.statusCode === 401) { reject(new Error('Invalid or expired Printify API token.')); return; }
-          if (res.statusCode !== 200) { reject(new Error(`Printify API returned HTTP ${res.statusCode}: ${raw.slice(0,200)}`)); return; }
+          if (res.statusCode === 401) {
+            reject(new Error(`Printify 401 – token rejected.\n    Printify response: ${raw.slice(0,300)}`));
+            return;
+          }
+          if (res.statusCode !== 200) { reject(new Error(`Printify API returned HTTP ${res.statusCode}: ${raw.slice(0,300)}`)); return; }
           try { resolve(JSON.parse(raw)); }
           catch { reject(new Error('Unexpected response from Printify: ' + raw.slice(0,200))); }
         });

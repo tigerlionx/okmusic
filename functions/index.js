@@ -34,6 +34,100 @@ const TYPE_META = {
   default:   { icon: "ic_launcher",  sound: "default",       channel: "general"  },
 };
 
+// ── Printify helper ───────────────────────────────────────────────────────────
+function stripHtml(html) {
+  return (html || "").replace(/<[^>]*>/g, " ").replace(/&nbsp;/g, " ").replace(/\s+/g, " ").trim().slice(0, 1000);
+}
+
+async function printifyGet(apiPath, token) {
+  const res = await fetch(`https://api.printify.com/v1${apiPath}`, {
+    headers: { Authorization: `Bearer ${token}`, Accept: "application/json", "User-Agent": "OK-Music/1.0" },
+  });
+  if (res.status === 401) throw new HttpsError("unauthenticated", "Printify rejected the token — please generate a new one at printify.com/app/account/api-access");
+  if (!res.ok) {
+    const body = await res.text();
+    throw new HttpsError("internal", `Printify API error HTTP ${res.status}: ${body.slice(0, 200)}`);
+  }
+  return res.json();
+}
+
+// ── Printify: save token + import products (admin-only Cloud Function) ─────────
+// Replaces the Node.js import script for environments that can't reach Printify directly.
+exports.importPrintifyProducts = onCall({ region: "us-central1", timeoutSeconds: 300 }, async (request) => {
+  if (!request.auth?.token?.email === "trendai509@gmail.com" && request.auth?.token?.email !== "trendai509@gmail.com") {
+    throw new HttpsError("permission-denied", "Admin only");
+  }
+  if (request.auth?.token?.email !== "trendai509@gmail.com") {
+    throw new HttpsError("permission-denied", "Admin only");
+  }
+
+  const { token, shopId: requestedShopId } = request.data || {};
+  if (!token) throw new HttpsError("invalid-argument", "Printify API token is required");
+
+  // 1. Get the admin's Firebase UID from the auth context (already authenticated)
+  const sellerId = request.auth.uid;
+
+  // 2. Find the shop
+  const shops = await printifyGet("/shops.json", token);
+  if (!shops.length) throw new HttpsError("not-found", "No Printify shops found on this account");
+  const shopId = String(requestedShopId || shops[0].id);
+
+  // 3. Save token + shopId to Firestore config so submitPrintifyOrder can use it
+  await db.collection("config").doc("printify").set({ token, shopId }, { merge: true });
+
+  // 4. Fetch all products (paginated)
+  const allProducts = [];
+  let page = 1;
+  while (true) {
+    const data = await printifyGet(`/shops/${shopId}/products.json?limit=50&page=${page}`, token);
+    const chunk = data.data || data;
+    if (!Array.isArray(chunk) || !chunk.length) break;
+    allProducts.push(...chunk);
+    if (!data.last_page || page >= data.last_page) break;
+    page++;
+  }
+  const published = allProducts.filter(p => p.visible !== false && p.is_locked !== true);
+
+  // 5. Write products to Firestore
+  let created = 0, updated = 0;
+  for (const p of published) {
+    const img = p.images?.find(i => i.is_default) || p.images?.[0];
+    const variants = (p.variants || [])
+      .filter(v => v.is_enabled !== false && v.is_available !== false)
+      .map(v => ({ id: String(v.id), label: v.title || String(v.id), price: v.price ? Number((v.price / 100).toFixed(2)) : 0 }));
+    const firstVariant = variants[0];
+    const price = firstVariant?.price ?? 0;
+
+    const doc = {
+      sellerId,
+      source: "printify",
+      printifyId: String(p.id),
+      printifyShopId: shopId,
+      title: p.title,
+      description: stripHtml(p.description),
+      photos: img ? [img.src] : [],
+      category: "Merch",
+      price,
+      shipping: 0,
+      variants,
+      stock: null,
+      lncPrice: null,
+      updatedAt: Date.now(),
+    };
+
+    const snap = await db.collection("products").where("printifyId", "==", String(p.id)).limit(1).get();
+    if (!snap.empty) {
+      await snap.docs[0].ref.update(doc);
+      updated++;
+    } else {
+      await db.collection("products").add({ ...doc, createdAt: Date.now() });
+      created++;
+    }
+  }
+
+  return { shopId, total: published.length, created, updated };
+});
+
 // ── Printify order submission ──────────────────────────────────────────────────
 // Called from the browser after the buyer fills the checkout form.
 // Reads the Printify API token from Firestore config/printify (Admin SDK bypasses rules).

@@ -1632,27 +1632,17 @@ function renderAdmin(){
   fetchLncCirculation();
 }
 function printifyPanelHTML(){
-  const shopOpts=_printifyShops.length
-    ?_printifyShops.map(s=>`<option value="${s.id}"${s.id==_printifyShopId?' selected':''}>${esc(s.title)}</option>`).join('')
-    :'';
   return `<div style="padding:4px 0 8px">
-    <p style="font-size:13px;color:var(--muted);margin:0 0 10px">Paste your <a href="https://printify.com/app/account/api-access" target="_blank" style="color:var(--orange)">Printify API token</a>, load your shops, then import all published products into the OK Music marketplace.</p>
+    <p style="font-size:13px;color:var(--muted);margin:0 0 10px">Paste your <a href="https://printify.com/app/account/api-access" target="_blank" style="color:var(--orange)">Printify API token</a> and click Import. The import runs via Google Cloud — works from any country.</p>
     <div class="field" style="margin-bottom:8px">
       <label style="font-size:13px">API Token</label>
       <input class="fb-field" id="printifyToken" type="password" placeholder="ey…" value="${esc(_printifyToken)}" style="font-size:13px" />
     </div>
-    ${shopOpts?`<div class="field" style="margin-bottom:8px">
-      <label style="font-size:13px">Shop</label>
-      <select class="fb-field" id="printifyShop" style="font-size:13px">${shopOpts}</select>
-    </div>`:''}
     <div class="field" style="margin-bottom:12px">
-      <label style="font-size:13px">Your public store URL <span style="font-weight:400;color:var(--muted)">(e.g. https://yourstore.printify.me)</span></label>
-      <input class="fb-field" id="printifyStoreUrl" type="url" placeholder="https://yourstore.printify.me" value="${esc(_printifyStoreUrl)}" style="font-size:13px" />
+      <label style="font-size:13px">Shop ID <span style="font-weight:400;color:var(--muted)">(optional — auto-detected if blank)</span></label>
+      <input class="fb-field" id="printifyShopId" type="text" placeholder="e.g. 12345678" value="${esc(_printifyShopId)}" style="font-size:13px" />
     </div>
-    <div style="display:flex;gap:8px;flex-wrap:wrap">
-      <button class="btn sm" data-action="loadprintifyshops">🔍 Load my shops</button>
-      ${shopOpts?`<button class="btn sm primary" data-action="importprintify">⬇️ Import products</button>`:''}
-    </div>
+    <button class="btn sm primary" data-action="importprintify">🚀 Save & Import via Cloud</button>
     <div id="printifyStatus" style="margin-top:8px;font-size:13px;color:var(--muted)"></div>
   </div>`;
 }
@@ -1721,72 +1711,36 @@ async function broadcastWelcome(){
   toast(`Guide sent to ${sent} user${sent!==1?"s":""} ✓`);
 }
 async function loadPrintifyShops(){
-  if(!isAdmin()) return;
-  const token=($('printifyToken')?.value||'').trim();
-  if(!token) return toast('Paste your Printify API token first');
-  _printifyToken=token;
-  _printifyStoreUrl=($('printifyStoreUrl')?.value||'').trim();
-  const status=$('printifyStatus');
-  if(status) status.textContent='Loading shops…';
-  try{
-    const res=await fetch('https://api.printify.com/v1/shops.json',{headers:{Authorization:`Bearer ${token}`}});
-    if(!res.ok) throw new Error(`HTTP ${res.status}`);
-    _printifyShops=await res.json();
-    if(!_printifyShops.length) return toast('No shops found on this account');
-    _printifyShopId=String(_printifyShops[0].id);
-    renderAdmin();
-    if($('printifyStatus')) $('printifyStatus').textContent=`Found ${_printifyShops.length} shop${_printifyShops.length!==1?'s':''}. Select one and click Import.`;
-  }catch(e){
-    const msg=e.message.includes('Failed to fetch')||e.message.includes('NetworkError')
-      ?'CORS blocked — Printify API does not allow direct browser requests. Please use the Printify API console or a proxy.'
-      :`Error: ${e.message}`;
-    if($('printifyStatus')) $('printifyStatus').style.color='var(--red,#e53)';
-    if($('printifyStatus')) $('printifyStatus').textContent=msg;
-    console.warn('loadPrintifyShops',e);
-  }
+  // Legacy: kept for dispatcher compatibility; import now uses Cloud Function
+  importPrintifyProducts();
 }
 async function importPrintifyProducts(){
   if(!isAdmin()) return;
   const token=($('printifyToken')?.value||_printifyToken).trim();
-  if(!token) return toast('API token missing');
-  const shopId=($('printifyShop')?.value||_printifyShopId).trim();
-  if(!shopId) return toast('Select a shop first');
-  _printifyStoreUrl=($('printifyStoreUrl')?.value||_printifyStoreUrl).trim();
-  _printifyShopId=shopId;
+  if(!token) return toast('Paste your Printify API token first');
+  _printifyToken=token;
+  const shopId=($('printifyShopId')?.value||'').trim();
   const status=$('printifyStatus');
-  if(status){ status.style.color='var(--muted)'; status.textContent='Fetching products…'; }
+  const btn=document.querySelector('[data-action="importprintify"]');
+  if(status){ status.style.color='var(--muted)'; status.textContent='Connecting to Printify via Cloud Function…'; }
+  if(btn){ btn.disabled=true; btn.textContent='Importing…'; }
   try{
-    const res=await fetch(`https://api.printify.com/v1/shops/${shopId}/products.json?limit=100`,{headers:{Authorization:`Bearer ${token}`}});
-    if(!res.ok) throw new Error(`HTTP ${res.status}`);
-    const data=await res.json();
-    const products=data.data||data;
-    const published=products.filter(p=>p.visible!==false&&p.is_locked!==true);
-    if(!published.length){ if(status) status.textContent='No published products found.'; return; }
-    let count=0;
-    for(const p of published){
-      const img=p.images?.find(i=>i.is_default)||p.images?.[0];
-      const variant=p.variants?.find(v=>v.is_enabled)|| p.variants?.[0];
-      const price=variant?.price?Number((variant.price/100).toFixed(2)):0;
-      const handle=p.external?.handle||p.id;
-      const buyUrl=p.external?.url||(_printifyStoreUrl?`${_printifyStoreUrl.replace(/\/$/,'')}/products/${handle}`:'');
-      const doc={
-        sellerId:ME.id, source:'printify', printifyId:p.id, printifyShopId:shopId,
-        title:p.title, description:(p.description||'').replace(/<[^>]*>/g,' ').trim().slice(0,1000),
-        photos:img?[img.src]:[], category:'Merch', price, shipping:0,
-        buyUrl, stock:null, lncPrice:null, createdAt:Date.now(), updatedAt:Date.now()
-      };
-      await fbDB.collection('products').add(doc);
-      count++;
-      if(status) status.textContent=`Importing… ${count}/${published.length}`;
+    const fn=firebase.functions().httpsCallable('importPrintifyProducts');
+    const result=await fn({ token, shopId: shopId||undefined });
+    const {total,created,updated,shopId:usedShopId}=result.data;
+    _printifyShopId=usedShopId||shopId;
+    if(status){
+      status.style.color='green';
+      status.textContent=`✓ ${created} new, ${updated} updated (${total} total). Token saved — checkout is now live!`;
     }
-    if(status){ status.style.color='green'; status.textContent=`✓ Imported ${count} product${count!==1?'s':''} into your marketplace!`; }
-    toast(`${count} Printify products imported 🖨️`);
+    toast(`Printify import done: ${created} new, ${updated} updated 🖨️`);
   }catch(e){
-    const msg=e.message.includes('Failed to fetch')||e.message.includes('NetworkError')
-      ?'CORS blocked — Printify API does not allow direct browser requests. Please use the Printify API console or a proxy.'
-      :`Error: ${e.message}`;
-    if(status){ status.style.color='var(--red,#e53)'; status.textContent=msg; }
-    console.warn('importPrintifyProducts',e);
+    console.error('importPrintifyProducts',e);
+    const msg=(e.message||'Import failed').replace(/^internal: /,'');
+    if(status){ status.style.color='var(--red,#e53)'; status.textContent=`Error: ${msg}`; }
+    toast('Import failed — see panel for details');
+  }finally{
+    if(btn){ btn.disabled=false; btn.textContent='🚀 Save & Import via Cloud'; }
   }
 }
 
