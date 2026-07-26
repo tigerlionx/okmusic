@@ -14,6 +14,11 @@ let _discAttach = {trackId:null, productId:null};
 let _discMode = 'short'; // 'short' | 'article'
 const _expandedPosts = new Set(); // post IDs the user has expanded — survives re-renders
 let _adminUsersOpen = false;
+let _printifyOpen = false;
+let _printifyToken = '';
+let _printifyShops = [];
+let _printifyShopId = '';
+let _printifyStoreUrl = '';
 let _preMusicVol = 1;
 
 // Seed data (incl. 100 demo creators) now lives in community-data.js:
@@ -1611,11 +1616,45 @@ function renderAdmin(){
       <p style="font-size:14px;margin:0 0 12px">Send the getting-started guide to every registered user as a notification they can read in the app.</p>
       <button class="btn primary" data-action="broadcastwelcome">📢 Send Instructions to All Users (${users.length})</button>
     </div>
+    <div class="admin-folder" data-action="toggleprintify" style="margin-top:14px">
+      <div class="admin-folder-header">
+        <span>🖨️ Printify Import</span>
+        <span class="admin-folder-chevron${_printifyOpen?' open':''}">${_printifyOpen?'▲':'▼'}</span>
+      </div>
+    </div>
+    <div class="admin-folder-body${_printifyOpen?'':' hidden'}">
+      ${printifyPanelHTML()}
+    </div>
     <div class="section-title" style="margin-top:28px">💡 Feature Suggestions (${(CACHE.suggestions||[]).length})</div>
     ${(CACHE.suggestions||[]).length?(CACHE.suggestions||[]).map(s=>`<div class="mrow2" style="padding:12px;background:#fff;border-radius:12px;margin-bottom:8px;box-shadow:0 2px 6px rgba(180,120,60,.06)">
       <div class="minfo"><div class="mt">${esc(s.text)}</div><div class="ms">${esc(s.name||'Anonymous')} · ${timeAgo(s.time)}</div></div>
     </div>`).join(''):'<div class="empty" style="margin-top:8px">No suggestions yet.</div>'}`;
   fetchLncCirculation();
+}
+function printifyPanelHTML(){
+  const shopOpts=_printifyShops.length
+    ?_printifyShops.map(s=>`<option value="${s.id}"${s.id==_printifyShopId?' selected':''}>${esc(s.title)}</option>`).join('')
+    :'';
+  return `<div style="padding:4px 0 8px">
+    <p style="font-size:13px;color:var(--muted);margin:0 0 10px">Paste your <a href="https://printify.com/app/account/api-access" target="_blank" style="color:var(--orange)">Printify API token</a>, load your shops, then import all published products into the OK Music marketplace.</p>
+    <div class="field" style="margin-bottom:8px">
+      <label style="font-size:13px">API Token</label>
+      <input class="fb-field" id="printifyToken" type="password" placeholder="ey…" value="${esc(_printifyToken)}" style="font-size:13px" />
+    </div>
+    ${shopOpts?`<div class="field" style="margin-bottom:8px">
+      <label style="font-size:13px">Shop</label>
+      <select class="fb-field" id="printifyShop" style="font-size:13px">${shopOpts}</select>
+    </div>`:''}
+    <div class="field" style="margin-bottom:12px">
+      <label style="font-size:13px">Your public store URL <span style="font-weight:400;color:var(--muted)">(e.g. https://yourstore.printify.me)</span></label>
+      <input class="fb-field" id="printifyStoreUrl" type="url" placeholder="https://yourstore.printify.me" value="${esc(_printifyStoreUrl)}" style="font-size:13px" />
+    </div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <button class="btn sm" data-action="loadprintifyshops">🔍 Load my shops</button>
+      ${shopOpts?`<button class="btn sm primary" data-action="importprintify">⬇️ Import products</button>`:''}
+    </div>
+    <div id="printifyStatus" style="margin-top:8px;font-size:13px;color:var(--muted)"></div>
+  </div>`;
 }
 async function fetchLncCirculation(){
   try{
@@ -1680,6 +1719,75 @@ async function broadcastWelcome(){
     }catch(e){ console.warn("broadcast fail",u.id,e.code); }
   }
   toast(`Guide sent to ${sent} user${sent!==1?"s":""} ✓`);
+}
+async function loadPrintifyShops(){
+  if(!isAdmin()) return;
+  const token=($('printifyToken')?.value||'').trim();
+  if(!token) return toast('Paste your Printify API token first');
+  _printifyToken=token;
+  _printifyStoreUrl=($('printifyStoreUrl')?.value||'').trim();
+  const status=$('printifyStatus');
+  if(status) status.textContent='Loading shops…';
+  try{
+    const res=await fetch('https://api.printify.com/v1/shops.json',{headers:{Authorization:`Bearer ${token}`}});
+    if(!res.ok) throw new Error(`HTTP ${res.status}`);
+    _printifyShops=await res.json();
+    if(!_printifyShops.length) return toast('No shops found on this account');
+    _printifyShopId=String(_printifyShops[0].id);
+    renderAdmin();
+    if($('printifyStatus')) $('printifyStatus').textContent=`Found ${_printifyShops.length} shop${_printifyShops.length!==1?'s':''}. Select one and click Import.`;
+  }catch(e){
+    const msg=e.message.includes('Failed to fetch')||e.message.includes('NetworkError')
+      ?'CORS blocked — Printify API does not allow direct browser requests. Please use the Printify API console or a proxy.'
+      :`Error: ${e.message}`;
+    if($('printifyStatus')) $('printifyStatus').style.color='var(--red,#e53)';
+    if($('printifyStatus')) $('printifyStatus').textContent=msg;
+    console.warn('loadPrintifyShops',e);
+  }
+}
+async function importPrintifyProducts(){
+  if(!isAdmin()) return;
+  const token=($('printifyToken')?.value||_printifyToken).trim();
+  if(!token) return toast('API token missing');
+  const shopId=($('printifyShop')?.value||_printifyShopId).trim();
+  if(!shopId) return toast('Select a shop first');
+  _printifyStoreUrl=($('printifyStoreUrl')?.value||_printifyStoreUrl).trim();
+  _printifyShopId=shopId;
+  const status=$('printifyStatus');
+  if(status){ status.style.color='var(--muted)'; status.textContent='Fetching products…'; }
+  try{
+    const res=await fetch(`https://api.printify.com/v1/shops/${shopId}/products.json?limit=100`,{headers:{Authorization:`Bearer ${token}`}});
+    if(!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data=await res.json();
+    const products=data.data||data;
+    const published=products.filter(p=>p.visible!==false&&p.is_locked!==true);
+    if(!published.length){ if(status) status.textContent='No published products found.'; return; }
+    let count=0;
+    for(const p of published){
+      const img=p.images?.find(i=>i.is_default)||p.images?.[0];
+      const variant=p.variants?.find(v=>v.is_enabled)|| p.variants?.[0];
+      const price=variant?.price?Number((variant.price/100).toFixed(2)):0;
+      const handle=p.external?.handle||p.id;
+      const buyUrl=p.external?.url||(_printifyStoreUrl?`${_printifyStoreUrl.replace(/\/$/,'')}/products/${handle}`:'');
+      const doc={
+        sellerId:ME.id, source:'printify', printifyId:p.id, printifyShopId:shopId,
+        title:p.title, description:(p.description||'').replace(/<[^>]*>/g,' ').trim().slice(0,1000),
+        photos:img?[img.src]:[], category:'Merch', price, shipping:0,
+        buyUrl, stock:null, lncPrice:null, createdAt:Date.now(), updatedAt:Date.now()
+      };
+      await fbDB.collection('products').add(doc);
+      count++;
+      if(status) status.textContent=`Importing… ${count}/${published.length}`;
+    }
+    if(status){ status.style.color='green'; status.textContent=`✓ Imported ${count} product${count!==1?'s':''} into your marketplace!`; }
+    toast(`${count} Printify products imported 🖨️`);
+  }catch(e){
+    const msg=e.message.includes('Failed to fetch')||e.message.includes('NetworkError')
+      ?'CORS blocked — Printify API does not allow direct browser requests. Please use the Printify API console or a proxy.'
+      :`Error: ${e.message}`;
+    if(status){ status.style.color='var(--red,#e53)'; status.textContent=msg; }
+    console.warn('importPrintifyProducts',e);
+  }
 }
 
 // ============ MARKETPLACE ============
@@ -1825,16 +1933,18 @@ function renderMarketplace(){
 }
 function mpBuyerCard(p){
   const photo=p.photos&&p.photos[0]; const seller=CACHE.sellers[p.sellerId]; const inCart=(state.cart||[]).includes(p.id); const oos=isOutOfStock(p);
+  const isPrintify=p.source==='printify';
   return `<div class="mp-card">
-    <div class="mp-photo" style="${photo?`background-image:url('${photo}');background-size:cover;background-position:center`:'background:var(--orange-1)'}" data-action="viewproduct" data-id="${p.id}">${photo?'':'📦'}</div>
+    <div class="mp-photo" style="${photo?`background-image:url('${photo}');background-size:cover;background-position:center`:'background:var(--orange-1)'}" data-action="viewproduct" data-id="${p.id}">${photo?'':'📦'}${isPrintify?'<span class="printify-badge">🖨️ Print-on-demand</span>':''}</div>
     <div class="mp-card-body">
       <div class="mp-title" data-action="viewproduct" data-id="${p.id}">${esc(p.title)}</div>
       <div class="mp-seller-name">${esc(seller?.name||'Seller')} · ${esc(seller?.location||'')}</div>
-      <div class="mp-price">$${parseFloat(p.price).toFixed(2)} <span class="mp-ship">+ $${parseFloat(p.shipping||0).toFixed(2)} ship</span></div>
-      ${p.lncPrice&&!oos?`<div class="lnc-badge" style="margin:4px 0">🦁 ${p.lncPrice} LNC</div>`:''}
-      ${oos
-        ?'<div class="mp-oos-badge">📦 Out of Stock</div>'
-        :`<button class="btn sm ${inCart?'':'primary'}" data-action="addtocart" data-id="${p.id}" style="margin-top:8px;width:100%">${inCart?'In cart ✓':'Add to cart'}</button>
+      ${p.price>0?`<div class="mp-price">$${parseFloat(p.price).toFixed(2)}</div>`:''}
+      ${isPrintify&&p.buyUrl
+        ?`<a class="btn sm primary" href="${esc(p.buyUrl)}" target="_blank" rel="noopener" style="margin-top:8px;width:100%;display:block;text-align:center;text-decoration:none">Buy on Printify →</a>`
+        :oos
+          ?'<div class="mp-oos-badge">📦 Out of Stock</div>'
+          :`<button class="btn sm ${inCart?'':'primary'}" data-action="addtocart" data-id="${p.id}" style="margin-top:8px;width:100%">${inCart?'In cart ✓':'Add to cart'}</button>
       ${p.lncPrice?`<button class="btn sm" data-action="buywithlioncoin" data-id="${p.id}" style="margin-top:4px;width:100%">🦁 Buy with LNC</button>`:''}`}
     </div>
   </div>`;
@@ -1842,16 +1952,20 @@ function mpBuyerCard(p){
 function viewProduct(id){
   const p=CACHE.products.find(x=>x.id===id); if(!p) return;
   const seller=CACHE.sellers[p.sellerId]; const photo=p.photos&&p.photos[0]; const inCart=(state.cart||[]).includes(id); const oos=isOutOfStock(p);
+  const isPrintify=p.source==='printify';
   openOverlay(`<div class="mp-detail">
     ${photo?`<div style="text-align:center;margin-bottom:12px"><img src="${photo}" class="mp-detail-img" data-action="zoomphoto" data-src="${photo}" /></div>`:''}
+    ${isPrintify?'<div class="printify-detail-badge">🖨️ Print-on-demand · Fulfilled by Printify</div>':''}
     <div class="mp-detail-title">${esc(p.title)}</div>
     <div class="mp-detail-cat">${esc(p.category||'')}</div>
-    <div class="mp-detail-price">$${parseFloat(p.price).toFixed(2)} <span class="mp-ship" style="font-size:14px;font-weight:400">+ $${parseFloat(p.shipping||0).toFixed(2)} shipping</span></div>
+    ${p.price>0?`<div class="mp-detail-price">$${parseFloat(p.price).toFixed(2)}</div>`:''}
     <div class="mp-detail-desc">${esc(p.description)}</div>
     <div class="mp-seller-card">👤 <b>${esc(seller?.name||'Unknown')}</b> · 📍 ${esc(seller?.location||'')}</div>
-    ${oos
-      ?'<div class="mp-oos-badge" style="margin-top:14px;font-size:14px;padding:10px">📦 Out of Stock</div>'
-      :`<button class="btn ${inCart?'':'primary'} block" data-action="addtocart" data-id="${id}" style="margin-top:14px">${inCart?'✓ In cart — remove':'🛒 Add to cart'}</button>
+    ${isPrintify&&p.buyUrl
+      ?`<a class="btn primary block" href="${esc(p.buyUrl)}" target="_blank" rel="noopener" style="margin-top:14px;display:block;text-align:center;text-decoration:none">🛒 Buy on Printify →</a>`
+      :oos
+        ?'<div class="mp-oos-badge" style="margin-top:14px;font-size:14px;padding:10px">📦 Out of Stock</div>'
+        :`<button class="btn ${inCart?'':'primary'} block" data-action="addtocart" data-id="${id}" style="margin-top:14px">${inCart?'✓ In cart — remove':'🛒 Add to cart'}</button>
     ${inCart?`<button class="btn primary block" data-action="nav" data-view="cart" style="margin-top:8px">Go to cart →</button>`:''}
     ${p.lncPrice?`<div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border)"><div class="lnc-badge" style="margin-bottom:8px">🦁 ${p.lncPrice} LNC</div><button class="btn block" data-action="buywithlioncoin" data-id="${id}" style="margin-top:4px">🦁 Buy with LionCoin</button></div>`:''}`}
   </div>`);
@@ -3494,6 +3608,9 @@ document.addEventListener("click",e=>{
     savetracklink:()=>saveTrackLink(el.dataset.id),
     broadcastwelcome:broadcastWelcome,
     toggleadminusers:()=>{ _adminUsersOpen=!_adminUsersOpen; renderAdmin(); },
+    toggleprintify:()=>{ _printifyOpen=!_printifyOpen; renderAdmin(); },
+    loadprintifyshops:loadPrintifyShops,
+    importprintify:importPrintifyProducts,
     adminuserprofile:()=>openAdminUserProfile(el.dataset.uid),
     showguide:()=>showWelcomeGuide(ME?.name||"there"),
     openchat:()=>{ state.chatUid=el.dataset.uid; state.view="chat"; renderApp(); },
