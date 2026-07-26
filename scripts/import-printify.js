@@ -11,12 +11,16 @@
  *      https://printify.com/app/account/api-access
  *
  * Usage:
- *   node scripts/import-printify.js <PRINTIFY_TOKEN> [STORE_URL] [SHOP_ID]
+ *   node scripts/import-printify.js <PRINTIFY_TOKEN> [SHOP_ID]
  *
  * Examples:
  *   node scripts/import-printify.js eyJ0eXAi...
- *   node scripts/import-printify.js eyJ0eXAi... https://mystore.printify.me
- *   node scripts/import-printify.js eyJ0eXAi... https://mystore.printify.me 12345678
+ *   node scripts/import-printify.js eyJ0eXAi... 12345678
+ *
+ * This script now also:
+ *   • Stores all enabled product variants (id, label, price) in each product doc
+ *   • Saves your token + shopId to Firestore config/printify so the
+ *     submitPrintifyOrder Cloud Function can use it without exposing the key
  */
 
 const https = require('https');
@@ -74,11 +78,10 @@ function stripHtml(html) {
 // ── Main ──────────────────────────────────────────────────────────────────────
 async function main() {
   const token    = process.argv[2];
-  const storeUrl = (process.argv[3] || '').replace(/\/$/, '');
-  let   shopId   = process.argv[4] || '';
+  let   shopId   = process.argv[3] || '';
 
   if (!token) {
-    console.error('Usage: node scripts/import-printify.js <TOKEN> [STORE_URL] [SHOP_ID]\n');
+    console.error('Usage: node scripts/import-printify.js <TOKEN> [SHOP_ID]\n');
     process.exit(1);
   }
 
@@ -106,6 +109,11 @@ async function main() {
   const shop = shops.find(s => String(s.id) === String(shopId)) || shops[0];
   console.log(`\n    Using shop: ${shop.title} (ID: ${shopId})`);
 
+  // ── 2b. Save token + shopId to Firestore config so the Cloud Function can use it ──
+  console.log('\n🔑  Saving Printify config to Firestore config/printify…');
+  await db.collection('config').doc('printify').set({ token, shopId: String(shopId) }, { merge: true });
+  console.log('    Done.');
+
   // ── 3. Fetch products (paginated, max 50 per page) ────────────────────────
   console.log('\n📦  Fetching products…');
   const allProducts = [];
@@ -130,11 +138,19 @@ async function main() {
   let created = 0, updated = 0;
 
   for (const p of published) {
-    const img     = p.images?.find(i => i.is_default) || p.images?.[0];
-    const variant = p.variants?.find(v => v.is_enabled) || p.variants?.[0];
-    const price   = variant?.price ? Number((variant.price / 100).toFixed(2)) : 0;
-    const handle  = p.external?.handle || String(p.id);
-    const buyUrl  = p.external?.url || (storeUrl ? `${storeUrl}/products/${handle}` : '');
+    const img = p.images?.find(i => i.is_default) || p.images?.[0];
+
+    // Collect enabled variants (id, human-readable label, price in $)
+    const variants = (p.variants || [])
+      .filter(v => v.is_enabled !== false && v.is_available !== false)
+      .map(v => ({
+        id:    String(v.id),
+        label: v.title || String(v.id),
+        price: v.price ? Number((v.price / 100).toFixed(2)) : 0,
+      }));
+
+    const firstVariant = variants[0];
+    const price = firstVariant?.price ?? 0;
 
     const doc = {
       sellerId,
@@ -147,7 +163,7 @@ async function main() {
       category:       'Merch',
       price,
       shipping:       0,
-      buyUrl,
+      variants,
       stock:          null,
       lncPrice:       null,
       updatedAt:      Date.now(),
@@ -166,7 +182,8 @@ async function main() {
   }
 
   console.log(`\n🎉  Done! ${created} new, ${updated} updated.`);
-  console.log('    Your Printify products are now live in the OK Music marketplace.\n');
+  console.log('    Your Printify products are now live in the OK Music marketplace.');
+  console.log('    Variants stored ✓  |  Printify config saved to Firestore ✓\n');
   process.exit(0);
 }
 

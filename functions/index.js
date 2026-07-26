@@ -15,10 +15,11 @@
 //    firebase deploy --only functions
 // ============================================================
 
-const { onDocumentCreated } = require("firebase-functions/v2/firestore");
-const { initializeApp }     = require("firebase-admin/app");
-const { getFirestore }      = require("firebase-admin/firestore");
-const { getMessaging }      = require("firebase-admin/messaging");
+const { onDocumentCreated }    = require("firebase-functions/v2/firestore");
+const { onCall, HttpsError }   = require("firebase-functions/v2/https");
+const { initializeApp }        = require("firebase-admin/app");
+const { getFirestore }         = require("firebase-admin/firestore");
+const { getMessaging }         = require("firebase-admin/messaging");
 
 initializeApp();
 const db  = getFirestore();
@@ -33,6 +34,87 @@ const TYPE_META = {
   default:   { icon: "ic_launcher",  sound: "default",       channel: "general"  },
 };
 
+// ── Printify order submission ──────────────────────────────────────────────────
+// Called from the browser after the buyer fills the checkout form.
+// Reads the Printify API token from Firestore config/printify (Admin SDK bypasses rules).
+exports.submitPrintifyOrder = onCall({ region: "us-central1" }, async (request) => {
+  if (!request.auth) throw new HttpsError("unauthenticated", "You must be signed in to place an order.");
+
+  const { printifyProductId, printifyShopId, variantId, quantity, address, okOrderId } = request.data || {};
+
+  if (!printifyProductId || !printifyShopId || !variantId) {
+    throw new HttpsError("invalid-argument", "Missing product or variant information.");
+  }
+  if (!address?.first_name || !address?.last_name || !address?.address1 || !address?.city || !address?.country) {
+    throw new HttpsError("invalid-argument", "Incomplete shipping address. Please fill all required fields.");
+  }
+  if (!okOrderId) throw new HttpsError("invalid-argument", "Missing order reference ID.");
+
+  // Read Printify token from secured Firestore document
+  const configSnap = await db.collection("config").doc("printify").get();
+  if (!configSnap.exists) {
+    throw new HttpsError("internal", "Printify is not configured on this platform. Please run the import script first.");
+  }
+  const { token } = configSnap.data();
+  if (!token) throw new HttpsError("internal", "Printify API token is missing from configuration.");
+
+  const payload = {
+    external_id: `okmusic-${okOrderId}`,
+    label: "OK Music",
+    line_items: [{
+      product_id: printifyProductId,
+      variant_id: parseInt(variantId, 10),
+      quantity:   quantity || 1,
+    }],
+    shipping_method: 1,
+    send_shipping_notification: true,
+    address_to: {
+      first_name: address.first_name,
+      last_name:  address.last_name,
+      email:      address.email   || "",
+      phone:      address.phone   || "",
+      country:    address.country,
+      region:     address.region  || "",
+      address1:   address.address1,
+      address2:   address.address2 || "",
+      city:       address.city,
+      zip:        address.zip     || "",
+    },
+  };
+
+  const response = await fetch(
+    `https://api.printify.com/v1/shops/${printifyShopId}/orders.json`,
+    {
+      method:  "POST",
+      headers: {
+        "Authorization": `Bearer ${token}`,
+        "Content-Type":  "application/json",
+        "User-Agent":    "OK-Music/1.0",
+      },
+      body: JSON.stringify(payload),
+    }
+  );
+
+  const result = await response.json();
+
+  if (!response.ok) {
+    console.error("Printify order error:", JSON.stringify(result));
+    const errMsg = result.errors?.reason || result.message || `Printify returned HTTP ${response.status}`;
+    throw new HttpsError("internal", errMsg);
+  }
+
+  // Update the Firestore order doc (Admin SDK — bypasses security rules)
+  await db.collection("printifyOrders").doc(okOrderId).update({
+    printifyOrderId: result.id,
+    status:          "submitted",
+    submittedAt:     Date.now(),
+  });
+
+  console.log(`Printify order ${result.id} created for okOrderId=${okOrderId} by uid=${request.auth.uid}`);
+  return { printifyOrderId: result.id };
+});
+
+// ── Push notifications ─────────────────────────────────────────────────────────
 // Triggered whenever a new notification document is created
 exports.sendPushOnNotification = onDocumentCreated(
   "notifications/{notifId}",

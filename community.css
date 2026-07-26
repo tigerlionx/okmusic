@@ -874,3 +874,9 @@ body.has-page-bg .topbar{background:rgba(255,221,191,.45)}
 /* ---- Admin controls ---- */
 .contest-admin{margin-top:18px;padding-top:16px;border-top:2px dashed #E2E8F0;}
 .contest-admin-label{font-size:10px;font-weight:800;color:#94A3B8;text-transform:uppercase;letter-spacing:.1em;margin-bottom:8px;}
+
+/* ── Printify checkout modal ──────────────────────────────────────────────── */
+.printify-checkout{padding:4px 0 2px}
+.printify-checkout-section{font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin:14px 0 10px;padding-top:12px;border-top:1px solid var(--line)}
+.printify-payment-note{background:var(--orange-1);border:1px solid rgba(251,122,40,.3);border-radius:12px;padding:12px 14px;font-size:13px;line-height:1.5;color:var(--fg)}
+.printify-payment-note b{color:var(--orange)}

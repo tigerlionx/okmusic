@@ -1940,8 +1940,8 @@ function mpBuyerCard(p){
       <div class="mp-title" data-action="viewproduct" data-id="${p.id}">${esc(p.title)}</div>
       <div class="mp-seller-name">${esc(seller?.name||'Seller')} · ${esc(seller?.location||'')}</div>
       ${p.price>0?`<div class="mp-price">$${parseFloat(p.price).toFixed(2)}</div>`:''}
-      ${isPrintify&&p.buyUrl
-        ?`<a class="btn sm primary" href="${esc(p.buyUrl)}" target="_blank" rel="noopener" style="margin-top:8px;width:100%;display:block;text-align:center;text-decoration:none">Buy on Printify →</a>`
+      ${isPrintify
+        ?`<button class="btn sm primary" data-action="printifycheckout" data-id="${p.id}" style="margin-top:8px;width:100%">🛒 Buy Now</button>`
         :oos
           ?'<div class="mp-oos-badge">📦 Out of Stock</div>'
           :`<button class="btn sm ${inCart?'':'primary'}" data-action="addtocart" data-id="${p.id}" style="margin-top:8px;width:100%">${inCart?'In cart ✓':'Add to cart'}</button>
@@ -1961,8 +1961,8 @@ function viewProduct(id){
     ${p.price>0?`<div class="mp-detail-price">$${parseFloat(p.price).toFixed(2)}</div>`:''}
     <div class="mp-detail-desc">${esc(p.description)}</div>
     <div class="mp-seller-card">👤 <b>${esc(seller?.name||'Unknown')}</b> · 📍 ${esc(seller?.location||'')}</div>
-    ${isPrintify&&p.buyUrl
-      ?`<a class="btn primary block" href="${esc(p.buyUrl)}" target="_blank" rel="noopener" style="margin-top:14px;display:block;text-align:center;text-decoration:none">🛒 Buy on Printify →</a>`
+    ${isPrintify
+      ?`<button class="btn primary block" data-action="printifycheckout" data-id="${id}" style="margin-top:14px">🛒 Buy Now</button>`
       :oos
         ?'<div class="mp-oos-badge" style="margin-top:14px;font-size:14px;padding:10px">📦 Out of Stock</div>'
         :`<button class="btn ${inCart?'':'primary'} block" data-action="addtocart" data-id="${id}" style="margin-top:14px">${inCart?'✓ In cart — remove':'🛒 Add to cart'}</button>
@@ -1972,6 +1972,131 @@ function viewProduct(id){
 }
 function zoomPhoto(src){
   openOverlay(`<div style="text-align:center"><img src="${src}" style="max-width:100%;max-height:75vh;border-radius:8px;object-fit:contain" /></div>`);
+}
+
+// ---------- Printify checkout ----------
+function openPrintifyCheckout(productId){
+  if(!ME) return openEmailAuth();
+  const p=CACHE.products.find(x=>x.id===productId); if(!p) return toast('Product not found');
+  const variants=(p.variants||[]).filter(v=>v.id);
+  const photo=p.photos&&p.photos[0];
+  const firstVariant=variants[0];
+  const defaultPrice=parseFloat(firstVariant?.price||p.price||0).toFixed(2);
+
+  openOverlay(`<div class="printify-checkout">
+    <div style="display:flex;gap:12px;margin-bottom:16px;align-items:flex-start">
+      ${photo?`<img src="${photo}" style="width:72px;height:72px;object-fit:cover;border-radius:10px;flex-shrink:0" />`
+             :'<div style="width:72px;height:72px;background:var(--orange-1);border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:28px">📦</div>'}
+      <div style="flex:1;min-width:0">
+        <div class="printify-detail-badge" style="margin-bottom:6px">🖨️ Print-on-demand</div>
+        <div style="font-weight:700;font-size:15px;line-height:1.3">${esc(p.title)}</div>
+        <div id="pCheckoutPrice" style="font-size:20px;font-weight:800;color:var(--orange);margin-top:4px">$${defaultPrice}</div>
+      </div>
+    </div>
+
+    ${variants.length>1
+      ?`<div class="field" style="margin-bottom:12px">
+          <label style="font-size:13px;font-weight:600">Option</label>
+          <select class="fb-field" id="pVariantSelect" style="font-size:14px">
+            ${variants.map(v=>`<option value="${esc(String(v.id))}" data-price="${parseFloat(v.price||0).toFixed(2)}">${esc(v.label||v.id)}</option>`).join('')}
+          </select>
+        </div>`
+      :variants.length===1
+        ?`<div style="background:var(--card);border-radius:10px;padding:9px 12px;margin-bottom:12px;font-size:13px;color:var(--muted)">Option: <b style="color:var(--fg)">${esc(variants[0].label||'Standard')}</b></div>`
+        :''}
+
+    <div class="printify-checkout-section">📦 Shipping address</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">
+      <div class="field"><label style="font-size:12px">First name *</label><input class="fb-field" id="pShipFname" placeholder="Jane" /></div>
+      <div class="field"><label style="font-size:12px">Last name *</label><input class="fb-field" id="pShipLname" placeholder="Doe" /></div>
+    </div>
+    <div class="field" style="margin-bottom:8px"><label style="font-size:12px">Email *</label><input class="fb-field" id="pShipEmail" type="email" placeholder="jane@example.com" value="${esc(fbAuth.currentUser?.email||'')}" /></div>
+    <div class="field" style="margin-bottom:8px"><label style="font-size:12px">Street address *</label><input class="fb-field" id="pShipAddr1" placeholder="123 Main Street" /></div>
+    <div class="field" style="margin-bottom:8px"><label style="font-size:12px">Apt / Suite / Floor (optional)</label><input class="fb-field" id="pShipAddr2" placeholder="Apt 4B" /></div>
+    <div style="display:grid;grid-template-columns:2fr 1fr;gap:8px;margin-bottom:8px">
+      <div class="field"><label style="font-size:12px">City *</label><input class="fb-field" id="pShipCity" placeholder="New York" /></div>
+      <div class="field"><label style="font-size:12px">ZIP / Postal *</label><input class="fb-field" id="pShipZip" placeholder="10001" /></div>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">
+      <div class="field"><label style="font-size:12px">State / Region</label><input class="fb-field" id="pShipRegion" placeholder="NY" /></div>
+      <div class="field"><label style="font-size:12px">Country code *</label><input class="fb-field" id="pShipCountry" placeholder="US" maxlength="2" /></div>
+    </div>
+    <div class="field" style="margin-bottom:14px"><label style="font-size:12px">Phone (optional)</label><input class="fb-field" id="pShipPhone" placeholder="+1 555 000 0000" /></div>
+
+    <div class="printify-payment-note">
+      💳 <b>Payment:</b> After placing your order you will receive a <b>Payoneer invoice</b> for
+      <b id="pCheckoutTotal">$${defaultPrice}</b>. Printify handles production and worldwide shipping.
+    </div>
+
+    <button class="btn primary block" data-action="placeprintifyorder" data-productid="${productId}" style="margin-top:14px">Place Order →</button>
+  </div>`);
+
+  setTimeout(()=>{
+    const sel=$('pVariantSelect');
+    if(sel) sel.onchange=()=>{
+      const opt=sel.options[sel.selectedIndex];
+      const price='$'+(opt.dataset.price||'0.00');
+      const cp=$('pCheckoutPrice'); if(cp) cp.textContent=price;
+      const ct=$('pCheckoutTotal'); if(ct) ct.textContent=price;
+    };
+  },0);
+}
+
+async function placePrintifyOrder(productId){
+  if(!ME) return openEmailAuth();
+  const p=CACHE.products.find(x=>x.id===productId); if(!p) return;
+  const variants=p.variants||[];
+  const sel=$('pVariantSelect');
+  const variantId=sel?sel.value:(variants[0]?.id||'');
+  const variant=variants.find(v=>String(v.id)===String(variantId))||variants[0];
+
+  const fname   =($('pShipFname')?.value||'').trim();
+  const lname   =($('pShipLname')?.value||'').trim();
+  const email   =($('pShipEmail')?.value||'').trim();
+  const addr1   =($('pShipAddr1')?.value||'').trim();
+  const addr2   =($('pShipAddr2')?.value||'').trim();
+  const city    =($('pShipCity')?.value||'').trim();
+  const zip     =($('pShipZip')?.value||'').trim();
+  const region  =($('pShipRegion')?.value||'').trim();
+  const country =($('pShipCountry')?.value||'').trim().toUpperCase();
+  const phone   =($('pShipPhone')?.value||'').trim();
+
+  if(!fname||!lname) return toast('Enter your full name');
+  if(!email||!email.includes('@')) return toast('Enter a valid email address');
+  if(!addr1) return toast('Enter your street address');
+  if(!city)  return toast('Enter your city');
+  if(!zip)   return toast('Enter your ZIP / postal code');
+  if(!country||country.length!==2) return toast('Enter a 2-letter country code (e.g. US, SS, GB)');
+  if(!variantId) return toast('No variant available — please re-run the import script');
+
+  const btn=document.querySelector('[data-action="placeprintifyorder"]');
+  if(btn){ btn.disabled=true; btn.textContent='Placing order…'; }
+
+  const address={first_name:fname,last_name:lname,email,phone,address1:addr1,address2:addr2,city,region,zip,country};
+
+  try{
+    const orderRef=await fbDB.collection('printifyOrders').add({
+      buyerId:ME.id, buyerName:ME.name, buyerEmail:ME.email||email,
+      productId, productTitle:p.title,
+      printifyProductId:p.printifyId, printifyShopId:p.printifyShopId,
+      variantId:String(variantId), variantLabel:variant?.label||'',
+      price:variant?.price||p.price,
+      address, status:'pending', createdAt:Date.now(),
+    });
+    const submitFn=firebase.functions().httpsCallable('submitPrintifyOrder');
+    const result=await submitFn({
+      printifyProductId:p.printifyId, printifyShopId:p.printifyShopId,
+      variantId:String(variantId), quantity:1, address, okOrderId:orderRef.id,
+    });
+    closeOverlay();
+    toast('Order placed! You will receive a Payoneer invoice shortly 🎉');
+    console.log('Printify order submitted:',result.data?.printifyOrderId);
+  }catch(e){
+    console.error('placePrintifyOrder',e);
+    const msg=(e.message||'Order failed — please try again').replace(/^internal: /,'');
+    toast(msg);
+    if(btn){ btn.disabled=false; btn.textContent='Place Order →'; }
+  }
 }
 
 // ---------- cart ----------
@@ -3594,6 +3719,8 @@ document.addEventListener("click",e=>{
     openmarketplace:openMarketplace, gobuyer:goBuyer, goseller:goSeller, gosellerdirect:()=>{ if(!ME) return openEmailAuth(); CACHE.sellers[ME.id]?go("mystore"):openSellerSetup(); },
     doregisterseller:doRegisterSeller, addproduct:()=>openProductForm(), editproduct:()=>openProductForm(el.dataset.id), delproduct:()=>deleteProduct(el.dataset.id),
     dosaveproduct:()=>doSaveProduct(el.dataset.id||null), viewproduct:()=>viewProduct(el.dataset.id),
+    printifycheckout:()=>openPrintifyCheckout(el.dataset.id),
+    placeprintifyorder:()=>placePrintifyOrder(el.dataset.productid),
     addtocart:()=>addToCart(el.dataset.id), removecart:()=>removeFromCart(el.dataset.id),
     checkout:openCheckout, doorder:doPlaceOrder, zoomphoto:()=>zoomPhoto(el.dataset.src),
     togglepl:()=>{ if(!state.openPlaylists) state.openPlaylists=new Set(); const id=el.dataset.pl; state.openPlaylists.has(id)?state.openPlaylists.delete(id):state.openPlaylists.add(id); renderMain(); },
