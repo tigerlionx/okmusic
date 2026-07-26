@@ -21,6 +21,14 @@ let _printifyShopId = '';
 let _printifyStoreUrl = '';
 let _preMusicVol = 1;
 
+// On GitHub Pages the Firebase Messaging SDK cannot serve its SW at the origin root.
+// Unregister any stale SW registrations outside /okmusic/ so they stop throwing 404s.
+if (location.hostname === 'tigerlionx.github.io' && 'serviceWorker' in navigator) {
+  navigator.serviceWorker.getRegistrations().then(regs => {
+    regs.forEach(reg => { if (!reg.scope.includes('/okmusic/')) reg.unregister(); });
+  });
+}
+
 // Seed data (incl. 100 demo creators) now lives in community-data.js:
 // SEED_USERS, SEED_TRACKS, SEED_STATUSES, SEED_STATS, SEED_FOLLOWERS, SEED_ST_STATS.
 const COLORS = ["#FB7A28","#7c5cff","#36d1c4","#ff5c7c","#ffb347","#5c8bff","#ff7ac6","#2bbf4e"];
