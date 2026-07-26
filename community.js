@@ -3299,9 +3299,10 @@ function openSendLNC(toUid){
       </div>`);
     setTimeout(()=>{
       let _dir='send';
-      const amt=$('lncAmt'); const res=$('feeCalcResult'); const ack=$('lncSendAck');
+      const amt=$('lncAmt'); const ack=$('lncSendAck');
       const btn=$('lncSendBtn'); const lbl=$('lncAmtLabel');
-      function refresh(){ if(res) res.outerHTML=_lncSendCalcHtml(_dir,amt?.value||0,myBal); }
+      // Re-query feeCalcResult each time: outerHTML replacement detaches the old ref
+      function refresh(){ const cur=$('feeCalcResult'); if(cur) cur.outerHTML=_lncSendCalcHtml(_dir,amt?.value||0,myBal); }
       function updateDir(d){ _dir=d;
         document.querySelectorAll('.fee-dir-btn').forEach(b=>b.classList.toggle('active',b.dataset.dir===d));
         if(lbl) lbl.textContent=d==='send'?'Amount you send (LNC, 0.01 precision)':'Amount they receive exactly (LNC)';
