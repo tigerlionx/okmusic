@@ -2249,6 +2249,10 @@ function showCallBrowserNotif(callerId){
 }
 
 async function initPushNotifications(){
+  // GitHub Pages project sites cannot serve firebase-messaging-sw.js at the origin
+  // root (/), so the Firebase Messaging SDK always fails its default SW registration.
+  // Push notifications are only active on the Firebase Hosting URL.
+  if(location.hostname==='tigerlionx.github.io') return;
   if(!('Notification' in window)) return;
   // Only request if not already decided
   if(Notification.permission==='default'){
@@ -4486,9 +4490,10 @@ function startListeners(){
   fbDB.collection("comments").onSnapshot(s=>{ CACHE.comments=s.docs.map(d=>({ id:d.id, ...d.data() })); scheduleRender(); }, e=>console.warn("comments",e.code));
   fbDB.collection("products").onSnapshot(s=>{ CACHE.products=s.docs.map(d=>({ id:d.id, ...d.data() })).sort((a,b)=>b.createdAt-a.createdAt); scheduleRender(); }, e=>console.warn("products",e.code));
   fbDB.collection("sellers").onSnapshot(s=>{ CACHE.sellers={}; s.forEach(d=>CACHE.sellers[d.id]={ id:d.id, ...d.data() }); scheduleRender(); }, e=>console.warn("sellers",e.code));
-  fbDB.collection("discoveryPosts").orderBy("time","desc").limit(100).onSnapshot(s=>{ CACHE.discoveryPosts=s.docs.map(d=>({ id:d.id, ...d.data() })); scheduleRender(); }, e=>console.warn("discoveryPosts",e.code));
 }
 function startAuthListeners(uid){
+  // discoveryPosts require auth per Firestore rules — start here, not in startListeners
+  fbDB.collection("discoveryPosts").orderBy("time","desc").limit(100).onSnapshot(s=>{ CACHE.discoveryPosts=s.docs.map(d=>({ id:d.id, ...d.data() })); scheduleRender(); }, e=>console.warn("discoveryPosts",e.code));
   // buyer orders (and admin gets all orders)
   const ordersQ=fbAuth.currentUser?.email===ADMIN_EMAIL
     ?fbDB.collection("orders")
