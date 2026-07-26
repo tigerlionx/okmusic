@@ -10,6 +10,9 @@ node_modules/
 # Firebase local cache
 .firebase/
 
+# private keys — never commit
+service-account.json
+
 # large media files
 *.mp3
 *.mp4
