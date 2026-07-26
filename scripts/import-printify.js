@@ -22,10 +22,16 @@
 const https = require('https');
 const path  = require('path');
 
-// ── Firebase Admin ────────────────────────────────────────────────────────────
-let admin;
-try { admin = require('firebase-admin'); }
-catch { console.error('\n❌  firebase-admin not found.\n    Run: npm install firebase-admin\n'); process.exit(1); }
+// ── Firebase Admin (v11+ modular API) ────────────────────────────────────────
+let initializeApp, cert, getFirestore, getAuth;
+try {
+  ({ initializeApp, cert } = require('firebase-admin/app'));
+  ({ getFirestore }        = require('firebase-admin/firestore'));
+  ({ getAuth }             = require('firebase-admin/auth'));
+} catch {
+  console.error('\n❌  firebase-admin not found.\n    Run: npm install firebase-admin\n');
+  process.exit(1);
+}
 
 const saPath = path.join(__dirname, '..', 'service-account.json');
 let serviceAccount;
@@ -36,8 +42,8 @@ catch {
   process.exit(1);
 }
 
-admin.initializeApp({ credential: admin.credential.cert(serviceAccount) });
-const db = admin.firestore();
+initializeApp({ credential: cert(serviceAccount) });
+const db = getFirestore();
 
 // ── Printify API helper ───────────────────────────────────────────────────────
 function printifyGet(apiPath, token) {
@@ -80,7 +86,7 @@ async function main() {
   console.log('🔐  Looking up admin account in Firebase Auth…');
   let sellerId;
   try {
-    const userRecord = await admin.auth().getUserByEmail('trendai509@gmail.com');
+    const userRecord = await getAuth().getUserByEmail('trendai509@gmail.com');
     sellerId = userRecord.uid;
     console.log(`    UID: ${sellerId}`);
   } catch (e) {
