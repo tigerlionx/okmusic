@@ -49,7 +49,26 @@ const THEMES = [
 const PLATFORM_EMAIL="trendai509@gmail.com";
 const ADMIN_EMAIL="trendai509@gmail.com";
 const PLATFORM_FEE=0.03;
-const MP_CATEGORIES=["Music Equipment","Clothing & Merch","Software & Plugins","Art & Design","Books & Courses","Other"];
+const MP_CATEGORIES=[
+  "Electronics","Fashion & Apparel","Home & Furniture","Beauty & Health",
+  "Food & Groceries","Vehicles & Parts","Books","Music & Audio",
+  "Digital Products / eBooks / Software","Art & Collectibles",
+  "Services","Sports & Outdoors","Baby & Kids","Other"
+];
+
+// ── LNC arithmetic helpers ────────────────────────────────────────────────────
+// Integer minor-unit (×100) math avoids floating-point drift. Round half-up throughout.
+function lncFee(grossLNC){
+  const grossC=Math.round(grossLNC*100);
+  const feeC=Math.floor(grossC*5/100+0.5);      // 5 % of gross, round half-up
+  return { gross:grossC/100, fee:feeC/100, net:(grossC-feeC)/100 };
+}
+function lncFeeReverse(netLNC){                  // caller wants payee to receive exactly netLNC
+  const netC=Math.round(netLNC*100);
+  const grossC=Math.floor(netC/0.95+0.5);        // gross = net / 0.95, round half-up
+  return { gross:grossC/100, fee:(grossC-netC)/100, net:netC/100 };
+}
+function fmtLNC(v){ return parseFloat(v||0).toFixed(2); }
 
 // ---------- DB ----------
 const LS = "okcommunity4";
@@ -1822,23 +1841,63 @@ function openProductForm(productId){
   window._mpPhoto=p?.photos?.[0]||null;
   window._mpPhotoFile=null;
   const prevStyle=window._mpPhoto?`background-image:url('${window._mpPhoto}');background-size:cover;background-position:center`:'background:var(--orange-1)';
+  // If existing product has a custom category, map it to "Other" in the select
+  const existingCat=p?.category||'Other';
+  const catInList=MP_CATEGORIES.includes(existingCat);
+  const selectVal=catInList?existingCat:'Other';
+  const customVal=catInList?'':existingCat;
+  const noLoc=p?p.location==null:false;
   openOverlay(`<h2>${p?'Edit product':'Add a product'}</h2>
     <div class="field"><label>Title</label><input class="fb-field" id="prodTitle" placeholder="e.g. OK Music hoodie" value="${esc(p?.title||'')}" /></div>
     <div class="field"><label>Description</label><textarea class="fb-field" id="prodDesc" placeholder="Describe your product — material, size, condition…" style="min-height:90px">${esc(p?.description||'')}</textarea></div>
-    <div class="field"><label>Category</label><select class="fb-field" id="prodCat">${MP_CATEGORIES.map(c=>`<option value="${c}" ${(p?.category||'Other')===c?'selected':''}>${c}</option>`).join("")}</select></div>
+    <div class="field"><label>Category</label>
+      <select class="fb-field" id="prodCat">${MP_CATEGORIES.map(c=>`<option value="${esc(c)}" ${selectVal===c?'selected':''}>${esc(c)}</option>`).join('')}</select>
+      <div id="prodCatCustomRow" style="margin-top:8px;display:${selectVal==='Other'?'block':'none'}">
+        <input class="fb-field" id="prodCatOther" placeholder="Describe your category…" value="${esc(customVal)}" maxlength="60" />
+      </div>
+    </div>
+    <div class="field"><label>Location <span style="font-weight:400;color:var(--muted)">(city, country)</span></label>
+      <input class="fb-field" id="prodLocation" placeholder="e.g. Paris, France" value="${esc(p?.location||'')}" ${noLoc?'disabled':''} />
+      <label style="display:flex;align-items:center;gap:8px;margin-top:6px;font-size:13px;cursor:pointer">
+        <input type="checkbox" id="prodNoLoc" ${noLoc?'checked':''}> No location / Digital product
+      </label>
+    </div>
     <div class="field"><label>Price (USD)</label><input class="fb-field" id="prodPrice" type="number" min="0.01" step="0.01" placeholder="0.00" value="${p?.price||''}" /></div>
     <div class="field"><label>Shipping cost (USD)</label><input class="fb-field" id="prodShip" type="number" min="0" step="0.01" placeholder="0.00" value="${p?.shipping||''}" /></div>
-    <div class="field"><label>🦁 LionCoin price <span style="font-weight:400;color:var(--muted)">(optional — lets buyers pay with LNC)</span></label><input class="fb-field" id="prodLnc" type="number" min="1" step="1" placeholder="e.g. 500" value="${p?.lncPrice||''}" /></div>
+    <div class="field"><label>🦁 LionCoin price <span style="font-weight:400;color:var(--muted)">(optional — 2 decimal places supported, e.g. 12.50)</span></label><input class="fb-field" id="prodLnc" type="number" min="0.01" step="0.01" placeholder="e.g. 12.50" value="${p?.lncPrice||''}" /></div>
     <div class="field"><label>Stock quantity <span style="font-weight:400;color:var(--muted)">(optional — leave blank for unlimited)</span></label><input class="fb-field" id="prodStock" type="number" min="0" step="1" placeholder="e.g. 10" value="${p?.stock!=null?p.stock:''}" /></div>
     <div class="field"><label>Product photo</label>
       <div class="covup"><div class="covprev" id="prodPhotoPrev" style="${prevStyle}">${window._mpPhoto?'':'📦'}</div>
         <div><input type="file" id="prodPhotoFile" accept="image/*,.heic,.heif,.avif,.webp,.tiff,.bmp,.svg" /><div class="note" style="margin-top:4px">All photo formats supported (JPG, PNG, WEBP, HEIC, RAW…)</div></div></div></div>
     <button class="btn primary block" data-action="dosaveproduct" data-id="${productId||''}" style="margin-top:16px">${p?'Save changes':'List product'}</button>`);
+  setTimeout(()=>{
+    const sel=$('prodCat'); const row=$('prodCatCustomRow'); const locInp=$('prodLocation'); const noLocChk=$('prodNoLoc');
+    if(sel&&row) sel.onchange=()=>{ row.style.display=sel.value==='Other'?'block':'none'; };
+    if(noLocChk&&locInp) noLocChk.onchange=()=>{ locInp.disabled=noLocChk.checked; if(noLocChk.checked) locInp.value=''; };
+    const photoFile=$('prodPhotoFile'); const photoPrev=$('prodPhotoPrev');
+    if(photoFile&&photoPrev) photoFile.onchange=e=>{
+      const f=e.target.files?.[0]; if(!f) return;
+      window._mpPhotoFile=f;
+      const url=URL.createObjectURL(f);
+      photoPrev.style.cssText=`background-image:url('${url}');background-size:cover;background-position:center`;
+      photoPrev.textContent='';
+    };
+  },0);
 }
 async function doSaveProduct(productId){
   const title=($("prodTitle").value||"").trim(), description=($("prodDesc").value||"").trim();
   const price=parseFloat(($("prodPrice")||{value:""}).value), shipping=parseFloat(($("prodShip")||{value:"0"}).value||"0")||0;
-  const category=($("prodCat")||{value:"Other"}).value||"Other";
+  // Category: "Other" + custom text → use custom text (trimmed, normalised)
+  const catSel=($("prodCat")||{value:"Other"}).value||"Other";
+  let category=catSel;
+  if(catSel==="Other"){
+    const custom=(($("prodCatOther")||{value:""}).value||"").trim();
+    category=custom||"Other";
+  }
+  // Location
+  const noLoc=!!$("prodNoLoc")?.checked;
+  const locationRaw=(($("prodLocation")||{value:""}).value||"").trim();
+  const location=noLoc?null:(locationRaw||null);
   if(!title||!description) return toast("Fill in title and description");
   if(!price||price<=0) return toast("Enter a valid price");
   const saveBtn=document.querySelector('[data-action="dosaveproduct"]');
@@ -1852,11 +1911,11 @@ async function doSaveProduct(productId){
       return toast("Photo upload failed: "+(e.message||e));
     }
   }
-  const lncPriceRaw=parseInt(($("prodLnc")||{value:""}).value)||0;
-  const lncPrice=lncPriceRaw>0?lncPriceRaw:null;
+  const lncRaw=parseFloat(($("prodLnc")||{value:""}).value)||0;
+  const lncPrice=lncRaw>=0.01?+lncRaw.toFixed(2):null;
   const stockRaw=parseInt(($("prodStock")||{value:""}).value);
   const stock=(!isNaN(stockRaw)&&stockRaw>=0)?stockRaw:null;
-  const data={ sellerId:ME.id, title, description, category, price, shipping, photos, ...(lncPrice?{lncPrice}:{lncPrice:null}), stock:stock!==null?stock:null, updatedAt:Date.now() };
+  const data={ sellerId:ME.id, title, description, category, location, price, shipping, photos, lncPrice:lncPrice??null, stock:stock!==null?stock:null, updatedAt:Date.now() };
   try{
     if(productId){ await fbDB.collection("products").doc(productId).update(data); closeOverlay(); toast("Product updated ✓"); }
     else{ data.createdAt=Date.now(); await fbDB.collection("products").add(data); closeOverlay(); toast("Product listed! 🎉"); }
@@ -1877,37 +1936,124 @@ function deleteProduct(id){
 function doDeleteProduct(id){ fbDB.collection("products").doc(id).delete().then(()=>{ closeOverlay(); toast("Product deleted"); go("mystore"); }).catch(e=>toast(e.code||e.message)); }
 
 // ---------- buyer browse ----------
+// _mpResults holds the current server-query result set; null = use CACHE.products
+let _mpResults=null;
+let _mpLoading=false;
+
+async function runMpQuery(){
+  const cat=state.mpCat||'';
+  const sort=state.mpSort||'newest';
+  // Only fire a Firestore query when a non-default filter is active
+  if(!cat&&sort==='newest'){ _mpResults=null; renderMarketplace(); return; }
+  _mpLoading=true; renderMarketplace();
+  try{
+    let q=fbDB.collection('products');
+    if(cat) q=q.where('category','==',cat);
+    if(sort==='priceAsc')  q=q.orderBy('price','asc');
+    else if(sort==='priceDesc') q=q.orderBy('price','desc');
+    else q=q.orderBy('createdAt','desc');
+    q=q.limit(120);
+    const snap=await q.get();
+    _mpResults=snap.docs.map(d=>({id:d.id,...d.data()}));
+  }catch(e){ console.warn('mpQuery',e.code,e.message); _mpResults=null; }
+  _mpLoading=false; renderMarketplace();
+}
+
 function renderMarketplace(){
-  const q=(state.mpSearch||"").toLowerCase();
-  let list=CACHE.products.slice().sort((a,b)=>b.createdAt-a.createdAt);
-  if(q) list=list.filter(p=>p.title.toLowerCase().includes(q)||(p.description||"").toLowerCase().includes(q)||(CACHE.sellers[p.sellerId]?.name||"").toLowerCase().includes(q));
   const cartCount=(state.cart||[]).length;
+  const q=(state.mpSearch||'').toLowerCase();
+  const minP=parseFloat(state.mpMinPrice)||0;
+  const maxP=parseFloat(state.mpMaxPrice)||Infinity;
+  const locF=state.mpLocFilter||'';
+
+  // Base list: server-query result or full CACHE
+  let list=(_mpResults||CACHE.products).slice();
+
+  // Client-side secondary filters (price range + location + text)
+  if(minP>0) list=list.filter(p=>parseFloat(p.price)>=minP);
+  if(maxP<Infinity) list=list.filter(p=>parseFloat(p.price)<=maxP);
+  if(locF) list=list.filter(p=>p.location===locF);
+  if(q) list=list.filter(p=>
+    (p.title||'').toLowerCase().includes(q)||
+    (p.description||'').toLowerCase().includes(q)||
+    (CACHE.sellers[p.sellerId]?.name||'').toLowerCase().includes(q)
+  );
+
+  // Unique locations for the location dropdown (from CACHE so it's always fresh)
+  const allLocs=[...new Set(CACHE.products.map(p=>p.location).filter(Boolean))].sort();
+  // Unique categories from CACHE for the category dropdown
+  const allCats=[...new Set(CACHE.products.map(p=>p.category).filter(Boolean))].sort();
+
+  const activeCat=state.mpCat||'';
+  const activeSort=state.mpSort||'newest';
+  const hasFilter=activeCat||activeSort!=='newest'||locF||minP>0||maxP<Infinity||q;
+
   $("page").innerHTML=`<div class="h-title">🛍️ Marketplace</div>
-    <div style="display:flex;gap:10px;margin-bottom:16px;align-items:center;flex-wrap:wrap">
-      <input class="fb-field" id="mpSearch" placeholder="Search products or sellers…" value="${esc(state.mpSearch||'')}" style="flex:1;min-width:180px;margin:0" />
+    <div class="mp-filter-bar">
+      <input class="fb-field mp-search-inp" id="mpSearch" placeholder="Search…" value="${esc(state.mpSearch||'')}" />
+      <select class="fb-field mp-filter-sel" id="mpCatSel">
+        <option value="">All categories</option>
+        ${allCats.map(c=>`<option value="${esc(c)}" ${activeCat===c?'selected':''}>${esc(c)}</option>`).join('')}
+      </select>
+      <select class="fb-field mp-filter-sel" id="mpSortSel">
+        <option value="newest" ${activeSort==='newest'?'selected':''}>Newest</option>
+        <option value="priceAsc" ${activeSort==='priceAsc'?'selected':''}>Price ↑</option>
+        <option value="priceDesc" ${activeSort==='priceDesc'?'selected':''}>Price ↓</option>
+      </select>
+      ${allLocs.length?`<select class="fb-field mp-filter-sel" id="mpLocSel">
+        <option value="">All locations</option>
+        ${allLocs.map(l=>`<option value="${esc(l)}" ${locF===l?'selected':''}>${esc(l)}</option>`).join('')}
+      </select>`:''}
+      <div class="mp-price-range">
+        <input class="fb-field" id="mpMinP" type="number" min="0" step="0.01" placeholder="Min $" value="${state.mpMinPrice||''}" style="width:80px" />
+        <span style="color:var(--muted);flex-shrink:0">–</span>
+        <input class="fb-field" id="mpMaxP" type="number" min="0" step="0.01" placeholder="Max $" value="${state.mpMaxPrice||''}" style="width:80px" />
+      </div>
+      ${hasFilter?`<button class="btn sm" data-action="clearmpfilters" style="white-space:nowrap;flex-shrink:0">✕ Clear</button>`:''}
+    </div>
+    <div style="display:flex;gap:8px;margin-bottom:12px;justify-content:flex-end">
       <button class="btn ${cartCount?'primary':''}" data-action="nav" data-view="cart">🛒 Cart${cartCount?` (${cartCount})`:''}</button>
       <button class="btn" data-action="gosellerdirect">🏪 Sell</button>
     </div>
-    ${list.length
-      ?`<div class="mp-grid">${list.map(mpBuyerCard).join("")}</div>`
-      :'<div class="empty">No products listed yet — be the first to sell!</div>'}`;
-  setTimeout(()=>{ const s=$("mpSearch"); if(s) s.oninput=e=>{ state.mpSearch=e.target.value; renderMarketplace(); }; },0);
+    ${_mpLoading
+      ?'<div class="empty">Loading…</div>'
+      :list.length
+        ?`<div class="mp-grid">${list.map(mpBuyerCard).join('')}</div>`
+        :'<div class="empty">No products match your filters.</div>'}`;
+
+  setTimeout(()=>{
+    const s=$('mpSearch'); if(s) s.oninput=e=>{ state.mpSearch=e.target.value; renderMarketplace(); };
+    const catSel=$('mpCatSel'); if(catSel) catSel.onchange=()=>{ state.mpCat=catSel.value; runMpQuery(); };
+    const sortSel=$('mpSortSel'); if(sortSel) sortSel.onchange=()=>{ state.mpSort=sortSel.value; runMpQuery(); };
+    const locSel=$('mpLocSel'); if(locSel) locSel.onchange=()=>{ state.mpLocFilter=locSel.value; renderMarketplace(); };
+    const minInp=$('mpMinP'); if(minInp) minInp.onchange=()=>{ state.mpMinPrice=minInp.value; renderMarketplace(); };
+    const maxInp=$('mpMaxP'); if(maxInp) maxInp.onchange=()=>{ state.mpMaxPrice=maxInp.value; renderMarketplace(); };
+  },0);
+}
+function clearMpFilters(){
+  state.mpCat=''; state.mpSort='newest'; state.mpLocFilter='';
+  state.mpMinPrice=''; state.mpMaxPrice=''; state.mpSearch='';
+  _mpResults=null; renderMarketplace();
 }
 function mpBuyerCard(p){
   const photo=p.photos&&p.photos[0]; const seller=CACHE.sellers[p.sellerId]; const inCart=(state.cart||[]).includes(p.id); const oos=isOutOfStock(p);
   const isPrintify=p.source==='printify';
+  const locBadge=p.location?`<span class="mp-loc-badge">📍 ${esc(p.location)}</span>`:'';
   return `<div class="mp-card">
     <div class="mp-photo" style="${photo?`background-image:url('${photo}');background-size:cover;background-position:center`:'background:var(--orange-1)'}" data-action="viewproduct" data-id="${p.id}">${photo?'':'📦'}${isPrintify?'<span class="printify-badge">🖨️ Print-on-demand</span>':''}</div>
     <div class="mp-card-body">
       <div class="mp-title" data-action="viewproduct" data-id="${p.id}">${esc(p.title)}</div>
-      <div class="mp-seller-name">${esc(seller?.name||'Seller')} · ${esc(seller?.location||'')}</div>
-      ${p.price>0?`<div class="mp-price">$${parseFloat(p.price).toFixed(2)}</div>`:''}
+      <div class="mp-seller-name">
+        <span class="mp-seller-link" data-action="contactseller" data-uid="${p.sellerId}" data-productid="${p.id}">${esc(seller?.name||'Seller')}</span>
+        ${locBadge}
+      </div>
+      ${p.price>0?`<div class="mp-price">$${parseFloat(p.price).toFixed(2)}${p.shipping>0?`<span class="mp-ship"> + $${parseFloat(p.shipping).toFixed(2)} ship</span>`:''}</div>`:''}
       ${isPrintify
         ?`<button class="btn sm primary" data-action="printifycheckout" data-id="${p.id}" style="margin-top:8px;width:100%">🛒 Buy Now</button>`
         :oos
           ?'<div class="mp-oos-badge">📦 Out of Stock</div>'
           :`<button class="btn sm ${inCart?'':'primary'}" data-action="addtocart" data-id="${p.id}" style="margin-top:8px;width:100%">${inCart?'In cart ✓':'Add to cart'}</button>
-      ${p.lncPrice?`<button class="btn sm" data-action="buywithlioncoin" data-id="${p.id}" style="margin-top:4px;width:100%">🦁 Buy with LNC</button>`:''}`}
+      ${p.lncPrice?`<button class="btn sm" data-action="buywithlioncoin" data-id="${p.id}" style="margin-top:4px;width:100%">🦁 Buy with LNC (${fmtLNC(p.lncPrice)} LNC)</button>`:''}`}
     </div>
   </div>`;
 }
@@ -1915,22 +2061,55 @@ function viewProduct(id){
   const p=CACHE.products.find(x=>x.id===id); if(!p) return;
   const seller=CACHE.sellers[p.sellerId]; const photo=p.photos&&p.photos[0]; const inCart=(state.cart||[]).includes(id); const oos=isOutOfStock(p);
   const isPrintify=p.source==='printify';
+  const ship=parseFloat(p.shipping||0);
+  const total=parseFloat(p.price||0)+ship;
+  const priceBreakdown=ship>0
+    ?`<div class="mp-price-breakdown">
+        <span>Product: <b>$${parseFloat(p.price).toFixed(2)}</b></span>
+        <span>Shipping: <b>$${ship.toFixed(2)}</b></span>
+        <span class="mp-price-total">Total: <b>$${total.toFixed(2)}</b></span>
+      </div>`
+    :`<div class="mp-detail-price">$${parseFloat(p.price).toFixed(2)}</div>`;
+  const locLine=p.location?`📍 ${esc(p.location)} · `:'';
   openOverlay(`<div class="mp-detail">
     ${photo?`<div style="text-align:center;margin-bottom:12px"><img src="${photo}" class="mp-detail-img" data-action="zoomphoto" data-src="${photo}" /></div>`:''}
     ${isPrintify?'<div class="printify-detail-badge">🖨️ Print-on-demand · Fulfilled by Printify</div>':''}
     <div class="mp-detail-title">${esc(p.title)}</div>
     <div class="mp-detail-cat">${esc(p.category||'')}</div>
-    ${p.price>0?`<div class="mp-detail-price">$${parseFloat(p.price).toFixed(2)}</div>`:''}
+    ${p.price>0?priceBreakdown:''}
     <div class="mp-detail-desc">${esc(p.description)}</div>
-    <div class="mp-seller-card">👤 <b>${esc(seller?.name||'Unknown')}</b> · 📍 ${esc(seller?.location||'')}</div>
+    <div class="mp-seller-card">
+      👤 <span class="mp-seller-link" data-action="contactseller" data-uid="${p.sellerId}" data-productid="${id}"><b>${esc(seller?.name||'Unknown')}</b></span>
+      · ${locLine}
+      <span style="font-size:12px;color:var(--muted)">Tap name to message or call seller</span>
+    </div>
     ${isPrintify
       ?`<button class="btn primary block" data-action="printifycheckout" data-id="${id}" style="margin-top:14px">🛒 Buy Now</button>`
       :oos
         ?'<div class="mp-oos-badge" style="margin-top:14px;font-size:14px;padding:10px">📦 Out of Stock</div>'
         :`<button class="btn ${inCart?'':'primary'} block" data-action="addtocart" data-id="${id}" style="margin-top:14px">${inCart?'✓ In cart — remove':'🛒 Add to cart'}</button>
     ${inCart?`<button class="btn primary block" data-action="nav" data-view="cart" style="margin-top:8px">Go to cart →</button>`:''}
-    ${p.lncPrice?`<div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border)"><div class="lnc-badge" style="margin-bottom:8px">🦁 ${p.lncPrice} LNC</div><button class="btn block" data-action="buywithlioncoin" data-id="${id}" style="margin-top:4px">🦁 Buy with LionCoin</button></div>`:''}`}
+    ${p.lncPrice?`<div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border)">
+      <div class="lnc-badge" style="margin-bottom:8px">🦁 ${fmtLNC(p.lncPrice)} LNC${ship>0?` + shipping`:''}</div>
+      <button class="btn block" data-action="buywithlioncoin" data-id="${id}" style="margin-top:4px">🦁 Buy with LionCoin</button>
+    </div>`:''}`}
   </div>`);
+}
+
+function contactSeller(sellerUid, productId){
+  if(!ME) return openEmailAuth();
+  if(sellerUid===ME.id) return toast("That's your own product.");
+  const p=CACHE.products.find(x=>x.id===productId);
+  // Open chat, then send a context message
+  closeOverlay();
+  state.chatUid=sellerUid; state.view='chat'; renderApp();
+  if(p){
+    // Pre-fill chat input so the buyer can add a note before sending
+    setTimeout(()=>{
+      const inp=$('chatInput');
+      if(inp&&!inp.value) inp.value=`Hi, I'm interested in your product: "${p.title}"`;
+    },300);
+  }
 }
 function zoomPhoto(src){
   openOverlay(`<div style="text-align:center"><img src="${src}" style="max-width:100%;max-height:75vh;border-radius:8px;object-fit:contain" /></div>`);
@@ -2909,34 +3088,57 @@ async function checkFanMilestone(uid){
   }catch{}
 }
 
+function _lncBuyDialog(productId){
+  const p=CACHE.products.find(x=>x.id===productId); if(!p||!p.lncPrice) return;
+  const gross=parseFloat(p.lncPrice);
+  const ship=parseFloat(p.shipping||0);
+  // LNC price covers the product; shipping (if any) is added on top in LNC equivalent
+  // For simplicity, lncPrice is the total the buyer pays (seller sets it inclusive of shipping)
+  // Spec: "If paid in LNC, the 5% fee applies to the total (product + shipping)"
+  // Here lncPrice IS the product price in LNC; we add an lncShipping equivalent if set
+  // Since lncShipping is not a separate field, use the USD shipping cost as a note only
+  const {fee,net}=lncFee(gross);
+  const bal=parseFloat(CACHE.wallet?.balance||0);
+  openOverlay(`<div style="padding:8px">
+    <div style="text-align:center;font-size:36px;margin-bottom:8px">🦁</div>
+    <h2 style="text-align:center">Buy with LionCoin</h2>
+    <p class="sub" style="text-align:center;margin:6px 0 14px">${esc(p.title)}</p>
+    <div class="cart-summary" style="margin-bottom:14px">
+      <div class="cart-line"><span>Product price</span><span>${fmtLNC(gross)} LNC</span></div>
+      <div class="cart-line"><span>OK Music fee (5%)</span><span>${fmtLNC(fee)} LNC</span></div>
+      <div class="cart-line cart-total"><span>Total debited from you</span><span>${fmtLNC(gross)} LNC</span></div>
+      <div class="cart-line" style="color:var(--muted);font-size:12px"><span>Seller receives</span><span>${fmtLNC(net)} LNC</span></div>
+    </div>
+    ${ship>0?`<p class="note" style="margin-bottom:10px">⚠️ This product has a USD shipping cost of <b>$${ship.toFixed(2)}</b>. Arrange shipping payment separately with the seller via message.</p>`:''}
+    <p class="sub" style="margin-bottom:12px">Your balance: <b>${fmtLNC(bal)} LNC</b>${bal<gross?' — <span style="color:#e2554f">insufficient</span>':''}</p>
+    <label class="fee-ack-row" id="lncBuyAckRow">
+      <input type="checkbox" id="lncBuyAck"> I acknowledge the 5% (${fmtLNC(fee)} LNC) OK Music platform fee
+    </label>
+    <div style="display:flex;gap:10px;margin-top:14px">
+      <button class="btn block" data-action="close">Cancel</button>
+      <button class="btn primary block" id="lncBuyConfirmBtn" data-action="confirmlncbuy" data-id="${productId}" disabled>Confirm purchase</button>
+    </div>
+  </div>`);
+  setTimeout(()=>{
+    const chk=$('lncBuyAck'); const btn=$('lncBuyConfirmBtn');
+    if(chk&&btn) chk.onchange=()=>{ btn.disabled=!chk.checked; $('lncBuyAckRow').classList.toggle('ack-ok',chk.checked); };
+  },0);
+}
+
 async function buyWithLNC(productId){
   if(!ME) return openEmailAuth();
   const p=CACHE.products.find(x=>x.id===productId); if(!p||!p.lncPrice) return;
   if(isOutOfStock(p)) return toast("This item is out of stock 📦");
-  const lncPrice=parseInt(p.lncPrice); const bal=CACHE.wallet?.balance||0;
-  if(bal<lncPrice) return toast(`Not enough LionCoins — need ${lncPrice} LNC, you have ${Math.floor(bal)} LNC`);
-  const fee=Math.round(lncPrice*0.05); const sellerAmount=lncPrice-fee;
-  openOverlay(`<div style="text-align:center;padding:8px">
-    <div style="font-size:40px;margin-bottom:8px">🦁</div>
-    <h2>Buy with LionCoin</h2>
-    <p class="sub" style="margin:10px 0">${esc(p.title)}</p>
-    <div class="cart-summary" style="margin:14px 0">
-      <div class="cart-line"><span>Price</span><span>${lncPrice} LNC</span></div>
-      <div class="cart-line"><span>Platform fee (5%)</span><span>${fee} LNC</span></div>
-      <div class="cart-line cart-total"><span>Total</span><span>${lncPrice} LNC</span></div>
-    </div>
-    <p class="sub" style="margin-bottom:16px">Your balance: <b>${Math.floor(bal)} LNC</b></p>
-    <div style="display:flex;gap:10px">
-      <button class="btn block" data-action="close">Cancel</button>
-      <button class="btn primary block" data-action="confirmlncbuy" data-id="${productId}">Confirm purchase</button>
-    </div>
-  </div>`);
+  const gross=parseFloat(p.lncPrice);
+  const bal=parseFloat(CACHE.wallet?.balance||0);
+  if(bal<gross) return toast(`Not enough LionCoins — need ${fmtLNC(gross)} LNC, you have ${fmtLNC(bal)} LNC`);
+  _lncBuyDialog(productId);
 }
 
 async function confirmLncBuy(productId){
   if(!ME) return;
   const p=CACHE.products.find(x=>x.id===productId); if(!p||!p.lncPrice) return;
-  const lncPrice=parseInt(p.lncPrice); const fee=Math.round(lncPrice*0.05); const sellerAmount=lncPrice-fee;
+  const {gross,fee,net}=lncFee(parseFloat(p.lncPrice));
   const F=firebase.firestore.FieldValue;
   const buyerRef=fbDB.collection('wallets').doc(ME.id);
   const sellerRef=fbDB.collection('wallets').doc(p.sellerId);
@@ -2947,20 +3149,20 @@ async function confirmLncBuy(productId){
       const [buyerSnap,productSnap]=await Promise.all([t.get(buyerRef),t.get(productRef)]);
       const pd=productSnap.data();
       if(pd&&pd.stock!=null&&pd.stock<=0) throw new Error('out_of_stock');
-      if(!buyerSnap.exists||(buyerSnap.data().balance||0)<lncPrice) throw new Error('Insufficient balance');
-      t.update(buyerRef,{balance:F.increment(-lncPrice),totalSpent:F.increment(lncPrice)});
-      t.set(sellerRef,{balance:F.increment(sellerAmount),totalEarned:F.increment(sellerAmount)},{merge:true});
+      if(!buyerSnap.exists||(parseFloat(buyerSnap.data().balance)||0)<gross) throw new Error('Insufficient balance');
+      t.update(buyerRef,{balance:F.increment(-gross),totalSpent:F.increment(gross)});
+      t.set(sellerRef,{balance:F.increment(net),totalEarned:F.increment(net)},{merge:true});
       if(pd&&pd.stock!=null) t.update(productRef,{stock:F.increment(-1)});
       ok=true;
     });
     if(ok){
-      fbDB.collection('wallets').doc(ME.id).collection('transactions').add({type:'marketplace_buy',amount:-lncPrice,description:`Bought: ${p.title}`,ref:productId,createdAt:now}).catch(()=>{});
-      fbDB.collection('wallets').doc(p.sellerId).collection('transactions').add({type:'marketplace_sale',amount:sellerAmount,description:`Sold: ${p.title}`,ref:productId,createdAt:now}).catch(()=>{});
+      fbDB.collection('wallets').doc(ME.id).collection('transactions').add({type:'marketplace_buy',amount:-gross,description:`Bought: ${p.title}`,ref:productId,createdAt:now}).catch(()=>{});
+      fbDB.collection('wallets').doc(p.sellerId).collection('transactions').add({type:'marketplace_sale',amount:net,description:`Sold: ${p.title}`,ref:productId,createdAt:now}).catch(()=>{});
       fbDB.collection('orders').add({buyerId:ME.id,buyerName:ME.name,buyerEmail:fbAuth.currentUser?.email||'',buyerAddress:'LNC purchase',
-        items:[{productId:p.id,title:p.title,price:0,shipping:0,sellerId:p.sellerId,lncPrice}],
-        subtotal:0,shipping:0,platformFee:0,total:0,lncAmount:lncPrice,status:'lnc_paid',createdAt:now
+        items:[{productId:p.id,title:p.title,price:0,shipping:0,sellerId:p.sellerId,lncPrice:gross}],
+        subtotal:0,shipping:0,platformFee:fee,total:0,lncAmount:gross,status:'lnc_paid',createdAt:now
       }).catch(()=>{});
-      closeOverlay(); toast(`Purchase complete! ${sellerAmount} LNC sent to seller 🦁`);
+      closeOverlay(); toast(`Purchase complete! ${fmtLNC(net)} LNC sent to seller 🦁`);
     }
   }catch(e){
     if(e.message==='out_of_stock') toast('This item is out of stock 📦');
@@ -3022,8 +3224,10 @@ function renderWallet(){
     if(chk) chk.onchange=async()=>{ await fbDB.collection('wallets').doc(ME.id).set({isPublic:chk.checked},{merge:true}).catch(()=>{}); toast(chk.checked?'Balance is now public 👁️':'Balance is now private 🔒'); };
   },0);
 }
-async function transferLNC(toUid,amount,note){
-  if(!ME||!toUid||ME.id===toUid||amount<=0) return false;
+// transferLNC: gross is debited from sender; 5% fee retained by platform; net credited to recipient.
+async function transferLNC(toUid,grossAmount,note){
+  if(!ME||!toUid||ME.id===toUid||grossAmount<=0) return false;
+  const {gross,fee,net}=lncFee(grossAmount);
   const F=firebase.firestore.FieldValue;
   const fromRef=fbDB.collection('wallets').doc(ME.id);
   const toRef=fbDB.collection('wallets').doc(toUid);
@@ -3031,28 +3235,41 @@ async function transferLNC(toUid,amount,note){
   try{
     await fbDB.runTransaction(async t=>{
       const fromSnap=await t.get(fromRef);
-      if(!fromSnap.exists||(fromSnap.data().balance||0)<amount) throw new Error('Insufficient balance');
-      t.update(fromRef,{balance:F.increment(-amount),totalSpent:F.increment(amount)});
-      // set+merge avoids reading the recipient wallet — F.increment handles new and existing docs
-      t.set(toRef,{balance:F.increment(amount),totalEarned:F.increment(amount)},{merge:true});
+      if(!fromSnap.exists||(parseFloat(fromSnap.data().balance)||0)<gross) throw new Error('Insufficient balance');
+      t.update(fromRef,{balance:F.increment(-gross),totalSpent:F.increment(gross)});
+      t.set(toRef,{balance:F.increment(net),totalEarned:F.increment(net)},{merge:true});
       ok=true;
     });
     if(ok){
       const toUser=userById(toUid);
-      const sendDesc=`Sent to ${toUser?.name||toUid}${note?' — '+note:''}`;
+      const sendDesc=`Sent to ${toUser?.name||toUid}${note?' — '+note:''} (incl. 5% fee)`;
       const recvDesc=`From ${ME.name}${note?' — '+note:''}`;
-      fbDB.collection('wallets').doc(ME.id).collection('transactions').add({type:'transfer_sent',amount:-amount,description:sendDesc,ref:toUid,createdAt:now}).catch(()=>{});
-      fbDB.collection('wallets').doc(toUid).collection('transactions').add({type:'transfer_received',amount,description:recvDesc,ref:ME.id,createdAt:now}).catch(()=>{});
-      fbDB.collection('transfers').add({fromUid:ME.id,toUid,amount,note:note||'',createdAt:now}).catch(()=>{});
-      notify(toUid,'transfer',`🦁 ${ME.name} sent you ${amount} LionCoin${amount>1?'s':''}${note?' — "'+note+'"':''}`);
+      fbDB.collection('wallets').doc(ME.id).collection('transactions').add({type:'transfer_sent',amount:-gross,description:sendDesc,ref:toUid,createdAt:now}).catch(()=>{});
+      fbDB.collection('wallets').doc(toUid).collection('transactions').add({type:'transfer_received',amount:net,description:recvDesc,ref:ME.id,createdAt:now}).catch(()=>{});
+      fbDB.collection('transfers').add({fromUid:ME.id,toUid,gross,fee,net,note:note||'',createdAt:now}).catch(()=>{});
+      notify(toUid,'transfer',`🦁 ${ME.name} sent you ${fmtLNC(net)} LionCoins${note?' — "'+note+'"':''}`);
     }
   }catch(e){console.warn('transferLNC',e);}
   return ok;
 }
 
+function _lncSendCalcHtml(dir,rawVal,myBal){
+  // dir: 'send' = I send X (gross); 'receive' = they receive exactly X (net→reverse calc)
+  const v=parseFloat(rawVal)||0;
+  if(v<=0) return '<div class="fee-calc-result" id="feeCalcResult"></div>';
+  const {gross,fee,net}=dir==='send'?lncFee(v):lncFeeReverse(v);
+  const insuf=gross>myBal;
+  return `<div class="fee-calc-result ${insuf?'insuf':''}" id="feeCalcResult">
+    <div class="fee-calc-row"><span>Gross sent by you</span><b>${fmtLNC(gross)} LNC</b></div>
+    <div class="fee-calc-row"><span>OK Music fee (5%)</span><b>${fmtLNC(fee)} LNC</b></div>
+    <div class="fee-calc-row fee-calc-net"><span>They receive</span><b>${fmtLNC(net)} LNC</b></div>
+    ${insuf?`<div style="color:#e2554f;font-size:12px;margin-top:4px">⚠️ Insufficient balance (you have ${fmtLNC(myBal)} LNC)</div>`:''}
+  </div>`;
+}
+
 function openSendLNC(toUid){
   if(!ME) return openEmailAuth();
-  const myBal=Math.floor(CACHE.wallet?.balance||0);
+  const myBal=parseFloat(CACHE.wallet?.balance||0);
   if(toUid){
     const u=userById(toUid); if(!u) return toast('User not found');
     openOverlay(`<h2>🦁 Send LionCoins</h2>
@@ -3061,19 +3278,44 @@ function openSendLNC(toUid){
           <div class="avatar" style="${avatarStyle(u,40)}">${u.avatarImg?'':initials(u.name)}</div>
           <div><div style="font-weight:700">${esc(u.name)}</div><div style="font-size:12px;color:var(--muted)">@${esc(u.handle||'')}</div></div>
         </div>
-        <div style="text-align:right"><div class="lnc-badge">🦁 ${myBal} LNC</div><div style="font-size:11px;color:var(--muted);margin-top:2px">your balance</div></div>
+        <div style="text-align:right"><div class="lnc-badge">🦁 ${fmtLNC(myBal)} LNC</div><div style="font-size:11px;color:var(--muted);margin-top:2px">your balance</div></div>
       </div>
-      <div class="field"><label>Amount (LNC)</label><input class="fb-field" id="lncAmt" type="number" min="1" max="${myBal}" placeholder="e.g. 50" /></div>
-      <div class="field"><label>Note <span style="font-weight:400;color:var(--muted)">(optional)</span></label><input class="fb-field" id="lncNote" placeholder="Thanks for the collab!" maxlength="100" /></div>
-      <div style="display:flex;gap:10px;margin-top:8px">
+      <div class="fee-calc-bar">
+        <button class="fee-dir-btn active" id="feeDir_send" data-dir="send">I send</button>
+        <button class="fee-dir-btn" id="feeDir_receive" data-dir="receive">They receive exactly</button>
+      </div>
+      <div class="field" style="margin-top:10px">
+        <label id="lncAmtLabel">Amount you send (LNC, 0.01 precision)</label>
+        <input class="fb-field" id="lncAmt" type="number" min="0.01" step="0.01" placeholder="e.g. 12.50" />
+      </div>
+      <div id="feeCalcResult"></div>
+      <div class="field" style="margin-top:10px"><label>Note <span style="font-weight:400;color:var(--muted)">(optional)</span></label><input class="fb-field" id="lncNote" placeholder="Thanks for the collab!" maxlength="100" /></div>
+      <label class="fee-ack-row" id="lncSendAckRow" style="margin-top:12px">
+        <input type="checkbox" id="lncSendAck"> I acknowledge the 5% OK Music platform fee on this transfer
+      </label>
+      <div style="display:flex;gap:10px;margin-top:14px">
         <button class="btn block" data-action="close">Cancel</button>
-        <button class="btn primary block" data-action="confirmsendlnc" data-uid="${toUid}">Send 🦁</button>
+        <button class="btn primary block" id="lncSendBtn" data-action="confirmsendlnc" data-uid="${toUid}" disabled>Send 🦁</button>
       </div>`);
-    setTimeout(()=>$('lncAmt')?.focus(),50);
+    setTimeout(()=>{
+      let _dir='send';
+      const amt=$('lncAmt'); const res=$('feeCalcResult'); const ack=$('lncSendAck');
+      const btn=$('lncSendBtn'); const lbl=$('lncAmtLabel');
+      function refresh(){ if(res) res.outerHTML=_lncSendCalcHtml(_dir,amt?.value||0,myBal); }
+      function updateDir(d){ _dir=d;
+        document.querySelectorAll('.fee-dir-btn').forEach(b=>b.classList.toggle('active',b.dataset.dir===d));
+        if(lbl) lbl.textContent=d==='send'?'Amount you send (LNC, 0.01 precision)':'Amount they receive exactly (LNC)';
+        refresh();
+      }
+      document.querySelectorAll('.fee-dir-btn').forEach(b=>b.onclick=()=>updateDir(b.dataset.dir));
+      if(amt) amt.oninput=refresh;
+      if(ack&&btn) ack.onchange=()=>{ btn.disabled=!ack.checked; $('lncSendAckRow')?.classList.toggle('ack-ok',ack.checked); };
+      amt?.focus();
+    },50);
   } else {
     const following=followingOf(ME.id).map(id=>userById(id)).filter(u=>u&&!String(u.id).startsWith('u_'));
     openOverlay(`<h2>🦁 Send LionCoins</h2>
-      <div class="lnc-badge" style="margin-bottom:14px">Your balance: ${myBal} LNC</div>
+      <div class="lnc-badge" style="margin-bottom:14px">Your balance: ${fmtLNC(myBal)} LNC</div>
       <div class="field"><input class="fb-field" id="lncUserSearch" placeholder="Search by name or @handle…" /></div>
       <div id="lncUserList" style="max-height:260px;overflow-y:auto;margin-top:4px">
         ${following.length?following.map(u=>`
@@ -3091,14 +3333,20 @@ function openSendLNC(toUid){
 }
 
 async function confirmSendLNC(toUid){
-  const amount=parseInt($('lncAmt')?.value||'0');
+  let _dir='send';
+  // Read direction from whichever fee-dir-btn is active
+  const activeDir=document.querySelector('.fee-dir-btn.active');
+  if(activeDir) _dir=activeDir.dataset.dir;
+  const rawVal=parseFloat($('lncAmt')?.value||'0');
+  if(!rawVal||rawVal<=0) return toast('Enter an amount');
+  const {gross,net}=_dir==='send'?lncFee(rawVal):lncFeeReverse(rawVal);
+  const myBal=parseFloat(CACHE.wallet?.balance||0);
+  if(gross>myBal) return toast(`Not enough LionCoins — need ${fmtLNC(gross)} LNC, you have ${fmtLNC(myBal)} LNC`);
   const note=($('lncNote')?.value||'').trim();
-  if(!amount||amount<1) return toast('Enter an amount');
-  if(amount>Math.floor(CACHE.wallet?.balance||0)) return toast('Not enough LionCoins');
-  const btn=document.querySelector('[data-action="confirmsendlnc"]');
+  const btn=$('lncSendBtn');
   if(btn){btn.disabled=true;btn.textContent='Sending…';}
-  const ok=await transferLNC(toUid,amount,note);
-  if(ok){ closeOverlay(); toast(`🦁 ${amount} LNC sent to ${userById(toUid)?.name||'them'}!`); }
+  const ok=await transferLNC(toUid,gross,note);
+  if(ok){ closeOverlay(); toast(`🦁 ${fmtLNC(net)} LNC delivered to ${userById(toUid)?.name||'them'}!`); }
   else{ if(btn){btn.disabled=false;btn.textContent='Send 🦁';} toast('Transfer failed — check your balance'); }
 }
 // ============ END LIONCOIN ============
@@ -3688,6 +3936,8 @@ document.addEventListener("click",e=>{
     openmarketplace:openMarketplace, gobuyer:goBuyer, goseller:goSeller, gosellerdirect:()=>{ if(!ME) return openEmailAuth(); CACHE.sellers[ME.id]?go("mystore"):openSellerSetup(); },
     doregisterseller:doRegisterSeller, addproduct:()=>openProductForm(), editproduct:()=>openProductForm(el.dataset.id), delproduct:()=>deleteProduct(el.dataset.id),
     dosaveproduct:()=>doSaveProduct(el.dataset.id||null), viewproduct:()=>viewProduct(el.dataset.id),
+    contactseller:()=>contactSeller(el.dataset.uid,el.dataset.productid),
+    clearmpfilters:clearMpFilters,
     printifycheckout:()=>openPrintifyCheckout(el.dataset.id),
     placeprintifyorder:()=>placePrintifyOrder(el.dataset.productid),
     addtocart:()=>addToCart(el.dataset.id), removecart:()=>removeFromCart(el.dataset.id),

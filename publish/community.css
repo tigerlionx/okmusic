@@ -383,6 +383,20 @@ body.has-page-bg .topbar{background:rgba(255,221,191,.45)}
 .mp-seller-name{font-size:12px;color:var(--muted);margin-bottom:4px}
 .mp-price{font-weight:800;color:var(--orange);font-size:16px}
 .mp-ship{font-size:12px;font-weight:400;color:var(--muted)}
+/* marketplace filter bar */
+.mp-filter-bar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:12px}
+.mp-filter-bar .mp-search-inp{flex:1;min-width:140px;margin:0}
+.mp-filter-sel{flex:0 0 auto;min-width:130px;margin:0}
+.mp-price-range{display:flex;align-items:center;gap:6px}
+.mp-price-range .fb-field{margin:0}
+/* seller name link */
+.mp-seller-link{color:var(--orange);cursor:pointer;font-weight:600;text-decoration:underline;text-underline-offset:2px}
+.mp-seller-link:hover{opacity:.75}
+/* location badge */
+.mp-loc-badge{display:inline-block;font-size:11px;color:var(--muted);margin-left:4px}
+/* price breakdown in detail view */
+.mp-price-breakdown{font-size:13px;color:var(--muted);display:flex;flex-wrap:wrap;gap:12px;align-items:center;margin:2px 0}
+.mp-price-total{font-size:20px;font-weight:800;color:var(--orange)}
 /* product detail */
 .mp-detail{display:flex;flex-direction:column;gap:10px}
 .mp-detail-img{max-width:100%;max-height:260px;border-radius:12px;object-fit:contain;cursor:zoom-in}
@@ -390,7 +404,18 @@ body.has-page-bg .topbar{background:rgba(255,221,191,.45)}
 .mp-detail-cat{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px}
 .mp-detail-price{font-size:22px;font-weight:800;color:var(--orange)}
 .mp-detail-desc{font-size:14px;line-height:1.6;color:var(--ink);white-space:pre-wrap}
-.mp-seller-card{background:var(--orange-1);border-radius:10px;padding:10px 12px;font-size:13px}
+.mp-seller-card{background:var(--orange-1);border-radius:10px;padding:10px 12px;font-size:13px;line-height:1.6}
+/* LNC fee calculator */
+.fee-calc-bar{display:flex;gap:6px;margin-bottom:6px}
+.fee-dir-btn{flex:1;padding:8px;border-radius:8px;border:1px solid var(--border);background:var(--card);color:var(--muted);cursor:pointer;font-size:13px;transition:all .15s}
+.fee-dir-btn.active{background:var(--orange);color:#fff;border-color:var(--orange);font-weight:700}
+.fee-calc-result{background:var(--orange-1);border-radius:10px;padding:10px 14px;margin-top:8px;font-size:13px}
+.fee-calc-result.insuf{background:#FEF2F2;border:1px solid #FCA5A5}
+.fee-calc-row{display:flex;justify-content:space-between;padding:3px 0}
+.fee-calc-net{font-weight:700;font-size:15px;color:var(--orange);border-top:1px solid var(--line);padding-top:6px;margin-top:4px}
+/* fee acknowledgment row */
+.fee-ack-row{display:flex;align-items:flex-start;gap:8px;padding:10px 12px;border-radius:10px;border:1px solid var(--border);background:var(--card);cursor:pointer;font-size:13px;line-height:1.4;transition:border-color .2s}
+.fee-ack-row.ack-ok{border-color:var(--orange);background:var(--orange-1)}
 /* cart */
 .cart-items{display:flex;flex-direction:column;gap:12px;margin-bottom:18px}
 .cart-row{display:flex;gap:12px;align-items:flex-start;background:#fff;border-radius:14px;padding:12px;box-shadow:0 1px 6px rgba(180,120,60,.08)}
