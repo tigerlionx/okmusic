@@ -394,6 +394,7 @@ body.has-page-bg .topbar{background:rgba(255,221,191,.45)}
 .mp-seller-link:hover{opacity:.75}
 /* location badge */
 .mp-loc-badge{display:inline-block;font-size:11px;color:var(--muted);margin-left:4px}
+.mp-cat-badge{display:inline-block;font-size:10px;font-weight:600;color:var(--orange);background:var(--orange-1);border-radius:4px;padding:1px 6px;margin-bottom:4px;letter-spacing:.2px}
 /* price breakdown in detail view */
 .mp-price-breakdown{font-size:13px;color:var(--muted);display:flex;flex-wrap:wrap;gap:12px;align-items:center;margin:2px 0}
 .mp-price-total{font-size:20px;font-weight:800;color:var(--orange)}

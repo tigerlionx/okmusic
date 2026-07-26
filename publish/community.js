@@ -1965,11 +1965,15 @@ function renderMarketplace(){
   const minP=parseFloat(state.mpMinPrice)||0;
   const maxP=parseFloat(state.mpMaxPrice)||Infinity;
   const locF=state.mpLocFilter||'';
+  const activeCat=state.mpCat||'';
+  const activeSort=state.mpSort||'newest';
 
   // Base list: server-query result or full CACHE
   let list=(_mpResults||CACHE.products).slice();
 
-  // Client-side secondary filters (price range + location + text)
+  // Client-side secondary filters — category applied here too so old products
+  // without the field are still correctly filtered when the server query falls back
+  if(activeCat) list=list.filter(p=>(p.category||'')=== activeCat);
   if(minP>0) list=list.filter(p=>parseFloat(p.price)>=minP);
   if(maxP<Infinity) list=list.filter(p=>parseFloat(p.price)<=maxP);
   if(locF) list=list.filter(p=>p.location===locF);
@@ -1981,11 +1985,8 @@ function renderMarketplace(){
 
   // Unique locations for the location dropdown (from CACHE so it's always fresh)
   const allLocs=[...new Set(CACHE.products.map(p=>p.location).filter(Boolean))].sort();
-  // Unique categories from CACHE for the category dropdown
-  const allCats=[...new Set(CACHE.products.map(p=>p.category).filter(Boolean))].sort();
-
-  const activeCat=state.mpCat||'';
-  const activeSort=state.mpSort||'newest';
+  // Always show the full canonical category list so the dropdown is never empty
+  const allCats=MP_CATEGORIES;
   const hasFilter=activeCat||activeSort!=='newest'||locF||minP>0||maxP<Infinity||q;
 
   $("page").innerHTML=`<div class="h-title">🛍️ Marketplace</div>
@@ -2039,9 +2040,11 @@ function mpBuyerCard(p){
   const photo=p.photos&&p.photos[0]; const seller=CACHE.sellers[p.sellerId]; const inCart=(state.cart||[]).includes(p.id); const oos=isOutOfStock(p);
   const isPrintify=p.source==='printify';
   const locBadge=p.location?`<span class="mp-loc-badge">📍 ${esc(p.location)}</span>`:'';
+  const catBadge=p.category?`<span class="mp-cat-badge">${esc(p.category)}</span>`:'';
   return `<div class="mp-card">
     <div class="mp-photo" style="${photo?`background-image:url('${photo}');background-size:cover;background-position:center`:'background:var(--orange-1)'}" data-action="viewproduct" data-id="${p.id}">${photo?'':'📦'}${isPrintify?'<span class="printify-badge">🖨️ Print-on-demand</span>':''}</div>
     <div class="mp-card-body">
+      ${catBadge}
       <div class="mp-title" data-action="viewproduct" data-id="${p.id}">${esc(p.title)}</div>
       <div class="mp-seller-name">
         <span class="mp-seller-link" data-action="contactseller" data-uid="${p.sellerId}" data-productid="${p.id}">${esc(seller?.name||'Seller')}</span>
