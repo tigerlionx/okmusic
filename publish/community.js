@@ -2260,7 +2260,10 @@ async function initPushNotifications(){
   // Register service worker and get FCM token
   if(!('serviceWorker' in navigator)) return;
   try{
-    const reg=await navigator.serviceWorker.register('/firebase-messaging-sw.js',{ scope:'/' });
+    // Derive the SW path relative to the page so it works on both Firebase Hosting (/)
+    // and GitHub Pages (/okmusic/), which serve the file at different URL prefixes.
+    const swBase=location.pathname.replace(/\/[^/]*$/,'/');
+    const reg=await navigator.serviceWorker.register(swBase+'firebase-messaging-sw.js',{ scope:swBase });
     // Listen for messages from the SW (e.g. notification click when app was closed)
     navigator.serviceWorker.addEventListener('message',e=>{
       const d=e.data||{};
