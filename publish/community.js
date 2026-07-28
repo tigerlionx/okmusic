@@ -1853,7 +1853,8 @@ function openProductForm(productId){
     <div class="field"><label>Category</label>
       <select class="fb-field" id="prodCat">${MP_CATEGORIES.map(c=>`<option value="${esc(c)}" ${selectVal===c?'selected':''}>${esc(c)}</option>`).join('')}</select>
       <div id="prodCatCustomRow" style="margin-top:8px;display:${selectVal==='Other'?'block':'none'}">
-        <input class="fb-field" id="prodCatOther" placeholder="Describe your category…" value="${esc(customVal)}" maxlength="60" />
+        <label style="font-size:12px;color:var(--muted);margin-bottom:4px;display:block">Name your category — any language welcome 🌍</label>
+        <input class="fb-field" id="prodCatOther" placeholder="e.g. Vêtements, 전자기기, Artesanía, ملابس…" value="${esc(customVal)}" maxlength="60" />
       </div>
     </div>
     <div class="field"><label>Location <span style="font-weight:400;color:var(--muted)">(city, country)</span></label>
@@ -1892,7 +1893,8 @@ async function doSaveProduct(productId){
   let category=catSel;
   if(catSel==="Other"){
     const custom=(($("prodCatOther")||{value:""}).value||"").trim();
-    category=custom||"Other";
+    if(!custom) return toast("Please name your product category — any language is welcome. Your buyers need to know what you're selling!");
+    category=custom;
   }
   // Location
   const noLoc=!!$("prodNoLoc")?.checked;
@@ -2095,7 +2097,10 @@ function viewProduct(id){
     ${p.lncPrice?`<div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border)">
       <div class="lnc-badge" style="margin-bottom:8px">🦁 ${fmtLNC(p.lncPrice)} LNC${ship>0?` + shipping`:''}</div>
       <button class="btn block" data-action="buywithlioncoin" data-id="${id}" style="margin-top:4px">🦁 Buy with LionCoin</button>
-    </div>`:''}`}
+    </div>`:''}
+    <div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--border)">
+      <button class="btn block" data-action="reserveproduct" data-id="${id}" style="width:100%">📦 Reserve — Pickup or Delivery</button>
+    </div>`}
   </div>`);
 }
 
@@ -2103,15 +2108,125 @@ function contactSeller(sellerUid, productId){
   if(!ME) return openEmailAuth();
   if(sellerUid===ME.id) return toast("That's your own product.");
   const p=CACHE.products.find(x=>x.id===productId);
-  // Open chat, then send a context message
   closeOverlay();
   state.chatUid=sellerUid; state.view='chat'; renderApp();
   if(p){
-    // Pre-fill chat input so the buyer can add a note before sending
     setTimeout(()=>{
       const inp=$('chatInput');
       if(inp&&!inp.value) inp.value=`Hi, I'm interested in your product: "${p.title}"`;
     },300);
+  }
+}
+
+function openReserveDialog(productId){
+  if(!ME) return openEmailAuth();
+  const p=CACHE.products.find(x=>x.id===productId); if(!p) return;
+  if(p.sellerId===ME.id) return toast("This is your own product.");
+  openOverlay(`<div style="padding:4px">
+    <h2>📦 Reserve this product</h2>
+    <p class="sub" style="margin:4px 0 16px">${esc(p.title)}</p>
+    <div class="field">
+      <label>Quantity</label>
+      <input class="fb-field" id="resQty" type="number" min="1" step="1" value="1" style="width:90px" />
+    </div>
+    <div class="field">
+      <label>How would you like to receive it?</label>
+      <div class="fee-calc-bar" style="margin-top:8px">
+        <button class="fee-dir-btn active" data-method="pickup">🚶 Pickup in store</button>
+        <button class="fee-dir-btn" data-method="delivery">🚚 Delivery</button>
+      </div>
+    </div>
+    <div id="resPickupFields">
+      <div class="field">
+        <label>Preferred pickup date</label>
+        <input class="fb-field" id="resPickupDate" type="date" />
+      </div>
+      <div class="field">
+        <label>Preferred time <span style="font-weight:400;color:var(--muted)">(leave blank if flexible)</span></label>
+        <input class="fb-field" id="resPickupTime" type="time" />
+      </div>
+    </div>
+    <div id="resDeliveryFields" style="display:none">
+      <div class="field">
+        <label>Delivery address</label>
+        <textarea class="fb-field" id="resAddress" rows="2" placeholder="Full address including city and country…" style="min-height:70px"></textarea>
+      </div>
+      <div class="field">
+        <label>Preferred delivery date</label>
+        <input class="fb-field" id="resDelivDate" type="date" />
+      </div>
+      <div class="field">
+        <label>Preferred time <span style="font-weight:400;color:var(--muted)">(leave blank for anytime)</span></label>
+        <input class="fb-field" id="resDelivTime" type="time" />
+      </div>
+    </div>
+    <div class="field" style="margin-top:4px">
+      <label>Note to seller <span style="font-weight:400;color:var(--muted)">(optional)</span></label>
+      <input class="fb-field" id="resNote" placeholder="Special instructions, questions…" maxlength="200" />
+    </div>
+    <div style="display:flex;gap:10px;margin-top:16px">
+      <button class="btn block" data-action="close">Cancel</button>
+      <button class="btn primary block" id="resSubmitBtn" data-action="submitreservation" data-id="${productId}">Send reservation 📨</button>
+    </div>
+  </div>`);
+  setTimeout(()=>{
+    const btns=document.querySelectorAll('.fee-dir-btn');
+    const pickupF=$('resPickupFields'); const delivF=$('resDeliveryFields');
+    btns.forEach(b=>b.onclick=()=>{
+      btns.forEach(x=>x.classList.remove('active')); b.classList.add('active');
+      const isDel=b.dataset.method==='delivery';
+      if(pickupF) pickupF.style.display=isDel?'none':'block';
+      if(delivF)  delivF.style.display=isDel?'block':'none';
+    });
+  },0);
+}
+
+async function submitReservation(productId){
+  if(!ME) return openEmailAuth();
+  const p=CACHE.products.find(x=>x.id===productId); if(!p) return;
+  const qty=Math.max(1,parseInt($('resQty')?.value||'1')||1);
+  const activeBtn=document.querySelector('.fee-dir-btn.active');
+  const method=activeBtn?.dataset.method||'pickup';
+  let pickupDate='',pickupTime='',deliveryAddress='',deliveryDate='',deliveryTime='';
+  if(method==='pickup'){
+    pickupDate=($('resPickupDate')?.value||'').trim();
+    pickupTime=($('resPickupTime')?.value||'').trim();
+    if(!pickupDate) return toast('Please select your preferred pickup date.');
+  } else {
+    deliveryAddress=($('resAddress')?.value||'').trim();
+    deliveryDate=($('resDelivDate')?.value||'').trim();
+    deliveryTime=($('resDelivTime')?.value||'').trim();
+    if(!deliveryAddress) return toast('Please enter a delivery address.');
+    if(!deliveryDate) return toast('Please select a preferred delivery date.');
+  }
+  const note=($('resNote')?.value||'').trim();
+  const btn=$('resSubmitBtn');
+  if(btn){btn.disabled=true;btn.textContent='Sending…';}
+  try{
+    await fbDB.collection('reservations').add({
+      productId, productTitle:p.title, sellerId:p.sellerId,
+      buyerId:ME.id, buyerName:ME.name, quantity:qty, method,
+      pickupDate:pickupDate||null, pickupTime:pickupTime||null,
+      deliveryAddress:deliveryAddress||null, deliveryDate:deliveryDate||null,
+      deliveryTime:deliveryTime||null, note:note||null,
+      status:'pending', createdAt:Date.now()
+    });
+    let summary=`Hi! I'd like to reserve your product: "${p.title}" — qty: ${qty}.\n`;
+    if(method==='pickup'){
+      summary+=`📍 Pickup on ${pickupDate}${pickupTime?' at '+pickupTime:' (flexible time)'}.`;
+    } else {
+      summary+=`🚚 Delivery to: ${deliveryAddress}\nDate: ${deliveryDate}${deliveryTime?' at '+deliveryTime:' — anytime'}.`;
+    }
+    if(note) summary+=`\n💬 ${note}`;
+    notify(p.sellerId,'reservation',`📦 ${ME.name} wants to reserve "${p.title}" (${method==='pickup'?'pickup':'delivery'})`);
+    closeOverlay();
+    state.chatUid=p.sellerId; state.view='chat'; renderApp();
+    setTimeout(()=>{ const inp=$('chatInput'); if(inp&&!inp.value) inp.value=summary; },300);
+    toast('Reservation sent! Continue in chat with the seller 💬');
+  }catch(e){
+    console.warn('submitReservation',e);
+    if(btn){btn.disabled=false;btn.textContent='Send reservation 📨';}
+    toast('Could not send reservation — please try again.');
   }
 }
 function zoomPhoto(src){
@@ -3942,6 +4057,8 @@ document.addEventListener("click",e=>{
     dosaveproduct:()=>doSaveProduct(el.dataset.id||null), viewproduct:()=>viewProduct(el.dataset.id),
     contactseller:()=>contactSeller(el.dataset.uid,el.dataset.productid),
     clearmpfilters:clearMpFilters,
+    reserveproduct:()=>openReserveDialog(el.dataset.id),
+    submitreservation:()=>submitReservation(el.dataset.id),
     printifycheckout:()=>openPrintifyCheckout(el.dataset.id),
     placeprintifyorder:()=>placePrintifyOrder(el.dataset.productid),
     addtocart:()=>addToCart(el.dataset.id), removecart:()=>removeFromCart(el.dataset.id),
