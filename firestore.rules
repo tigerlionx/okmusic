@@ -93,7 +93,12 @@ service cloud.firestore {
         resource.data.buyerId == request.auth.uid ||
         request.auth.token.email == "trendai509@gmail.com"
       );
-      allow update, delete: if false;
+      // Buyer may cancel their own order while it is still pending payment
+      allow update: if signedIn() && resource.data.buyerId == request.auth.uid
+        && resource.data.status == 'pending_payment'
+        && request.resource.data.status == 'cancelled'
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status','cancelledAt']);
+      allow delete: if false;
     }
 
     match /messages/{convId} {

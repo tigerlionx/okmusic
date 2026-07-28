@@ -2089,7 +2089,10 @@ function viewProduct(id){
       <span style="font-size:12px;color:var(--muted)">Tap name to message or call seller</span>
     </div>
     ${isPrintify
-      ?`<button class="btn primary block" data-action="printifycheckout" data-id="${id}" style="margin-top:14px">🛒 Buy Now</button>`
+      ?`<button class="btn primary block" data-action="printifycheckout" data-id="${id}" style="margin-top:14px">🛒 Buy Now</button>
+    <div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--border)">
+      <button class="btn block" data-action="reserveproduct" data-id="${id}" style="width:100%">📦 Reserve — Pickup or Delivery</button>
+    </div>`
       :oos
         ?'<div class="mp-oos-badge" style="margin-top:14px;font-size:14px;padding:10px">📦 Out of Stock</div>'
         :`<button class="btn ${inCart?'':'primary'} block" data-action="addtocart" data-id="${id}" style="margin-top:14px">${inCart?'✓ In cart — remove':'🛒 Add to cart'}</button>
@@ -2238,6 +2241,16 @@ function openPrintifyCheckout(productId){
   if(!ME) return openEmailAuth();
   const p=CACHE.products.find(x=>x.id===productId); if(!p) return toast('Product not found');
   const variants=(p.variants||[]).filter(v=>v.id);
+  if(!variants.length){
+    openOverlay(`<div style="text-align:center;padding:16px">
+      <div style="font-size:40px;margin-bottom:12px">⚠️</div>
+      <h2>Item temporarily unavailable</h2>
+      <p class="sub" style="margin:10px 0 18px">This product's options haven't been set up yet. You can reserve it and the seller will contact you to complete the purchase.</p>
+      <button class="btn primary block" data-action="reserveproduct" data-id="${productId}" style="margin-bottom:8px">📦 Reserve — Pickup or Delivery</button>
+      <button class="btn block" data-action="close">Close</button>
+    </div>`);
+    return;
+  }
   const photo=p.photos&&p.photos[0];
   const firstVariant=variants[0];
   const defaultPrice=parseFloat(firstVariant?.price||p.price||0).toFixed(2);
@@ -2326,7 +2339,7 @@ async function placePrintifyOrder(productId){
   if(!city)  return toast('Enter your city');
   if(!zip)   return toast('Enter your ZIP / postal code');
   if(!country||country.length!==2) return toast('Enter a 2-letter country code (e.g. US, SS, GB)');
-  if(!variantId) return toast('No variant available — please re-run the import script');
+  if(!variantId) return toast('This item is temporarily unavailable. Please contact the seller or use the Reserve option.');
 
   const btn=document.querySelector('[data-action="placeprintifyorder"]');
   if(btn){ btn.disabled=true; btn.textContent='Placing order…'; }
@@ -4061,6 +4074,8 @@ document.addEventListener("click",e=>{
     submitreservation:()=>submitReservation(el.dataset.id),
     printifycheckout:()=>openPrintifyCheckout(el.dataset.id),
     placeprintifyorder:()=>placePrintifyOrder(el.dataset.productid),
+    cancelorder:()=>cancelOrder(el.dataset.id),
+    confirmcancelorder:()=>confirmCancelOrder(el.dataset.id),
     addtocart:()=>addToCart(el.dataset.id), removecart:()=>removeFromCart(el.dataset.id),
     checkout:openCheckout, doorder:doPlaceOrder, zoomphoto:()=>zoomPhoto(el.dataset.src),
     togglepl:()=>{ if(!state.openPlaylists) state.openPlaylists=new Set(); const id=el.dataset.pl; state.openPlaylists.has(id)?state.openPlaylists.delete(id):state.openPlaylists.add(id); renderMain(); },
@@ -4899,16 +4914,41 @@ function renderMyOrders(){
   const orders=(CACHE.orders||[]).filter(o=>o.buyerId===ME.id).sort((a,b)=>b.createdAt-a.createdAt);
   $("page").innerHTML=`<div class="h-title">📦 My Orders</div>
     ${orders.length?orders.map(o=>{
-      const statusLabel={pending_payment:"⏳ Awaiting payment",paid:"✅ Paid",shipped:"🚚 Shipped",completed:"✓ Completed"}[o.status]||o.status;
-      return`<div class="mrow2" style="flex-wrap:wrap;gap:10px;padding:14px;border-radius:14px;background:#fff;box-shadow:0 2px 8px rgba(180,120,60,.07);margin-bottom:10px">
-        <div class="minfo" style="flex:1;min-width:0">
-          <div class="mt">Order <b>${o.id.slice(0,8).toUpperCase()}</b> · ${timeAgo(o.createdAt)}</div>
-          <div class="ms">${(o.items||[]).map(i=>esc(i.title)).join(", ")}</div>
-          <div class="ms" style="margin-top:4px">${statusLabel} · <b>$${parseFloat(o.total||0).toFixed(2)}</b></div>
+      const statusLabel={pending_payment:"⏳ Awaiting payment",paid:"✅ Paid",shipped:"🚚 Shipped",completed:"✓ Completed",cancelled:"✕ Cancelled",lnc_paid:"✅ Paid (LNC)"}[o.status]||o.status;
+      const canCancel=o.status==="pending_payment";
+      return`<div style="padding:14px;border-radius:14px;background:var(--card);box-shadow:0 2px 8px rgba(180,120,60,.07);margin-bottom:10px">
+        <div class="mrow2" style="flex-wrap:wrap;gap:10px;align-items:flex-start">
+          <div class="minfo" style="flex:1;min-width:0">
+            <div class="mt">Order <b>${o.id.slice(0,8).toUpperCase()}</b> · ${timeAgo(o.createdAt)}</div>
+            <div class="ms">${(o.items||[]).map(i=>esc(i.title)).join(", ")}</div>
+            <div class="ms" style="margin-top:4px">${statusLabel} · <b>$${parseFloat(o.total||0).toFixed(2)}</b></div>
+          </div>
+          ${canCancel?`<button class="btn sm" data-action="cancelorder" data-id="${o.id}" style="color:#e2554f;border-color:#e2554f;flex-shrink:0">✕ Cancel</button>`:''}
         </div>
-        ${o.status==="pending_payment"?`<div style="font-size:12px;color:var(--muted);max-width:200px">Send $${parseFloat(o.total||0).toFixed(2)} via Payoneer to <b>${PLATFORM_EMAIL}</b> — include order ID <b>${o.id.slice(0,8).toUpperCase()}</b></div>`:''}
+        ${canCancel?`<div style="font-size:12px;color:var(--muted);margin-top:10px;padding-top:10px;border-top:1px solid var(--border)">Send $${parseFloat(o.total||0).toFixed(2)} via Payoneer to <b>${PLATFORM_EMAIL}</b> — include order ID <b>${o.id.slice(0,8).toUpperCase()}</b> in the payment note.</div>`:''}
       </div>`;
     }).join(""):'<div class="empty">No orders yet — browse the Marketplace to start shopping. 🛍️</div>'}`;
+}
+
+function cancelOrder(orderId){
+  const o=(CACHE.orders||[]).find(x=>x.id===orderId); if(!o) return;
+  openOverlay(`<div style="text-align:center;padding:8px">
+    <div style="font-size:40px;margin-bottom:12px">⚠️</div>
+    <h2>Cancel this order?</h2>
+    <p class="sub" style="margin:10px 0 6px">Order <b>${orderId.slice(0,8).toUpperCase()}</b></p>
+    <p class="sub" style="margin-bottom:20px">${(o.items||[]).map(i=>esc(i.title)).join(", ")}</p>
+    <div style="display:flex;gap:10px">
+      <button class="btn block" data-action="close">Keep order</button>
+      <button class="btn block" data-action="confirmcancelorder" data-id="${orderId}" style="background:#e2554f;color:#fff;border-color:#e2554f">Yes, cancel</button>
+    </div>
+  </div>`);
+}
+
+async function confirmCancelOrder(orderId){
+  try{
+    await fbDB.collection('orders').doc(orderId).update({status:'cancelled',cancelledAt:Date.now()});
+    closeOverlay(); toast('Order cancelled.'); renderMyOrders();
+  }catch(e){ toast('Could not cancel — '+(e.message||e.code||'unknown error')); }
 }
 
 // ---------- init: real Firebase auth + live data ----------
