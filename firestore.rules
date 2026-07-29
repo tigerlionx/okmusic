@@ -202,6 +202,13 @@ service cloud.firestore {
       allow delete: if false;
     }
 
+    // Platform-wide shared data
+    match /platform/{doc} {
+      // Category registry: all signed-in users can read; any seller can add a custom category key
+      allow read: if signedIn();
+      allow write: if signedIn() && doc == "categories";
+    }
+
     // Printify API config — only admin can read/write; Cloud Function uses Admin SDK (bypasses rules)
     match /config/{doc} {
       allow read, write: if request.auth != null && request.auth.token.email == "trendai509@gmail.com";

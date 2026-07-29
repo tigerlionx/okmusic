@@ -1841,17 +1841,20 @@ function openProductForm(productId){
   window._mpPhoto=p?.photos?.[0]||null;
   window._mpPhotoFile=null;
   const prevStyle=window._mpPhoto?`background-image:url('${window._mpPhoto}');background-size:cover;background-position:center`:'background:var(--orange-1)';
-  // If existing product has a custom category, map it to "Other" in the select
+  // Build seller category dropdown: canonical + previously-used custom categories + "Other" (new)
   const existingCat=p?.category||'Other';
-  const catInList=MP_CATEGORIES.includes(existingCat);
-  const selectVal=catInList?existingCat:'Other';
-  const customVal=catInList?'':existingCat;
+  const catInMP=MP_CATEGORIES.includes(existingCat);
+  const customRegistry=(CACHE.customCategories||[]).filter(c=>!MP_CATEGORIES.includes(c));
+  const catInCustom=customRegistry.includes(existingCat);
+  const selectVal=(catInMP||catInCustom)?existingCat:'Other';
+  const customVal=(catInMP||catInCustom)?'':existingCat;
+  const allSellerCats=[...MP_CATEGORIES.filter(c=>c!=='Other'),...customRegistry,'Other'];
   const noLoc=p?p.location==null:false;
   openOverlay(`<h2>${p?'Edit product':'Add a product'}</h2>
     <div class="field"><label>Title</label><input class="fb-field" id="prodTitle" placeholder="e.g. OK Music hoodie" value="${esc(p?.title||'')}" /></div>
     <div class="field"><label>Description</label><textarea class="fb-field" id="prodDesc" placeholder="Describe your product — material, size, condition…" style="min-height:90px">${esc(p?.description||'')}</textarea></div>
     <div class="field"><label>Category</label>
-      <select class="fb-field" id="prodCat">${MP_CATEGORIES.map(c=>`<option value="${esc(c)}" ${selectVal===c?'selected':''}>${esc(c)}</option>`).join('')}</select>
+      <select class="fb-field" id="prodCat">${allSellerCats.map(c=>`<option value="${esc(c)}" ${selectVal===c?'selected':''}>${esc(c)}</option>`).join('')}</select>
       <div id="prodCatCustomRow" style="margin-top:8px;display:${selectVal==='Other'?'block':'none'}">
         <label style="font-size:12px;color:var(--muted);margin-bottom:4px;display:block">Name your category — any language welcome 🌍</label>
         <input class="fb-field" id="prodCatOther" placeholder="e.g. Vêtements, 전자기기, Artesanía, ملابس…" value="${esc(customVal)}" maxlength="60" />
@@ -1918,6 +1921,12 @@ async function doSaveProduct(productId){
   const stockRaw=parseInt(($("prodStock")||{value:""}).value);
   const stock=(!isNaN(stockRaw)&&stockRaw>=0)?stockRaw:null;
   const data={ sellerId:ME.id, title, description, category, location, price, shipping, photos, lncPrice:lncPrice??null, stock:stock!==null?stock:null, updatedAt:Date.now() };
+  // Register any custom category in the persistent registry so buyers can filter by it
+  if(!MP_CATEGORIES.includes(category)){
+    fbDB.collection("platform").doc("categories")
+      .set({ [category]:{ addedAt:Date.now(), addedBy:ME.id } },{ merge:true })
+      .catch(()=>{});
+  }
   try{
     if(productId){ await fbDB.collection("products").doc(productId).update(data); closeOverlay(); toast("Product updated ✓"); }
     else{ data.createdAt=Date.now(); await fbDB.collection("products").add(data); closeOverlay(); toast("Product listed! 🎉"); }
@@ -1987,8 +1996,12 @@ function renderMarketplace(){
 
   // Unique locations for the location dropdown (from CACHE so it's always fresh)
   const allLocs=[...new Set(CACHE.products.map(p=>p.location).filter(Boolean))].sort();
-  // Always show the full canonical category list so the dropdown is never empty
-  const allCats=MP_CATEGORIES;
+  // Merge canonical categories (minus "Other") + every custom category ever registered
+  const _customCats=[...new Set([
+    ...(CACHE.customCategories||[]),
+    ...(CACHE.products||[]).map(p=>p.category).filter(c=>c&&!MP_CATEGORIES.includes(c))
+  ])].sort((a,b)=>a.localeCompare(b));
+  const allCats=[...MP_CATEGORIES.filter(c=>c!=='Other'),..._customCats];
   const hasFilter=activeCat||activeSort!=='newest'||locF||minP>0||maxP<Infinity||q;
 
   $("page").innerHTML=`<div class="h-title">🛍️ Marketplace</div>
@@ -4884,6 +4897,11 @@ function startListeners(){
   fbDB.collection("comments").onSnapshot(s=>{ CACHE.comments=s.docs.map(d=>({ id:d.id, ...d.data() })); scheduleRender(); }, e=>console.warn("comments",e.code));
   fbDB.collection("products").onSnapshot(s=>{ CACHE.products=s.docs.map(d=>({ id:d.id, ...d.data() })).sort((a,b)=>b.createdAt-a.createdAt); scheduleRender(); }, e=>console.warn("products",e.code));
   fbDB.collection("sellers").onSnapshot(s=>{ CACHE.sellers={}; s.forEach(d=>CACHE.sellers[d.id]={ id:d.id, ...d.data() }); scheduleRender(); }, e=>console.warn("sellers",e.code));
+  // Category registry — accumulates every custom category sellers have ever used
+  fbDB.collection("platform").doc("categories").onSnapshot(
+    s=>{ CACHE.customCategories=s.exists?Object.keys(s.data()).sort((a,b)=>a.localeCompare(b)):[]; scheduleRender(); },
+    ()=>{ CACHE.customCategories=[]; }
+  );
 }
 function startAuthListeners(uid){
   // discoveryPosts require auth per Firestore rules — start here, not in startListeners
