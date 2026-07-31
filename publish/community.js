@@ -70,6 +70,125 @@ function lncFeeReverse(netLNC){                  // caller wants payee to receiv
 }
 function fmtLNC(v){ return parseFloat(v||0).toFixed(2); }
 
+// ── ISO 4217 full currency list (verified: HTG, AFN, all Peso variants, XOF, XAF, SSP included) ──
+const ISO_CURRENCIES=[
+  {code:'AED',name:'UAE Dirham'},{code:'AFN',name:'Afghan Afghani'},
+  {code:'ALL',name:'Albanian Lek'},{code:'AMD',name:'Armenian Dram'},
+  {code:'ANG',name:'Netherlands Antillean Guilder'},{code:'AOA',name:'Angolan Kwanza'},
+  {code:'ARS',name:'Argentine Peso'},{code:'AUD',name:'Australian Dollar'},
+  {code:'AWG',name:'Aruban Florin'},{code:'AZN',name:'Azerbaijani Manat'},
+  {code:'BAM',name:'Bosnia-Herzegovina Convertible Mark'},{code:'BBD',name:'Barbadian Dollar'},
+  {code:'BDT',name:'Bangladeshi Taka'},{code:'BGN',name:'Bulgarian Lev'},
+  {code:'BHD',name:'Bahraini Dinar'},{code:'BIF',name:'Burundian Franc'},
+  {code:'BMD',name:'Bermudian Dollar'},{code:'BND',name:'Brunei Dollar'},
+  {code:'BOB',name:'Bolivian Boliviano'},{code:'BRL',name:'Brazilian Real'},
+  {code:'BSD',name:'Bahamian Dollar'},{code:'BTN',name:'Bhutanese Ngultrum'},
+  {code:'BWP',name:'Botswana Pula'},{code:'BYN',name:'Belarusian Ruble'},
+  {code:'BZD',name:'Belize Dollar'},{code:'CAD',name:'Canadian Dollar'},
+  {code:'CDF',name:'Congolese Franc'},{code:'CHF',name:'Swiss Franc'},
+  {code:'CLP',name:'Chilean Peso'},{code:'CNY',name:'Chinese Yuan'},
+  {code:'COP',name:'Colombian Peso'},{code:'CRC',name:'Costa Rican Colón'},
+  {code:'CUC',name:'Cuban Convertible Peso'},{code:'CUP',name:'Cuban Peso'},
+  {code:'CVE',name:'Cape Verdean Escudo'},{code:'CZK',name:'Czech Koruna'},
+  {code:'DJF',name:'Djiboutian Franc'},{code:'DKK',name:'Danish Krone'},
+  {code:'DOP',name:'Dominican Peso'},{code:'DZD',name:'Algerian Dinar'},
+  {code:'EGP',name:'Egyptian Pound'},{code:'ERN',name:'Eritrean Nakfa'},
+  {code:'ETB',name:'Ethiopian Birr'},{code:'EUR',name:'Euro'},
+  {code:'FJD',name:'Fijian Dollar'},{code:'FKP',name:'Falkland Islands Pound'},
+  {code:'GBP',name:'British Pound Sterling'},{code:'GEL',name:'Georgian Lari'},
+  {code:'GHS',name:'Ghanaian Cedi'},{code:'GIP',name:'Gibraltar Pound'},
+  {code:'GMD',name:'Gambian Dalasi'},{code:'GNF',name:'Guinean Franc'},
+  {code:'GTQ',name:'Guatemalan Quetzal'},{code:'GYD',name:'Guyanese Dollar'},
+  {code:'HKD',name:'Hong Kong Dollar'},{code:'HNL',name:'Honduran Lempira'},
+  {code:'HTG',name:'Haitian Gourde'},{code:'HUF',name:'Hungarian Forint'},
+  {code:'IDR',name:'Indonesian Rupiah'},{code:'ILS',name:'Israeli New Shekel'},
+  {code:'INR',name:'Indian Rupee'},{code:'IQD',name:'Iraqi Dinar'},
+  {code:'IRR',name:'Iranian Rial'},{code:'ISK',name:'Icelandic Króna'},
+  {code:'JMD',name:'Jamaican Dollar'},{code:'JOD',name:'Jordanian Dinar'},
+  {code:'JPY',name:'Japanese Yen'},{code:'KES',name:'Kenyan Shilling'},
+  {code:'KGS',name:'Kyrgystani Som'},{code:'KHR',name:'Cambodian Riel'},
+  {code:'KMF',name:'Comorian Franc'},{code:'KPW',name:'North Korean Won'},
+  {code:'KRW',name:'South Korean Won'},{code:'KWD',name:'Kuwaiti Dinar'},
+  {code:'KYD',name:'Cayman Islands Dollar'},{code:'KZT',name:'Kazakhstani Tenge'},
+  {code:'LAK',name:'Laotian Kip'},{code:'LBP',name:'Lebanese Pound'},
+  {code:'LKR',name:'Sri Lankan Rupee'},{code:'LRD',name:'Liberian Dollar'},
+  {code:'LSL',name:'Lesotho Loti'},{code:'LYD',name:'Libyan Dinar'},
+  {code:'MAD',name:'Moroccan Dirham'},{code:'MDL',name:'Moldovan Leu'},
+  {code:'MGA',name:'Malagasy Ariary'},{code:'MKD',name:'Macedonian Denar'},
+  {code:'MMK',name:'Myanmar Kyat'},{code:'MNT',name:'Mongolian Tögrög'},
+  {code:'MOP',name:'Macanese Pataca'},{code:'MRU',name:'Mauritanian Ouguiya'},
+  {code:'MUR',name:'Mauritian Rupee'},{code:'MVR',name:'Maldivian Rufiyaa'},
+  {code:'MWK',name:'Malawian Kwacha'},{code:'MXN',name:'Mexican Peso'},
+  {code:'MYR',name:'Malaysian Ringgit'},{code:'MZN',name:'Mozambican Metical'},
+  {code:'NAD',name:'Namibian Dollar'},{code:'NGN',name:'Nigerian Naira'},
+  {code:'NIO',name:'Nicaraguan Córdoba'},{code:'NOK',name:'Norwegian Krone'},
+  {code:'NPR',name:'Nepalese Rupee'},{code:'NZD',name:'New Zealand Dollar'},
+  {code:'OMR',name:'Omani Rial'},{code:'PAB',name:'Panamanian Balboa'},
+  {code:'PEN',name:'Peruvian Sol'},{code:'PGK',name:'Papua New Guinean Kina'},
+  {code:'PHP',name:'Philippine Peso'},{code:'PKR',name:'Pakistani Rupee'},
+  {code:'PLN',name:'Polish Zloty'},{code:'PYG',name:'Paraguayan Guaraní'},
+  {code:'QAR',name:'Qatari Riyal'},{code:'RON',name:'Romanian Leu'},
+  {code:'RSD',name:'Serbian Dinar'},{code:'RUB',name:'Russian Ruble'},
+  {code:'RWF',name:'Rwandan Franc'},{code:'SAR',name:'Saudi Riyal'},
+  {code:'SBD',name:'Solomon Islands Dollar'},{code:'SCR',name:'Seychellois Rupee'},
+  {code:'SDG',name:'Sudanese Pound'},{code:'SEK',name:'Swedish Krona'},
+  {code:'SGD',name:'Singapore Dollar'},{code:'SHP',name:'Saint Helena Pound'},
+  {code:'SLL',name:'Sierra Leonean Leone'},{code:'SOS',name:'Somali Shilling'},
+  {code:'SRD',name:'Surinamese Dollar'},{code:'SSP',name:'South Sudanese Pound'},
+  {code:'STN',name:'São Tomé & Príncipe Dobra'},{code:'SVC',name:'Salvadoran Colón'},
+  {code:'SYP',name:'Syrian Pound'},{code:'SZL',name:'Swazi Lilangeni'},
+  {code:'THB',name:'Thai Baht'},{code:'TJS',name:'Tajikistani Somoni'},
+  {code:'TMT',name:'Turkmenistani Manat'},{code:'TND',name:'Tunisian Dinar'},
+  {code:'TOP',name:"Tongan Pa'anga"},{code:'TRY',name:'Turkish Lira'},
+  {code:'TTD',name:'Trinidad & Tobago Dollar'},{code:'TWD',name:'New Taiwan Dollar'},
+  {code:'TZS',name:'Tanzanian Shilling'},{code:'UAH',name:'Ukrainian Hryvnia'},
+  {code:'UGX',name:'Ugandan Shilling'},{code:'USD',name:'US Dollar'},
+  {code:'UYU',name:'Uruguayan Peso'},{code:'UZS',name:'Uzbekistani Som'},
+  {code:'VES',name:'Venezuelan Bolívar Soberano'},{code:'VND',name:'Vietnamese Dong'},
+  {code:'VUV',name:'Vanuatu Vatu'},{code:'WST',name:'Samoan Tala'},
+  {code:'XAF',name:'Central African CFA Franc'},{code:'XCD',name:'East Caribbean Dollar'},
+  {code:'XOF',name:'West African CFA Franc'},{code:'XPF',name:'CFP Franc'},
+  {code:'YER',name:'Yemeni Rial'},{code:'ZAR',name:'South African Rand'},
+  {code:'ZMW',name:'Zambian Kwacha'},{code:'ZWL',name:'Zimbabwean Dollar'},
+];
+
+function currencyOptions(selected='USD'){
+  return ISO_CURRENCIES.map(c=>`<option value="${c.code}" ${selected===c.code?'selected':''}>${c.code} — ${c.name}</option>`).join('');
+}
+
+// Format an amount in a given currency (falls back to "CODE amount" if Intl doesn't know it)
+function fmtCurrency(amount,code){
+  const n=parseFloat(amount||0);
+  if(!code||code==='USD') return `$${n.toFixed(2)}`;
+  try{ return new Intl.NumberFormat('en-US',{style:'currency',currency:code,minimumFractionDigits:2}).format(n); }
+  catch(e){ return `${code} ${n.toFixed(2)}`; }
+}
+
+// Return live USD equivalent string, or null (same currency), or "USD value unavailable"
+function usdEquiv(amount,code){
+  if(!code||code==='USD') return null;
+  const rates=CACHE.fxRates;
+  if(!rates) return null; // still fetching — show nothing
+  if(!rates[code]) return 'USD value unavailable';
+  return `≈ $${((parseFloat(amount)||0)/rates[code]).toFixed(2)} USD`;
+}
+
+// Best USD price for a product — used in cart totals and price filter
+function productPriceUSD(p){
+  const price=parseFloat(p.price||0);
+  if(!p.currency||p.currency==='USD') return price;
+  if(p.priceUSD!=null) return parseFloat(p.priceUSD); // stored at listing time
+  const rates=CACHE.fxRates||{};
+  return rates[p.currency]?+(price/rates[p.currency]).toFixed(2):price;
+}
+function productShippingUSD(p){
+  const ship=parseFloat(p.shipping||0);
+  if(!p.currency||p.currency==='USD') return ship;
+  if(p.shippingUSD!=null) return parseFloat(p.shippingUSD);
+  const rates=CACHE.fxRates||{};
+  return rates[p.currency]?+(ship/rates[p.currency]).toFixed(2):ship;
+}
+
 // ---------- DB ----------
 const LS = "okcommunity4";
 function load(){ try{ return JSON.parse(localStorage.getItem(LS))||{}; }catch{ return {}; } }
@@ -779,7 +898,7 @@ function openAttachProduct(){
     const photo=p.photos&&p.photos[0];
     return `<div class="mf-track" style="cursor:pointer" data-action="selectdiscproduct" data-id="${p.id}">
       <div class="mf-art" style="${photo?`background-image:url('${photo}');background-size:cover;background-position:center`:'background:var(--orange-1)'}">${photo?'':'📦'}</div>
-      <div class="mf-info"><div class="mf-title">${esc(p.title)}</div><div class="mf-artist">$${parseFloat(p.price).toFixed(2)}</div></div>
+      <div class="mf-info"><div class="mf-title">${esc(p.title)}</div><div class="mf-artist">${fmtCurrency(p.price,p.currency)}</div></div>
     </div>`;
   }).join('');
   openOverlay(`<h2>🛒 Select an item to attach</h2><div style="margin-top:12px">${rows}</div>`);
@@ -1787,21 +1906,45 @@ function openMarketplace(){
 function goBuyer(){ closeOverlay(); go("marketplace"); }
 function goSeller(){ closeOverlay(); CACHE.sellers[ME.id]?go("mystore"):openSellerSetup(); }
 
+function _sellerFormHtml(s){
+  const cur=s?.currency||'USD';
+  return `
+    <div class="field"><label>Store name</label><input class="fb-field" id="slName" placeholder="e.g. Emmanuel's Merch" value="${esc(s?.name||ME.name)}" /></div>
+    <div class="field"><label>Location (city, country)</label><input class="fb-field" id="slLoc" placeholder="e.g. Port-au-Prince, Haiti" value="${esc(s?.location||'')}" /></div>
+    <div class="field"><label>Your Payoneer email</label><input class="fb-field" id="slPayoneer" type="email" placeholder="your@payoneer.com" value="${esc(s?.payoneerEmail||'')}" /></div>
+    <p class="note" style="margin-top:4px">Buyers pay the platform first. You receive <b>97%</b> of each sale via Payoneer within 1–2 business days after payment clears.</p>
+    <div class="field" style="margin-top:10px"><label>Store currency 🌍</label>
+      <select class="fb-field" id="slCurrency">${currencyOptions(cur)}</select>
+      <p class="note" style="margin-top:4px">Prices you enter will be in this currency. Buyers always see the live USD equivalent.</p>
+    </div>`;
+}
 function openSellerSetup(){
   openOverlay(`<h2>🏪 Open your store</h2><p class="sub">Fill in your details to start selling on OK Music.</p>
-    <div class="field"><label>Store name</label><input class="fb-field" id="slName" placeholder="e.g. Emmanuel's Merch" value="${esc(ME.name)}" /></div>
-    <div class="field"><label>Location (city, country)</label><input class="fb-field" id="slLoc" placeholder="e.g. Montreal, Canada" /></div>
-    <div class="field"><label>Your Payoneer email</label><input class="fb-field" id="slPayoneer" type="email" placeholder="your@payoneer.com" /></div>
-    <p class="note" style="margin-top:4px">Buyers pay the platform first. You receive <b>97%</b> of each sale via Payoneer within 1–2 business days after payment clears.</p>
+    ${_sellerFormHtml(null)}
     <button class="btn primary block" data-action="doregisterseller" style="margin-top:16px">Continue →</button>`);
 }
 async function doRegisterSeller(){
   const name=($("slName").value||"").trim(), location=($("slLoc").value||"").trim(), payoneerEmail=($("slPayoneer").value||"").trim();
+  const currency=($("slCurrency")||{value:"USD"}).value||"USD";
   if(!name||!location) return toast("Fill in all fields");
   if(!payoneerEmail||!payoneerEmail.includes("@")) return toast("Enter a valid Payoneer email");
-  try{ await fbDB.collection("sellers").doc(ME.id).set({ name, location, payoneerEmail, uid:ME.id, createdAt:Date.now() });
+  try{ await fbDB.collection("sellers").doc(ME.id).set({ name, location, payoneerEmail, currency, uid:ME.id, createdAt:Date.now() });
     toast("Store created! 🎉"); closeOverlay(); go("mystore"); }
   catch(e){ toast("Couldn't create store: "+(e.code||e.message)); }
+}
+function openEditSellerSettings(){
+  const s=CACHE.sellers[ME.id]; if(!s) return;
+  openOverlay(`<h2>⚙️ Store settings</h2>${_sellerFormHtml(s)}
+    <button class="btn primary block" data-action="doeditseller" style="margin-top:16px">Save settings</button>`);
+}
+async function doEditSeller(){
+  const name=($("slName").value||"").trim(), location=($("slLoc").value||"").trim(), payoneerEmail=($("slPayoneer").value||"").trim();
+  const currency=($("slCurrency")||{value:"USD"}).value||"USD";
+  if(!name||!location) return toast("Fill in store name and location");
+  if(!payoneerEmail||!payoneerEmail.includes("@")) return toast("Enter a valid Payoneer email");
+  try{ await fbDB.collection("sellers").doc(ME.id).update({ name, location, payoneerEmail, currency });
+    closeOverlay(); toast("Settings saved ✓"); }
+  catch(e){ toast("Couldn't save: "+(e.code||e.message)); }
 }
 
 // ---------- seller store management ----------
@@ -1811,8 +1954,11 @@ function renderSellerStore(){
   const products=CACHE.products.filter(p=>p.sellerId===ME.id);
   $("page").innerHTML=`<div class="h-title">🏪 My Store</div>
     <div class="mp-store-header">
-      <div><b>${esc(seller.name)}</b> · 📍 ${esc(seller.location)}</div>
-      <button class="btn primary" data-action="addproduct">＋ Add product</button>
+      <div><b>${esc(seller.name)}</b> · 📍 ${esc(seller.location)}${seller.currency&&seller.currency!=='USD'?` · 💱 ${seller.currency}`:''}</div>
+      <div style="display:flex;gap:6px">
+        <button class="btn sm" data-action="editsellersettings" style="color:var(--muted)">⚙️ Settings</button>
+        <button class="btn primary" data-action="addproduct">＋ Add product</button>
+      </div>
     </div>
     ${products.length
       ?`<div class="mp-grid">${products.map(mpSellerCard).join("")}</div>`
@@ -1826,7 +1972,7 @@ function mpSellerCard(p){
     <div class="mp-photo" style="${photo?`background-image:url('${photo}');background-size:cover;background-position:center`:'background:var(--orange-1)'}" data-action="viewproduct" data-id="${p.id}">${photo?'':'📦'}</div>
     <div class="mp-card-body">
       <div class="mp-title">${esc(p.title)}</div>
-      <div class="mp-price">$${parseFloat(p.price).toFixed(2)} <span class="mp-ship">+ $${parseFloat(p.shipping||0).toFixed(2)} ship</span></div>
+      <div class="mp-price">${fmtCurrency(p.price,p.currency)} <span class="mp-ship">+ ${fmtCurrency(p.shipping||0,p.currency)} ship</span></div>
       ${p.stock!=null?`<div class="mp-stock-info${oos?' oos':''}">📦 ${oos?'Out of stock':`${p.stock} in stock`}</div>`:''}
       <div style="display:flex;gap:6px;margin-top:8px">
         <button class="btn sm" data-action="editproduct" data-id="${p.id}">Edit</button>
@@ -1866,8 +2012,12 @@ function openProductForm(productId){
         <input type="checkbox" id="prodNoLoc" ${noLoc?'checked':''}> No location / Digital product
       </label>
     </div>
-    <div class="field"><label>Price (USD)</label><input class="fb-field" id="prodPrice" type="number" min="0.01" step="0.01" placeholder="0.00" value="${p?.price||''}" /></div>
-    <div class="field"><label>Shipping cost (USD)</label><input class="fb-field" id="prodShip" type="number" min="0" step="0.01" placeholder="0.00" value="${p?.shipping||''}" /></div>
+    <div class="field"><label>Currency 🌍</label>
+      <select class="fb-field" id="prodCurrency">${currencyOptions(p?.currency||CACHE.sellers[ME.id]?.currency||'USD')}</select>
+      <p class="note" style="margin-top:4px">Buyers will see the live USD equivalent next to your price.</p>
+    </div>
+    <div class="field"><label>Price</label><input class="fb-field" id="prodPrice" type="number" min="0.01" step="0.01" placeholder="0.00" value="${p?.price||''}" /></div>
+    <div class="field"><label>Shipping cost</label><input class="fb-field" id="prodShip" type="number" min="0" step="0.01" placeholder="0.00" value="${p?.shipping||''}" /></div>
     <div class="field"><label>🦁 LionCoin price <span style="font-weight:400;color:var(--muted)">(optional — 2 decimal places supported, e.g. 12.50)</span></label><input class="fb-field" id="prodLnc" type="number" min="0.01" step="0.01" placeholder="e.g. 12.50" value="${p?.lncPrice||''}" /></div>
     <div class="field"><label>Stock quantity <span style="font-weight:400;color:var(--muted)">(optional — leave blank for unlimited)</span></label><input class="fb-field" id="prodStock" type="number" min="0" step="1" placeholder="e.g. 10" value="${p?.stock!=null?p.stock:''}" /></div>
     <div class="field"><label>Product photo</label>
@@ -1920,7 +2070,11 @@ async function doSaveProduct(productId){
   const lncPrice=lncRaw>=0.01?+lncRaw.toFixed(2):null;
   const stockRaw=parseInt(($("prodStock")||{value:""}).value);
   const stock=(!isNaN(stockRaw)&&stockRaw>=0)?stockRaw:null;
-  const data={ sellerId:ME.id, title, description, category, location, price, shipping, photos, lncPrice:lncPrice??null, stock:stock!==null?stock:null, updatedAt:Date.now() };
+  const currency=($("prodCurrency")||{value:"USD"}).value||"USD";
+  const fxRate=(CACHE.fxRates||{})[currency]||null;
+  const priceUSD=!currency||currency==='USD'?price:(fxRate?+(price/fxRate).toFixed(2):null);
+  const shippingUSD=!currency||currency==='USD'?shipping:(fxRate?+(shipping/fxRate).toFixed(2):null);
+  const data={ sellerId:ME.id, title, description, category, location, currency, price, priceUSD, shipping, shippingUSD, photos, lncPrice:lncPrice??null, stock:stock!==null?stock:null, updatedAt:Date.now() };
   // Register any custom category in the persistent registry so buyers can filter by it
   if(!MP_CATEGORIES.includes(category)){
     fbDB.collection("platform").doc("categories")
@@ -1985,8 +2139,8 @@ function renderMarketplace(){
   // Client-side secondary filters — category applied here too so old products
   // without the field are still correctly filtered when the server query falls back
   if(activeCat) list=list.filter(p=>(p.category||'')=== activeCat);
-  if(minP>0) list=list.filter(p=>parseFloat(p.price)>=minP);
-  if(maxP<Infinity) list=list.filter(p=>parseFloat(p.price)<=maxP);
+  if(minP>0) list=list.filter(p=>productPriceUSD(p)>=minP);
+  if(maxP<Infinity) list=list.filter(p=>productPriceUSD(p)<=maxP);
   if(locF) list=list.filter(p=>p.location===locF);
   if(q) list=list.filter(p=>
     (p.title||'').toLowerCase().includes(q)||
@@ -2021,9 +2175,9 @@ function renderMarketplace(){
         ${allLocs.map(l=>`<option value="${esc(l)}" ${locF===l?'selected':''}>${esc(l)}</option>`).join('')}
       </select>`:''}
       <div class="mp-price-range">
-        <input class="fb-field" id="mpMinP" type="number" min="0" step="0.01" placeholder="Min $" value="${state.mpMinPrice||''}" style="width:80px" />
+        <input class="fb-field" id="mpMinP" type="number" min="0" step="0.01" placeholder="Min USD" value="${state.mpMinPrice||''}" style="width:80px" />
         <span style="color:var(--muted);flex-shrink:0">–</span>
-        <input class="fb-field" id="mpMaxP" type="number" min="0" step="0.01" placeholder="Max $" value="${state.mpMaxPrice||''}" style="width:80px" />
+        <input class="fb-field" id="mpMaxP" type="number" min="0" step="0.01" placeholder="Max USD" value="${state.mpMaxPrice||''}" style="width:80px" />
       </div>
       ${hasFilter?`<button class="btn sm" data-action="clearmpfilters" style="white-space:nowrap;flex-shrink:0">✕ Clear</button>`:''}
     </div>
@@ -2065,7 +2219,7 @@ function mpBuyerCard(p){
         <span class="mp-seller-link" data-action="contactseller" data-uid="${p.sellerId}" data-productid="${p.id}">${esc(seller?.name||'Seller')}</span>
         ${locBadge}
       </div>
-      ${p.price>0?`<div class="mp-price">$${parseFloat(p.price).toFixed(2)}${p.shipping>0?`<span class="mp-ship"> + $${parseFloat(p.shipping).toFixed(2)} ship</span>`:''}</div>`:''}
+      ${p.price>0?(()=>{const eq=usdEquiv(p.price,p.currency);return`<div class="mp-price">${fmtCurrency(p.price,p.currency)}${p.shipping>0?`<span class="mp-ship"> + ${fmtCurrency(p.shipping,p.currency)} ship</span>`:''}</div>${eq?`<div class="mp-usd-equiv">${eq}</div>`:''}`})():''}
       ${isPrintify
         ?`<button class="btn sm primary" data-action="printifycheckout" data-id="${p.id}" style="margin-top:8px;width:100%">🛒 Buy Now</button>`
         :oos
@@ -2081,13 +2235,14 @@ function viewProduct(id){
   const isPrintify=p.source==='printify';
   const ship=parseFloat(p.shipping||0);
   const total=parseFloat(p.price||0)+ship;
+  const _pEq=usdEquiv(p.price,p.currency); const _sEq=usdEquiv(ship,p.currency); const _tEq=usdEquiv(total,p.currency);
   const priceBreakdown=ship>0
     ?`<div class="mp-price-breakdown">
-        <span>Product: <b>$${parseFloat(p.price).toFixed(2)}</b></span>
-        <span>Shipping: <b>$${ship.toFixed(2)}</b></span>
-        <span class="mp-price-total">Total: <b>$${total.toFixed(2)}</b></span>
+        <span>Product: <b>${fmtCurrency(p.price,p.currency)}</b>${_pEq?` <span class="mp-usd-equiv-inline">${_pEq}</span>`:''}</span>
+        <span>Shipping: <b>${fmtCurrency(ship,p.currency)}</b>${_sEq?` <span class="mp-usd-equiv-inline">${_sEq}</span>`:''}</span>
+        <span class="mp-price-total">Total: <b>${fmtCurrency(total,p.currency)}</b>${_tEq?` <span class="mp-usd-equiv-inline">${_tEq}</span>`:''}</span>
       </div>`
-    :`<div class="mp-detail-price">$${parseFloat(p.price).toFixed(2)}</div>`;
+    :`<div class="mp-detail-price">${fmtCurrency(p.price,p.currency)}${_pEq?`<div class="mp-usd-equiv" style="margin-top:2px">${_pEq}</div>`:''}</div>`;
   const locLine=p.location?`📍 ${esc(p.location)} · `:'';
   openOverlay(`<div class="mp-detail">
     ${photo?`<div style="text-align:center;margin-bottom:12px"><img src="${photo}" class="mp-detail-img" data-action="zoomphoto" data-src="${photo}" /></div>`:''}
@@ -2400,24 +2555,24 @@ function removeFromCart(id){ state.cart=(state.cart||[]).filter(x=>x!==id); pers
 function renderCart(){
   if(!state.cart) state.cart=[];
   const items=state.cart.map(id=>CACHE.products.find(p=>p.id===id)).filter(Boolean);
-  const subtotal=items.reduce((s,p)=>s+parseFloat(p.price),0);
-  const shipping=items.reduce((s,p)=>s+parseFloat(p.shipping||0),0);
+  const subtotal=+items.reduce((s,p)=>s+productPriceUSD(p),0).toFixed(2);
+  const shipping=+items.reduce((s,p)=>s+productShippingUSD(p),0).toFixed(2);
   const fee=+(subtotal*PLATFORM_FEE).toFixed(2);
   const total=+(subtotal+shipping+fee).toFixed(2);
   $("page").innerHTML=`<div class="h-title">🛒 My Cart</div>
     ${items.length?`
-      <div class="cart-items">${items.map(p=>{ const photo=p.photos&&p.photos[0]; return `<div class="cart-row">
+      <div class="cart-items">${items.map(p=>{ const photo=p.photos&&p.photos[0]; const eq=usdEquiv(p.price,p.currency); return `<div class="cart-row">
         <div class="cart-photo" style="${photo?`background-image:url('${photo}');background-size:cover;background-position:center`:'background:var(--orange-1)'}">${photo?'':'📦'}</div>
         <div class="cart-info"><div class="cart-title">${esc(p.title)}</div>
-          <div class="cart-price">$${parseFloat(p.price).toFixed(2)} + $${parseFloat(p.shipping||0).toFixed(2)} ship</div>
+          <div class="cart-price">${fmtCurrency(p.price,p.currency)}${eq?` <span style="font-size:11px;color:var(--muted)">${eq}</span>`:''} + ${fmtCurrency(p.shipping||0,p.currency)} ship</div>
           <div class="mp-seller-name">${esc(CACHE.sellers[p.sellerId]?.name||'Seller')}</div></div>
         <button class="btn sm" data-action="removecart" data-id="${p.id}" style="color:#e2554f;border-color:#f0b3b3;align-self:center">Remove</button>
       </div>`; }).join("")}</div>
       <div class="cart-summary">
-        <div class="cart-line"><span>Subtotal</span><span>$${subtotal.toFixed(2)}</span></div>
-        <div class="cart-line"><span>Shipping</span><span>$${shipping.toFixed(2)}</span></div>
+        <div class="cart-line"><span>Subtotal (USD)</span><span>$${subtotal.toFixed(2)}</span></div>
+        <div class="cart-line"><span>Shipping (USD)</span><span>$${shipping.toFixed(2)}</span></div>
         <div class="cart-line"><span>Platform fee (3%)</span><span>$${fee.toFixed(2)}</span></div>
-        <div class="cart-line cart-total"><span>Total</span><span>$${total.toFixed(2)}</span></div>
+        <div class="cart-line cart-total"><span>Total (USD)</span><span>$${total.toFixed(2)}</span></div>
       </div>
       <button class="btn primary block" data-action="checkout" style="margin-top:18px;font-size:16px;padding:14px">Proceed to checkout →</button>
       <button class="btn block" data-action="nav" data-view="marketplace" style="margin-top:8px">← Continue shopping</button>`
@@ -2428,8 +2583,8 @@ function renderCart(){
 function openCheckout(){
   if(!state.cart||!state.cart.length) return go("cart");
   const items=state.cart.map(id=>CACHE.products.find(p=>p.id===id)).filter(Boolean);
-  const subtotal=items.reduce((s,p)=>s+parseFloat(p.price),0);
-  const shipping=items.reduce((s,p)=>s+parseFloat(p.shipping||0),0);
+  const subtotal=+items.reduce((s,p)=>s+productPriceUSD(p),0).toFixed(2);
+  const shipping=+items.reduce((s,p)=>s+productShippingUSD(p),0).toFixed(2);
   const fee=+(subtotal*PLATFORM_FEE).toFixed(2);
   const total=+(subtotal+shipping+fee).toFixed(2);
   openOverlay(`<h2>📦 Checkout</h2>
@@ -2453,8 +2608,8 @@ async function doPlaceOrder(){
   if(!items.length) return toast("Cart is empty");
   const oosItem=items.find(isOutOfStock);
   if(oosItem) return toast(`"${oosItem.title}" is out of stock — remove it from your cart`);
-  const subtotal=items.reduce((s,p)=>s+parseFloat(p.price),0);
-  const shippingTotal=items.reduce((s,p)=>s+parseFloat(p.shipping||0),0);
+  const subtotal=+items.reduce((s,p)=>s+productPriceUSD(p),0).toFixed(2);
+  const shippingTotal=+items.reduce((s,p)=>s+productShippingUSD(p),0).toFixed(2);
   const fee=+(subtotal*PLATFORM_FEE).toFixed(2);
   const total=+(subtotal+shippingTotal+fee).toFixed(2);
   const F=firebase.firestore.FieldValue;
@@ -2469,7 +2624,7 @@ async function doPlaceOrder(){
       }
       t.set(orderRef,{
         buyerId:ME.id, buyerName:name, buyerEmail:email, buyerAddress:address,
-        items:items.map(p=>({productId:p.id,title:p.title,price:p.price,shipping:p.shipping||0,sellerId:p.sellerId})),
+        items:items.map(p=>({productId:p.id,title:p.title,price:productPriceUSD(p),currency:'USD',shipping:productShippingUSD(p),sellerId:p.sellerId})),
         subtotal, shipping:shippingTotal, platformFee:fee, total, status:"pending_payment", createdAt:Date.now()
       });
       snaps.forEach(snap=>{
@@ -4079,6 +4234,8 @@ document.addEventListener("click",e=>{
     editcmt:()=>editComment(el.dataset.id), delcmt:()=>deleteComment(el.dataset.id),
     fantab:()=>{ state.fanTab=el.dataset.t; state.view='fans'; renderFans(); }, suggest:openSuggest, sendsuggest:sendSuggest,
     openmarketplace:openMarketplace, gobuyer:goBuyer, goseller:goSeller, gosellerdirect:()=>{ if(!ME) return openEmailAuth(); CACHE.sellers[ME.id]?go("mystore"):openSellerSetup(); },
+    editsellersettings:()=>{ if(!ME) return; openEditSellerSettings(); },
+    doeditseller:doEditSeller,
     doregisterseller:doRegisterSeller, addproduct:()=>openProductForm(), editproduct:()=>openProductForm(el.dataset.id), delproduct:()=>deleteProduct(el.dataset.id),
     dosaveproduct:()=>doSaveProduct(el.dataset.id||null), viewproduct:()=>viewProduct(el.dataset.id),
     contactseller:()=>contactSeller(el.dataset.uid,el.dataset.productid),
@@ -4897,6 +5054,11 @@ function startListeners(){
   fbDB.collection("comments").onSnapshot(s=>{ CACHE.comments=s.docs.map(d=>({ id:d.id, ...d.data() })); scheduleRender(); }, e=>console.warn("comments",e.code));
   fbDB.collection("products").onSnapshot(s=>{ CACHE.products=s.docs.map(d=>({ id:d.id, ...d.data() })).sort((a,b)=>b.createdAt-a.createdAt); scheduleRender(); }, e=>console.warn("products",e.code));
   fbDB.collection("sellers").onSnapshot(s=>{ CACHE.sellers={}; s.forEach(d=>CACHE.sellers[d.id]={ id:d.id, ...d.data() }); scheduleRender(); }, e=>console.warn("sellers",e.code));
+  // Daily FX rates (USD base) for multi-currency display
+  fetch('https://open.er-api.com/v6/latest/USD')
+    .then(r=>r.json())
+    .then(d=>{ if(d.result==='success'){ CACHE.fxRates=d.rates; scheduleRender(); } })
+    .catch(()=>{ CACHE.fxRates={}; });
   // Category registry — accumulates every custom category sellers have ever used
   fbDB.collection("platform").doc("categories").onSnapshot(
     s=>{ CACHE.customCategories=s.exists?Object.keys(s.data()).sort((a,b)=>a.localeCompare(b)):[]; scheduleRender(); },

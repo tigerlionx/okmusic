@@ -383,6 +383,8 @@ body.has-page-bg .topbar{background:rgba(255,221,191,.45)}
 .mp-seller-name{font-size:12px;color:var(--muted);margin-bottom:4px}
 .mp-price{font-weight:800;color:var(--orange);font-size:16px}
 .mp-ship{font-size:12px;font-weight:400;color:var(--muted)}
+.mp-usd-equiv{font-size:11px;color:var(--muted);margin-top:1px}
+.mp-usd-equiv-inline{font-size:11px;color:var(--muted);font-weight:400}
 /* marketplace filter bar */
 .mp-filter-bar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:12px}
 .mp-filter-bar .mp-search-inp{flex:1;min-width:140px;margin:0}
