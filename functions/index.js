@@ -25,6 +25,7 @@ const { initializeApp }        = require("firebase-admin/app");
 const { getFirestore }         = require("firebase-admin/firestore");
 const { getMessaging }         = require("firebase-admin/messaging");
 const nodemailer               = require("nodemailer");
+const { RtcTokenBuilder, RtcRole } = require("agora-access-token");
 
 initializeApp();
 const db  = getFirestore();
@@ -181,6 +182,27 @@ const TYPE_META = {
   new_product:  { icon: "ic_launcher",  sound: "default",       channel: "general"  },
   default:      { icon: "ic_launcher",  sound: "default",       channel: "general"  },
 };
+
+// ── Agora token generation ────────────────────────────────────────────────────
+// Called from the browser before joining/hosting a live stream.
+// Reads App ID + Certificate from Firestore /config/agora (Admin SDK bypasses rules).
+exports.generateAgoraToken = onCall({ region: "us-central1" }, async (request) => {
+  if (!request.auth) throw new HttpsError("unauthenticated", "Must be signed in.");
+
+  const { channelName, role } = request.data || {};
+  if (!channelName) throw new HttpsError("invalid-argument", "channelName is required.");
+
+  const configSnap = await db.collection("config").doc("agora").get();
+  if (!configSnap.exists) throw new HttpsError("internal", "Agora not configured.");
+  const { appId, appCertificate } = configSnap.data();
+  if (!appId || !appCertificate) throw new HttpsError("internal", "Agora credentials incomplete.");
+
+  const rtcRole = role === "host" ? RtcRole.PUBLISHER : RtcRole.SUBSCRIBER;
+  const expiresAt = Math.floor(Date.now() / 1000) + 3600; // 1-hour token
+  const token = RtcTokenBuilder.buildTokenWithUid(appId, appCertificate, channelName, 0, rtcRole, expiresAt);
+
+  return { token, appId, expiresAt };
+});
 
 // ── Printify helper ───────────────────────────────────────────────────────────
 function stripHtml(html) {

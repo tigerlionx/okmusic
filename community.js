@@ -48,7 +48,7 @@ const THEMES = [
 
 const PLATFORM_EMAIL="trendai509@gmail.com";
 const ADMIN_EMAIL="trendai509@gmail.com";
-const AGORA_APP_ID=''; // Fill in your Agora App ID from agora.io — leave empty to see setup instructions
+const AGORA_APP_ID='abe047eaf0f04fa1a445b763991f56b7'; // OK Music Live project (agora.io)
 const PLATFORM_FEE=0.03;
 // Promoted listing plans — cost in LNC, duration in days
 const PROMO_PLANS=[
@@ -5960,14 +5960,21 @@ async function renderLiveStream(streamId){
   },100);
 }
 
+async function _getAgoraToken(channelName,role){
+  const fn=firebase.functions().httpsCallable('generateAgoraToken');
+  const res=await fn({channelName,role});
+  return res.data;
+}
+
 async function _startAgoraHost(streamId,channelName){
   if(!AGORA_APP_ID){toast("Agora App ID not configured.");return;}
   if(!window.AgoraRTC){toast("Agora SDK not loaded. Check your internet connection.");return;}
   try{
     _agoraSid=streamId;_liveRole='host';
+    const {token,appId}=await _getAgoraToken(channelName,'host');
     _agoraClient=AgoraRTC.createClient({mode:'live',codec:'vp8'});
     await _agoraClient.setClientRole('host');
-    await _agoraClient.join(AGORA_APP_ID,channelName,null,ME.id);
+    await _agoraClient.join(appId,channelName,token,ME.id);
     _agoraLocalTracks=await AgoraRTC.createMicrophoneAndCameraTracks({},{facingMode:'user'});
     await _agoraClient.publish(_agoraLocalTracks);
     const preview=document.getElementById('hostPreviewVideo');
@@ -5994,6 +6001,7 @@ async function _startAgoraAudience(streamId,channelName){
   }
   try{
     _agoraSid=streamId;_liveRole='audience';
+    const {token,appId}=await _getAgoraToken(channelName,'audience');
     _agoraClient=AgoraRTC.createClient({mode:'live',codec:'vp8'});
     await _agoraClient.setClientRole('audience');
     _agoraClient.on('user-published',async(user,mediaType)=>{
@@ -6012,7 +6020,7 @@ async function _startAgoraAudience(streamId,channelName){
       const s=document.getElementById('streamStatus');
       if(s){s.style.display='';s.textContent='Host has left the stream.';}
     });
-    await _agoraClient.join(AGORA_APP_ID,channelName,null,ME?.id||('viewer_'+Date.now()));
+    await _agoraClient.join(appId,channelName,token,ME?.id||('viewer_'+Date.now()));
     const s=document.getElementById('streamStatus');if(s)s.textContent='Waiting for host…';
   }catch(e){
     const s=document.getElementById('streamStatus');
