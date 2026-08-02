@@ -1726,7 +1726,7 @@ function viewAvatar(uid){
 
 // ---------- overlay ----------
 function openOverlay(h){ $("overlayBody").innerHTML=`<div class="modal"><button class="modal-x" data-action="close">✕</button>${h}</div>`; $("overlay").hidden=false; }
-function closeOverlay(){ if(activePc){endCall();return;} $("overlay").hidden=true; $("overlayBody").innerHTML=""; }
+function closeOverlay(){ $("overlay").hidden=true; $("overlayBody").innerHTML=""; }
 
 // ---------- player ----------
 let hasSrc=false;
@@ -2946,6 +2946,32 @@ function startMyNotifications(){
         if(Date.now()-n.time>30000) return;  // ignore old notifications on page load
         _shownNotifIds.add(n.id);
         if(n.type==='call') return;  // calls handled separately by listenForIncomingCalls
+        if(n.type==='call_conference'&&n.callId&&!activePc&&!_confCallId){
+          // Show incoming conference ring in the floating panel
+          showCallBrowserNotif(n.fromUid);
+          const panel=document.getElementById('call-panel');
+          const caller=userById(n.fromUid)||{name:n.fromName||'Someone',color:'#FB7A28'};
+          if(panel&&!panel.classList.contains('active')){
+            playRing();
+            panel.innerHTML=`
+              <div class="cp-drag" id="cpDrag"><span class="cp-drag-dots">⠿</span><span class="cp-title">📞 Conference call</span></div>
+              <div class="cp-body" style="text-align:center;padding:18px 16px">
+                <div style="position:relative;width:70px;height:70px;margin:0 auto 12px">
+                  <div class="call-pulse" style="inset:-8px"></div><div class="call-pulse d2" style="inset:-18px"></div>
+                  <div class="avatar" style="${avatarStyle(caller,70)}">${caller.avatarImg?'':initials(caller.name||'?')}</div>
+                </div>
+                <div style="font-weight:700;font-size:16px;color:var(--text);margin-bottom:4px">${esc(caller.name||n.fromName||'Someone')}</div>
+                <div style="font-size:12px;color:var(--muted);margin-bottom:16px">Incoming conference call</div>
+                <div style="display:flex;gap:14px;justify-content:center">
+                  <button class="call-btn-accept" data-action="joinconference" data-id="${n.callId}" title="Join">📞</button>
+                  <button class="call-btn-end" data-action="declineconf" data-id="${n.callId}" title="Decline">📵</button>
+                </div>
+              </div>`;
+            panel.classList.add('active');
+            _reinitCpDrag();
+          }
+          return;
+        }
         showBrowserNotif('◎ OK Music', n.text, { tag:n.type, renotify:true });
       });
       scheduleRender();
@@ -4544,6 +4570,15 @@ document.addEventListener("click",e=>{
     acceptcall:()=>acceptCall(el.dataset.uid),
     mutecall:muteCall,
     endcall:endCall,
+    leavecall:leaveConference,
+    confmute:confMuteToggle,
+    togglehand:toggleCallHand,
+    opencallinvite:openCallInvite,
+    invitetoconf:()=>inviteToCall(el.dataset.uid),
+    startconference:openConferenceDialog,
+    beginconference:beginConference,
+    joinconference:()=>joinConference(el.dataset.id),
+    declineconf:()=>{ stopRing(); const p=document.getElementById('call-panel'); if(p){p.classList.remove('active');p.innerHTML='';} },
     confirmdel:()=>doDeleteTrack(el.dataset.id),
     confirmdelcmt:()=>doDeleteComment(el.dataset.id),
     confirmdelprod:()=>doDeleteProduct(el.dataset.id),
@@ -4668,6 +4703,11 @@ async function getICE(){
 }
 let activePc=null,activeStream=null,activeCallId=null,callUnsub=null,callInterval=null,muted=false,_iceTimeout=null;
 let _vizAnimId=null,_vizCtx=null,_localAn=null,_remoteAn=null,_localData=null,_remoteData=null,_testMicStream=null;
+// Conference call state
+let _confCallId=null,_confPeers={},_confAudios={},_confSignalUnsub=null,_confCallUnsub=null;
+let _confHandRaised=false,_confParticipants={},_confProcessed={};
+// Floating panel drag state
+let _cpDragging=false,_cpDragOffX=0,_cpDragOffY=0;
 
 function _makeAn(stream){
   const src=_vizCtx.createMediaStreamSource(stream);
@@ -4877,7 +4917,8 @@ function openChat(uid){
         <span style="font-size:11px;color:${statusColor};margin-left:6px">${statusLabel}</span>
       </div>
       <span title="End-to-end encrypted" style="font-size:16px;opacity:.6;flex-shrink:0">🔒</span>
-      <button class="btn sm" data-action="startcall" data-uid="${uid}" title="Voice call" style="flex-shrink:0">📞 Call</button>
+      <button class="btn sm" data-action="startcall" data-uid="${uid}" title="Voice call" style="flex-shrink:0">📞</button>
+      <button class="btn sm" data-action="startconference" title="Conference call" style="flex-shrink:0">👥📞</button>
     </div>
     <div class="chat-msgs" id="chatMsgs"></div>
     <div class="chat-input-row">
@@ -5062,36 +5103,41 @@ function startCall(uid){
 function openCallUI(uid,mode){
   const other=userById(uid)||{name:"Someone",color:"#888"};
   const pulse=mode==="incoming"||mode==="outgoing";
-  openOverlay(`<div class="call-ui">
-    <div class="call-avatar-wrap">
-      ${pulse?'<div class="call-pulse"></div><div class="call-pulse d2"></div>':''}
-      <div class="avatar" style="${avatarStyle(other,108)}">${other.avatarImg?'':initials(other.name)}</div>
+  const panel=document.getElementById('call-panel');
+  if(!panel)return;
+  panel.innerHTML=`
+    <div class="cp-drag" id="cpDrag">
+      <span class="cp-drag-dots">⠿</span>
+      <span class="cp-title">📞 ${esc(other.name)}</span>
+      <span class="cp-timer-txt" id="callTimer" style="display:none"></span>
     </div>
-    <div class="call-name">${esc(other.name)}</div>
-    <div class="call-status" id="callStatus">${mode==="outgoing"?"Calling…":"Incoming call…"}</div>
-    <audio id="remoteAudio" autoplay playsinline></audio>
-    <div class="call-timer" id="callTimer" style="display:none">0:00</div>
-    <div class="voice-viz" id="voiceViz">
-      <div class="vv-col">
-        <div class="vv-bars" id="localBars">${'<div class="vv-bar"></div>'.repeat(10)}</div>
-        <span class="vv-lbl">🎙️ You</span>
+    <div class="cp-body">
+      <div class="call-avatar-wrap" style="position:relative;width:80px;height:80px;margin:0 auto 12px">
+        ${pulse?'<div class="call-pulse" style="inset:-8px"></div><div class="call-pulse d2" style="inset:-18px"></div>':''}
+        <div class="avatar" style="${avatarStyle(other,80)}">${other.avatarImg?'':initials(other.name)}</div>
       </div>
-      <div class="vv-mid">〰</div>
-      <div class="vv-col">
-        <div class="vv-bars" id="remoteBars">${'<div class="vv-bar vv-r"></div>'.repeat(10)}</div>
-        <span class="vv-lbl">🔊 Them</span>
+      <div class="call-status" id="callStatus">${mode==="outgoing"?"Calling…":"Incoming call…"}</div>
+      <audio id="remoteAudio" autoplay playsinline style="display:none"></audio>
+      <div class="voice-viz" id="voiceViz" style="display:none">
+        <div class="vv-col">
+          <div class="vv-bars" id="localBars">${'<div class="vv-bar"></div>'.repeat(10)}</div>
+          <span class="vv-lbl">🎙️ You</span>
+        </div>
+        <div class="vv-mid">〰</div>
+        <div class="vv-col">
+          <div class="vv-bars" id="remoteBars">${'<div class="vv-bar vv-r"></div>'.repeat(10)}</div>
+          <span class="vv-lbl">🔊 Them</span>
+        </div>
       </div>
-    </div>
-    ${mode==="incoming"?`<button class="mic-test-btn" id="micTestBtn" data-action="testmic">🎙️ Test your mic before answering</button>`:''}
-    <div class="call-btns">
-      ${mode==="incoming"?`<button class="call-btn-accept" data-action="acceptcall" data-uid="${uid}" title="Accept">📞</button>`:''}
-      <button class="call-btn-mute" id="muteBtn" data-action="mutecall" title="Mute">🎙️</button>
-      <button class="call-btn-end" data-action="endcall" title="${mode==="incoming"?"Decline":"End call"}">📵</button>
-    </div>
-  </div>`);
-  // Unlock Web Audio API during this user-gesture frame (required for iOS/Safari).
-  // Do NOT call ra.play() here — no source yet, and a failed play() can corrupt
-  // the element's internal state before the real stream arrives in ontrack.
+      ${mode==="incoming"?`<button class="mic-test-btn" id="micTestBtn" data-action="testmic">🎙️ Test mic</button>`:''}
+      <div class="call-btns">
+        ${mode==="incoming"?`<button class="call-btn-accept" data-action="acceptcall" data-uid="${uid}" title="Answer">📞</button>`:''}
+        <button class="call-btn-mute" id="muteBtn" data-action="mutecall" title="Mute">🎙️</button>
+        <button class="call-btn-end" data-action="endcall" title="${mode==="incoming"?"Decline":"End call"}">📵</button>
+      </div>
+    </div>`;
+  panel.classList.add('active');
+  _reinitCpDrag();
   try{const _ac=new(window.AudioContext||window.webkitAudioContext)();_ac.resume().catch(()=>{});}catch(e){}
   _preMusicVol=audio.volume||1; audio.volume=0.12;
   if(mode==="incoming") playRing();
@@ -5288,7 +5334,9 @@ async function endCall(){
   if(activePc){activePc.close();activePc=null;}
   if(activeStream){activeStream.getTracks().forEach(t=>t.stop());activeStream=null;}
   if(activeCallId){await fbDB.collection("calls").doc(activeCallId).update({status:"ended"}).catch(()=>{});activeCallId=null;}
-  muted=false;closeOverlay();
+  muted=false;
+  const _cp=document.getElementById('call-panel');
+  if(_cp){_cp.classList.remove('active');_cp.innerHTML='';_cp.style.left='';_cp.style.top='';}
 }
 
 function listenForIncomingCalls(){
@@ -5313,6 +5361,376 @@ function listenForIncomingCalls(){
     },e=>console.warn("calls listener:",e.code||e.message));
 }
 let _callsUnsub=null;
+
+// ---- FLOATING CALL PANEL INIT & DRAG ----
+function initCallPanel(){
+  if(document.getElementById('call-panel'))return;
+  const p=document.createElement('div');
+  p.id='call-panel';
+  document.body.appendChild(p);
+}
+
+function _reinitCpDrag(){
+  const drag=document.getElementById('cpDrag');
+  if(!drag)return;
+  drag.addEventListener('pointerdown',e=>{
+    if(e.button!==0&&e.pointerType==='mouse')return;
+    const panel=document.getElementById('call-panel');if(!panel)return;
+    const rect=panel.getBoundingClientRect();
+    _cpDragOffX=e.clientX-rect.left;_cpDragOffY=e.clientY-rect.top;
+    _cpDragging=true;
+    drag.setPointerCapture(e.pointerId);drag.classList.add('dragging');
+    panel.style.bottom='auto';panel.style.right='auto';
+    panel.style.left=rect.left+'px';panel.style.top=rect.top+'px';
+    e.preventDefault();
+  },{passive:false});
+  drag.addEventListener('pointermove',e=>{
+    if(!_cpDragging)return;
+    const panel=document.getElementById('call-panel');if(!panel)return;
+    let x=e.clientX-_cpDragOffX,y=e.clientY-_cpDragOffY;
+    x=Math.max(0,Math.min(window.innerWidth-panel.offsetWidth,x));
+    y=Math.max(0,Math.min(window.innerHeight-panel.offsetHeight,y));
+    panel.style.left=x+'px';panel.style.top=y+'px';
+  });
+  drag.addEventListener('pointerup',()=>{
+    _cpDragging=false;
+    const d=document.getElementById('cpDrag');if(d)d.classList.remove('dragging');
+  });
+}
+
+// ---- CONFERENCE CALLS ----
+function _openConfPanel(statusText){
+  const panel=document.getElementById('call-panel');if(!panel)return;
+  panel.innerHTML=`
+    <div class="cp-drag" id="cpDrag">
+      <span class="cp-drag-dots">⠿</span>
+      <span class="cp-title">📞 Conference call</span>
+      <span class="cp-timer-txt" id="callTimer" style="display:none"></span>
+    </div>
+    <div class="cp-body">
+      <div class="cp-conf-status" id="cpConfStatus">${statusText||'Conference active'}</div>
+      <div class="cp-participants" id="cpParticipants"></div>
+      <div class="voice-viz" id="voiceViz" style="display:none">
+        <div class="vv-col">
+          <div class="vv-bars" id="localBars">${'<div class="vv-bar"></div>'.repeat(10)}</div>
+          <span class="vv-lbl">🎙️ You</span>
+        </div>
+      </div>
+      <audio id="remoteAudio" autoplay playsinline style="display:none"></audio>
+      <div class="cp-conf-controls">
+        <button class="cp-cbtn" id="cpMuteBtn" data-action="confmute" title="Mute/unmute">🎙️</button>
+        <button class="cp-cbtn" id="cpHandBtn" data-action="togglehand" title="Raise hand">✋</button>
+        <button class="cp-cbtn" data-action="opencallinvite" title="Invite someone">➕</button>
+        <button class="cp-cbtn cp-cend" data-action="leavecall" title="Leave call">📵</button>
+      </div>
+    </div>`;
+  panel.classList.add('active');
+  _reinitCpDrag();
+  _updateConfPanel();
+}
+
+function _updateConfPanel(){
+  const el=document.getElementById('cpParticipants');
+  if(!el||!_confCallId)return;
+  const uids=Object.keys(_confParticipants);
+  const statusEl=document.getElementById('cpConfStatus');
+  if(statusEl&&uids.length>0) statusEl.textContent=`${uids.length} participant${uids.length!==1?'s':''}`;
+  el.innerHTML=uids.map(uid=>{
+    const u=userById(uid)||{name:uid.slice(0,8),color:'#888'};
+    const p=_confParticipants[uid]||{};
+    const isMe=uid===ME?.id;
+    const avStyle=u.avatarImg?`background-image:url('${u.avatarImg}');background-size:cover;background-position:center`:`background:${u.color}`;
+    return`<div class="cp-participant">
+      <div class="cp-p-av" style="${avStyle}">${u.avatarImg?'':initials(u.name)}</div>
+      <span class="cp-p-name">${esc(u.name)}${isMe?' (you)':''}</span>
+      <span class="cp-p-icons">
+        ${p.handRaised?'<span class="cp-p-hand">✋</span>':''}
+        ${p.muted?'<span style="font-size:12px;opacity:.5">🔇</span>':'<span style="font-size:12px;opacity:.35">🎙️</span>'}
+      </span>
+    </div>`;
+  }).join('');
+}
+
+async function startConference(invitedUids){
+  if(!navigator.mediaDevices)return toast("Mic not available on this device.");
+  if(activePc||_confCallId)return toast("Already in a call.");
+  if(!invitedUids||!invitedUids.length)return;
+  try{
+    const stream=await navigator.mediaDevices.getUserMedia({audio:true});
+    activeStream=stream;
+    const callId='conf_'+ME.id.slice(0,8)+'_'+Date.now();
+    _confCallId=callId;_confPeers={};_confAudios={};_confHandRaised=false;_confProcessed={};
+    _confParticipants={[ME.id]:{muted:false,handRaised:false,joinedAt:Date.now()}};
+    await fbDB.collection("conferences").doc(callId).set({
+      type:'conference',initiatorUid:ME.id,initiatorName:ME.name,
+      title:`${ME.name}'s call`,invitedUids,participantUids:[ME.id],
+      status:'active',time:Date.now(),participants:_confParticipants
+    });
+    invitedUids.forEach(uid=>{
+      fbDB.collection("notifications").add({
+        forUid:uid,type:"call_conference",fromUid:ME.id,fromName:ME.name,
+        callId,text:`📞 ${ME.name} is inviting you to a conference call`,time:Date.now(),read:false
+      }).catch(()=>{});
+    });
+    showCallBrowserNotif(ME.id);
+    _openConfPanel('Waiting for others to join…');
+    _listenConfUpdates(callId);
+    _preMusicVol=audio.volume||1;audio.volume=0.12;
+    startVoiceViz(stream);
+    const viz=document.getElementById('voiceViz');if(viz)viz.style.display='flex';
+  }catch(e){
+    toast(e.name==='NotAllowedError'?"Mic blocked — allow mic access and try again.":`Mic error: ${e.message||e}`);
+    leaveConference();
+  }
+}
+
+async function joinConference(callId){
+  if(activePc)return toast("End your current call first.");
+  if(_confCallId===callId)return;
+  if(_confCallId)return toast("Already in a conference call.");
+  stopRing();
+  try{
+    const stream=await navigator.mediaDevices.getUserMedia({audio:true});
+    activeStream=stream;
+    _confCallId=callId;_confPeers={};_confAudios={};_confHandRaised=false;_confProcessed={};
+    const snap=await fbDB.collection("conferences").doc(callId).get();
+    if(!snap.exists||snap.data().status==='ended'){toast("Conference has ended.");leaveConference();return;}
+    const conf=snap.data();
+    _confParticipants={...conf.participants||{}};
+    _confParticipants[ME.id]={muted:false,handRaised:false,joinedAt:Date.now()};
+    const F=firebase.firestore.FieldValue;
+    await fbDB.collection("conferences").doc(callId).update({
+      participantUids:F.arrayUnion(ME.id),
+      [`participants.${ME.id}`]:{muted:false,handRaised:false,joinedAt:Date.now()}
+    });
+    _openConfPanel('Conference active');
+    _preMusicVol=audio.volume||1;audio.volume=0.12;
+    startVoiceViz(stream);
+    const viz=document.getElementById('voiceViz');if(viz)viz.style.display='flex';
+    const existing=(conf.participantUids||[]).filter(uid=>uid!==ME.id);
+    for(const uid of existing) _makeConfOffer(callId,uid);
+    _listenConfUpdates(callId);
+  }catch(e){
+    toast(e.name==='NotAllowedError'?"Mic blocked.":`Error: ${e.message||e}`);
+    leaveConference();
+  }
+}
+
+async function _makeConfOffer(callId,remoteUid){
+  if(_confPeers[remoteUid])return;
+  const iceServers=await getICE();
+  const pc=new RTCPeerConnection({iceServers});
+  _confPeers[remoteUid]=pc;
+  if(activeStream) activeStream.getTracks().forEach(t=>pc.addTrack(t,activeStream));
+  pc.ontrack=e=>_attachConfAudio(remoteUid,(e.streams&&e.streams[0])||new MediaStream([e.track]));
+  pc.oniceconnectionstatechange=()=>{
+    if(pc.iceConnectionState==='failed'||pc.iceConnectionState==='closed')_cleanupConfPeer(remoteUid);
+    _updateConfPanel();
+  };
+  const pairKey=[ME.id,remoteUid].sort().join('___');
+  const buf=[];let docReady=false;
+  pc.onicecandidate=e=>{
+    if(!e.candidate)return;
+    const j=e.candidate.toJSON();
+    if(docReady) fbDB.collection("conferences").doc(callId).collection("signals").doc(pairKey)
+      .update({offerCandidates:firebase.firestore.FieldValue.arrayUnion(j)}).catch(()=>{});
+    else buf.push(j);
+  };
+  const offer=await pc.createOffer();
+  await pc.setLocalDescription(offer);
+  await fbDB.collection("conferences").doc(callId).collection("signals").doc(pairKey).set({
+    uids:[ME.id,remoteUid].sort(),offererUid:ME.id,
+    offer:{type:offer.type,sdp:offer.sdp},answer:null,
+    offerCandidates:[],answerCandidates:[]
+  });
+  docReady=true;
+  if(buf.length) fbDB.collection("conferences").doc(callId).collection("signals").doc(pairKey)
+    .update({offerCandidates:firebase.firestore.FieldValue.arrayUnion(...buf)}).catch(()=>{});
+  _updateConfPanel();
+}
+
+async function _answerConfOffer(callId,pairKey,sig){
+  const remoteUid=sig.offererUid;
+  if(_confPeers[remoteUid])return;
+  const iceServers=await getICE();
+  const pc=new RTCPeerConnection({iceServers});
+  _confPeers[remoteUid]=pc;
+  if(activeStream) activeStream.getTracks().forEach(t=>pc.addTrack(t,activeStream));
+  pc.ontrack=e=>_attachConfAudio(remoteUid,(e.streams&&e.streams[0])||new MediaStream([e.track]));
+  pc.oniceconnectionstatechange=()=>{
+    if(pc.iceConnectionState==='failed'||pc.iceConnectionState==='closed')_cleanupConfPeer(remoteUid);
+    _updateConfPanel();
+  };
+  const buf=[];let docReady=false;
+  pc.onicecandidate=e=>{
+    if(!e.candidate)return;
+    const j=e.candidate.toJSON();
+    if(docReady) fbDB.collection("conferences").doc(callId).collection("signals").doc(pairKey)
+      .update({answerCandidates:firebase.firestore.FieldValue.arrayUnion(j)}).catch(()=>{});
+    else buf.push(j);
+  };
+  await pc.setRemoteDescription(new RTCSessionDescription(sig.offer));
+  for(const c of(sig.offerCandidates||[])) await pc.addIceCandidate(new RTCIceCandidate(c)).catch(()=>{});
+  const answer=await pc.createAnswer();
+  await pc.setLocalDescription(answer);
+  await fbDB.collection("conferences").doc(callId).collection("signals").doc(pairKey)
+    .update({answer:{type:answer.type,sdp:answer.sdp}});
+  docReady=true;
+  if(buf.length) fbDB.collection("conferences").doc(callId).collection("signals").doc(pairKey)
+    .update({answerCandidates:firebase.firestore.FieldValue.arrayUnion(...buf)}).catch(()=>{});
+  _updateConfPanel();
+}
+
+function _attachConfAudio(uid,stream){
+  let au=_confAudios[uid];
+  if(!au){au=new Audio();au.autoplay=true;au.volume=1.0;document.body.appendChild(au);_confAudios[uid]=au;}
+  au.srcObject=stream;au.play().catch(()=>{});
+}
+
+function _cleanupConfPeer(uid){
+  if(_confPeers[uid]){try{_confPeers[uid].close();}catch(e){}delete _confPeers[uid];}
+  if(_confAudios[uid]){_confAudios[uid].srcObject=null;try{_confAudios[uid].remove();}catch(e){}delete _confAudios[uid];}
+}
+
+function _listenConfUpdates(callId){
+  if(_confCallUnsub){_confCallUnsub();_confCallUnsub=null;}
+  _confCallUnsub=fbDB.collection("conferences").doc(callId).onSnapshot(snap=>{
+    if(!snap.exists){leaveConference();return;}
+    const conf=snap.data();
+    if(conf.status==='ended'){leaveConference();return;}
+    _confParticipants=conf.participants||{};
+    _updateConfPanel();
+  },e=>console.warn("conf:",e.code));
+
+  if(_confSignalUnsub){_confSignalUnsub();_confSignalUnsub=null;}
+  _confSignalUnsub=fbDB.collection("conferences").doc(callId).collection("signals").onSnapshot(snap=>{
+    snap.docChanges().forEach(async ch=>{
+      if(ch.type==='removed')return;
+      const sig=ch.doc.data();const pairKey=ch.doc.id;
+      if(!(sig.uids||[]).includes(ME?.id))return;
+      if(sig.offererUid!==ME.id){
+        if(!sig.offer||_confPeers[sig.offererUid])return;
+        await _answerConfOffer(callId,pairKey,sig);
+      } else {
+        const otherUid=(sig.uids||[]).find(u=>u!==ME.id);
+        const pc=_confPeers[otherUid];if(!pc)return;
+        if(sig.answer&&!pc.currentRemoteDescription)
+          await pc.setRemoteDescription(new RTCSessionDescription(sig.answer)).catch(()=>{});
+        if(pc.currentRemoteDescription){
+          const already=_confProcessed['ac_'+pairKey]||0;
+          const fresh=(sig.answerCandidates||[]).slice(already);
+          for(const c of fresh) await pc.addIceCandidate(new RTCIceCandidate(c)).catch(()=>{});
+          _confProcessed['ac_'+pairKey]=(sig.answerCandidates||[]).length;
+        }
+      }
+    });
+  },e=>console.warn("conf signals:",e.code));
+}
+
+async function leaveConference(){
+  if(!_confCallId)return;
+  const callId=_confCallId;_confCallId=null;
+  Object.keys(_confPeers).forEach(uid=>_cleanupConfPeer(uid));
+  _confPeers={};_confAudios={};_confHandRaised=false;_confParticipants={};_confProcessed={};
+  if(_confCallUnsub){_confCallUnsub();_confCallUnsub=null;}
+  if(_confSignalUnsub){_confSignalUnsub();_confSignalUnsub=null;}
+  stopVoiceViz();
+  if(activeStream){activeStream.getTracks().forEach(t=>t.stop());activeStream=null;}
+  audio.volume=_preMusicVol;muted=false;
+  await fbDB.collection("conferences").doc(callId).update({
+    participantUids:firebase.firestore.FieldValue.arrayRemove(ME.id)
+  }).catch(()=>{});
+  const panel=document.getElementById('call-panel');
+  if(panel){panel.classList.remove('active');panel.innerHTML='';panel.style.left='';panel.style.top='';}
+}
+
+async function toggleCallHand(){
+  if(!_confCallId)return;
+  _confHandRaised=!_confHandRaised;
+  await fbDB.collection("conferences").doc(_confCallId).update({
+    [`participants.${ME.id}.handRaised`]:_confHandRaised
+  }).catch(()=>{});
+  const btn=document.getElementById('cpHandBtn');
+  if(btn)btn.classList.toggle('on',_confHandRaised);
+  _confParticipants[ME.id]={...(_confParticipants[ME.id]||{}),handRaised:_confHandRaised};
+  _updateConfPanel();
+}
+
+async function confMuteToggle(){
+  muted=!muted;
+  if(activeStream) activeStream.getAudioTracks().forEach(t=>t.enabled=!muted);
+  if(_confCallId){
+    _confParticipants[ME.id]={...(_confParticipants[ME.id]||{}),muted};
+    await fbDB.collection("conferences").doc(_confCallId).update({
+      [`participants.${ME.id}.muted`]:muted
+    }).catch(()=>{});
+    _updateConfPanel();
+  }
+  const btn=document.getElementById('cpMuteBtn');if(btn){btn.classList.toggle('on',muted);btn.textContent=muted?'🔇':'🎙️';}
+  const btn2=document.getElementById('muteBtn');if(btn2)btn2.textContent=muted?'🔇 Unmute':'🎙️ Mute';
+}
+
+function openCallInvite(){
+  if(!_confCallId&&!activeCallId)return;
+  const currentParts=_confCallId?Object.keys(_confParticipants):[];
+  const candidates=Object.values(CACHE.users||{}).filter(u=>u.id!==ME?.id&&!currentParts.includes(u.id)&&u.handle);
+  if(!candidates.length){toast("No users to invite.");return;}
+  openOverlay(`<div>
+    <div style="font-size:18px;font-weight:700;margin-bottom:14px">📞 Invite to call</div>
+    <div style="display:flex;flex-direction:column;gap:7px;max-height:300px;overflow-y:auto">
+      ${candidates.slice(0,20).map(u=>`
+        <div style="display:flex;align-items:center;gap:10px;padding:8px;border-radius:10px;background:var(--bg)">
+          <div class="avatar sm" style="${avatarStyle(u,36)}">${u.avatarImg?'':initials(u.name)}</div>
+          <div style="flex:1"><div style="font-weight:600;font-size:13px">${esc(u.name)}</div><div style="font-size:11px;color:var(--muted)">@${esc(u.handle)}</div></div>
+          <button class="btn sm primary" data-action="invitetoconf" data-uid="${u.id}">Invite</button>
+        </div>`).join('')}
+    </div>
+  </div>`);
+}
+
+async function inviteToCall(uid){
+  if(!_confCallId)return;
+  closeOverlay();
+  await fbDB.collection("conferences").doc(_confCallId).update({
+    invitedUids:firebase.firestore.FieldValue.arrayUnion(uid)
+  }).catch(()=>{});
+  fbDB.collection("notifications").add({
+    forUid:uid,type:"call_conference",fromUid:ME.id,fromName:ME.name,
+    callId:_confCallId,text:`📞 ${ME.name} invited you to a conference call`,time:Date.now(),read:false
+  }).catch(()=>{});
+  toast("Invite sent 📞");
+}
+
+function openConferenceDialog(){
+  if(!ME)return openEmailAuth();
+  const allUsers=Object.values(CACHE.users||{}).filter(u=>u.id!==ME.id&&u.handle);
+  if(!allUsers.length){toast("No users found.");return;}
+  openOverlay(`<div>
+    <div style="font-size:18px;font-weight:700;margin-bottom:4px">📞 Start conference call</div>
+    <div style="font-size:12px;color:var(--muted);margin-bottom:14px">Select people to invite (up to 8)</div>
+    <div id="confPickList" style="display:flex;flex-direction:column;gap:6px;max-height:280px;overflow-y:auto;margin-bottom:14px">
+      ${allUsers.slice(0,30).map(u=>`
+        <label style="display:flex;align-items:center;gap:10px;padding:7px 8px;border-radius:10px;background:var(--bg);cursor:pointer">
+          <input type="checkbox" value="${u.id}" style="accent-color:var(--orange);width:16px;height:16px;flex-shrink:0">
+          <div class="avatar sm" style="${avatarStyle(u,34)}">${u.avatarImg?'':initials(u.name)}</div>
+          <div><div style="font-weight:600;font-size:13px">${esc(u.name)}</div><div style="font-size:11px;color:var(--muted)">@${esc(u.handle)}</div></div>
+        </label>`).join('')}
+    </div>
+    <div style="display:flex;gap:10px">
+      <button class="btn block" data-action="close">Cancel</button>
+      <button class="btn block primary" data-action="beginconference">📞 Start call</button>
+    </div>
+  </div>`);
+}
+
+function beginConference(){
+  const checked=[...document.querySelectorAll('#confPickList input:checked')].map(i=>i.value);
+  if(!checked.length){toast("Select at least one person to call.");return;}
+  if(checked.length>8){toast("Conference calls support up to 8 participants.");return;}
+  closeOverlay();
+  startConference(checked);
+}
+
 function startListeners(){
   fbDB.collection("users").onSnapshot(s=>{ CACHE.users={}; s.forEach(d=>CACHE.users[d.id]={ id:d.id, ...d.data() }); scheduleRender(); }, e=>console.warn("users",e.code));
   fbDB.collection("tracks").onSnapshot(s=>{ CACHE.tracks=s.docs.map(d=>({ id:d.id, ...d.data() })); scheduleRender(); }, e=>console.warn("tracks",e.code));
@@ -5410,7 +5828,7 @@ fbAuth.onAuthStateChanged(async (user)=>{
   if(user){
     const prof=await loadProfile(user.uid);
     startAuthListeners(user.uid);
-    if(prof){ ME=prof; syncME(); startMyNotifications(); listenForIncomingCalls(); initPushNotifications(); render(); handleLoginSecurity(user.uid); initPresence(user.uid); E2EE.init(user.uid); checkLoginReward(user.uid); }
+    if(prof){ ME=prof; syncME(); startMyNotifications(); listenForIncomingCalls(); initPushNotifications(); render(); handleLoginSecurity(user.uid); initPresence(user.uid); E2EE.init(user.uid); checkLoginReward(user.uid); initCallPanel(); }
     else { ME={ id:user.uid, name:user.displayName||"" }; render(); }   // no profile yet → onboarding
   } else {
     if(_presenceInterval){clearInterval(_presenceInterval);_presenceInterval=null;}

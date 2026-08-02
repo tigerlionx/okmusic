@@ -949,3 +949,46 @@ body.has-page-bg .topbar{background:rgba(255,221,191,.45)}
 .printify-checkout-section{font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin:14px 0 10px;padding-top:12px;border-top:1px solid var(--line)}
 .printify-payment-note{background:var(--orange-1);border:1px solid rgba(251,122,40,.3);border-radius:12px;padding:12px 14px;font-size:13px;line-height:1.5;color:var(--fg)}
 .printify-payment-note b{color:var(--orange)}
+
+/* ── Floating Call Panel (v86) ───────────────────────────── */
+#call-panel{position:fixed;bottom:80px;right:16px;width:310px;background:var(--card);border:1px solid var(--border);border-radius:20px;box-shadow:0 10px 40px rgba(0,0,0,.28);z-index:9000;display:none;flex-direction:column;overflow:hidden;user-select:none;max-height:90vh;}
+#call-panel.active{display:flex;}
+.cp-drag{display:flex;align-items:center;gap:8px;padding:11px 14px 10px;cursor:grab;background:var(--orange);color:#fff;border-radius:20px 20px 0 0;flex-shrink:0;touch-action:none;}
+.cp-drag.dragging{cursor:grabbing;}
+.cp-drag-dots{font-size:13px;opacity:.6;flex-shrink:0;}
+.cp-title{font-weight:700;font-size:14px;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.cp-timer-txt{font-size:12px;font-weight:700;opacity:.9;font-variant-numeric:tabular-nums;flex-shrink:0;}
+.cp-body{padding:16px;flex:1;overflow-y:auto;}
+/* Override the dark-overlay styles when call UI lives in the floating panel */
+#call-panel .call-name{color:var(--text);font-size:17px;margin-bottom:4px;}
+#call-panel .call-status{font-size:12px;color:var(--muted);margin-bottom:8px;min-height:auto;}
+#call-panel .call-timer{color:var(--text);font-size:20px;margin:6px 0 10px;letter-spacing:1px;}
+#call-panel .call-btns{margin-top:8px;gap:14px;}
+#call-panel .call-btn-accept,#call-panel .call-btn-mute,#call-panel .call-btn-end{width:52px;height:52px;font-size:20px;}
+#call-panel .call-avatar-wrap{width:80px;height:80px;margin:0 auto 12px;}
+#call-panel .call-avatar-wrap .avatar{width:80px;height:80px;font-size:30px;}
+#call-panel .voice-viz{max-width:none;width:100%;background:var(--bg);margin:6px 0 10px;border-radius:12px;padding:10px 12px;}
+#call-panel .vv-lbl{color:var(--muted);}
+#call-panel .vv-bar{background:rgba(39,174,96,.15);}
+#call-panel .vv-bar.lit{background:#27ae60;}
+#call-panel .vv-bar.vv-r{background:rgba(52,152,219,.15);}
+#call-panel .vv-bar.vv-r.lit{background:#3498db;}
+#call-panel .vv-mid{color:var(--muted);}
+#call-panel .mic-test-btn{background:var(--bg);color:var(--muted);border-color:var(--border);margin:0 auto 10px;display:flex;}
+/* Conference-specific */
+.cp-conf-status{font-size:12px;color:var(--muted);text-align:center;margin-bottom:8px;}
+.cp-participants{display:flex;flex-direction:column;gap:5px;margin-bottom:10px;max-height:190px;overflow-y:auto;}
+.cp-participant{display:flex;align-items:center;gap:8px;padding:6px 10px;border-radius:10px;background:var(--bg);}
+.cp-p-av{width:32px;height:32px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;color:#fff;flex-shrink:0;background-size:cover;background-position:center;}
+.cp-p-name{flex:1;font-size:13px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text);}
+.cp-p-icons{display:flex;gap:3px;align-items:center;flex-shrink:0;}
+.cp-p-hand{font-size:14px;animation:cpHandWave .6s ease infinite alternate;}
+@keyframes cpHandWave{from{transform:rotate(-12deg);}to{transform:rotate(12deg);}}
+.cp-conf-controls{display:flex;justify-content:center;gap:10px;padding:8px 0 2px;}
+.cp-cbtn{width:46px;height:46px;border-radius:50%;border:1px solid var(--border);background:var(--bg);cursor:pointer;font-size:18px;display:flex;align-items:center;justify-content:center;transition:background .15s,transform .1s;color:var(--text);}
+.cp-cbtn:hover{background:var(--border);}
+.cp-cbtn:active{transform:scale(.91);}
+.cp-cbtn.on{background:var(--orange);border-color:var(--orange);}
+.cp-cbtn.cp-cend{background:#e74c3c;border-color:#e74c3c;color:#fff;}
+.cp-cbtn.cp-cend:hover{background:#c0392b;}
+@media(max-width:420px){#call-panel{width:calc(100vw - 24px);right:12px;bottom:72px;}}
