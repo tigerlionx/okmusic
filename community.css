@@ -1008,6 +1008,7 @@ body.has-page-bg .topbar{background:rgba(255,221,191,.45)}
 .live-card-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;}
 .live-badge{background:#e74c3c;color:#fff;font-size:10px;font-weight:800;letter-spacing:.08em;padding:3px 8px;border-radius:20px;animation:livePulse 1.8s ease infinite;}
 @keyframes livePulse{0%,100%{opacity:1;}50%{opacity:.6;}}
+.profile-live-badge{position:absolute;bottom:-4px;left:50%;transform:translateX(-50%);background:#e74c3c;color:#fff;font-size:10px;font-weight:800;padding:2px 10px;border-radius:20px;white-space:nowrap;cursor:pointer;animation:livePulse 1.8s ease infinite;box-shadow:0 2px 8px rgba(231,76,60,.5);}
 .live-card-title{font-weight:700;font-size:14px;margin-bottom:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 .live-card-host{font-size:12px;color:var(--muted);margin-bottom:6px;}
 .live-card-viewers{font-size:12px;color:var(--muted);}

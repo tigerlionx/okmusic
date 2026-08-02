@@ -252,6 +252,17 @@ function userFollowerCount(uid){ let n=0; for(const f in CACHE.userFollows) if(C
 function followersOfUser(uid){ const r=[]; for(const f in CACHE.userFollows){ if(CACHE.userFollows[f].includes(uid)) r.push(f); } return r; }
 // isFanOf: ME is an accepted fan of uid (ME is in uid's followersOf list)
 function isFanOf(uid){ return ME&&followersOf(uid).includes(ME.id); }
+// Live stream helpers
+function isCreatorLive(uid){ return (CACHE.liveStreams||[]).some(s=>s.hostUid===uid); }
+function getCreatorStream(uid){ return (CACHE.liveStreams||[]).find(s=>s.hostUid===uid)||null; }
+function isLiveNotifyEnabled(creatorUid){ return ME&&((CACHE.liveNotify||{})[ME.id]||[]).includes(creatorUid); }
+async function toggleLiveNotify(creatorUid){
+  if(!ME){openEmailAuth();return;}
+  const F=firebase.firestore.FieldValue;
+  const on=isLiveNotifyEnabled(creatorUid);
+  await fbDB.collection('userFollows').doc(ME.id).set({liveNotify:F[on?'arrayRemove':'arrayUnion'](creatorUid)},{merge:true});
+  toast(on?"Live notifications off":"🔔 You'll be notified when they go live");
+}
 // hasPendingFanRequest: ME sent a fan request to uid (not yet accepted)
 function hasPendingFanRequestTo(uid){ return (CACHE.fanRequestsSent||[]).some(r=>r.toUid===uid&&r.status==='pending'); }
 function likeCount(t){ return (SEED_STATS[t]?.likes||0)+((CACHE.reactions["t_"+t]?.likes||[]).length); }
@@ -275,7 +286,7 @@ let toastTimer; function toast(m){ const e=$("toast"); e.textContent=m; e.hidden
 // ---------- state ----------
 let ME=null;                                   // the signed-in user's profile (Firebase)
 // live shared data, kept in sync by Firestore listeners
-const CACHE={ users:{}, tracks:[], statuses:[], follows:{}, userFollows:{}, reactions:{}, comments:[], notifications:[], products:[], sellers:{}, orders:[], convos:{}, suggestions:[], followRequests:[], fanRequestsSent:[], wallet:null, walletTxs:[], contests:[], discoveryPosts:[], customCategories:[], fxRates:{} };
+const CACHE={ users:{}, tracks:[], statuses:[], follows:{}, userFollows:{}, liveNotify:{}, reactions:{}, comments:[], notifications:[], products:[], sellers:{}, orders:[], convos:{}, suggestions:[], followRequests:[], fanRequestsSent:[], wallet:null, walletTxs:[], contests:[], discoveryPosts:[], customCategories:[], fxRates:{} };
 let state={ view:"discover", profileId:null, query:"", cart:JSON.parse(localStorage.getItem("okmusic_cart")||"[]"), openFolders:new Set(), streamId:null };
 function persistCart(){ try{ localStorage.setItem("okmusic_cart",JSON.stringify(state.cart||[])); }catch(e){} }
 let playMode="continuous"; // "continuous" | "repeat" | "shuffle"
@@ -729,9 +740,42 @@ function renderDiscover(){
   // Discovery feed posts
   const discPosts=(CACHE.discoveryPosts||[]).filter(p=>!blockedList.includes(p.userId));
 
+  const liveStreams=(CACHE.liveStreams||[]).filter(s=>s.status==='live');
+  const liveSorted=liveStreams.slice().sort((a,b)=>{
+    const af=ME&&(isFollowing(a.hostUid)||isFollowingUser(a.hostUid))?1:0;
+    const bf=ME&&(isFollowing(b.hostUid)||isFollowingUser(b.hostUid))?1:0;
+    if(bf!==af) return bf-af;
+    return (b.viewerCount||0)-(a.viewerCount||0);
+  });
+  let liveSection='';
+  if(liveSorted.length){
+    const sid='_live_'; const open=state.openFolders.has(sid);
+    const liveRows=liveSorted.map(s=>{
+      const host=userById(s.hostUid)||{name:s.hostName||'?',id:s.hostUid,color:'#e74c3c'};
+      return `<div class="mf-track" data-action="joinstream" data-id="${s.id}" style="cursor:pointer">
+        <div class="mf-art" style="${avatarStyle(host,36)};border-radius:50%">${host.avatarImg?'':initials(host.name)}</div>
+        <div class="mf-info">
+          <div class="mf-title">${esc(s.title||'Live Stream')}</div>
+          <div class="mf-artist">${esc(host.name)}</div>
+        </div>
+        <span class="live-badge" style="flex-shrink:0;font-size:9px;padding:2px 7px">LIVE</span>
+        <span class="mf-plays">👁 ${s.viewerCount||0}</span>
+      </div>`;
+    }).join('');
+    liveSection=`<div class="music-folder${open?' open':''}" id="mfolder-${sid}" style="border-left:3px solid #e74c3c;margin-bottom:8px">
+      <div class="music-folder-hd" data-action="togglefolder" data-genre="${sid}">
+        <span class="mf-arrow" id="mfarrow-${sid}">${open?'▼':'▶'}</span>
+        <span class="mf-icon">📡</span>
+        <span class="mf-name" style="color:#e74c3c">Live Now</span>
+        <span class="live-badge" style="font-size:9px;padding:2px 7px;animation:none">${liveSorted.length}</span>
+      </div>
+      <div class="music-folder-body" id="mfbody-${sid}" style="display:${open?'block':'none'}">${liveRows}</div>
+    </div>`;
+  }
   $('page').innerHTML=`<div class="h-title">Discover</div>
     <div class="discover-layout">
       <div class="discover-music">
+        ${liveSection}
         <div class="col-h" style="margin-top:0">🎵 Music Library</div>
         ${artistSec}
         ${foldersHtml||'<div class="empty" style="padding:20px 0">No tracks found'+(q?` for "${esc(state.query)}"`:' yet')+'.</div>'}
@@ -996,13 +1040,16 @@ function renderProfile(uid){
     : `${fanBtn} ${followBtn}
        ${!blocked&&canMessage(uid)?`<button class="btn" data-action="openchat" data-uid="${uid}">💬 Message</button>`:''}
        ${!blocked?`<button class="btn" data-action="sendlnc" data-uid="${uid}">🦁 Send LNC</button>`:''}
+       ${!blocked&&ME&&(isFollowing(uid)||isFollowingUser(uid))?`<button class="btn${isLiveNotifyEnabled(uid)?' active':''}" data-action="togglelivenotify" data-uid="${uid}" style="${isLiveNotifyEnabled(uid)?'background:#e74c3c;color:#fff;border-color:#e74c3c':''}" title="${isLiveNotifyEnabled(uid)?'Live notifications on — tap to turn off':'Notify me when live'}">${isLiveNotifyEnabled(uid)?'🔔 Notified':'🔕 Notify live'}</button>`:''}
        <button class="btn" data-action="blockuser" data-uid="${uid}" style="${blocked?'background:#e2554f;color:#fff;border-color:#e2554f':''}">${blocked?'🚫 Blocked':'🚫 Block'}</button>
        <button class="btn" data-action="reportuser" data-uid="${uid}">⚑ Report</button>`;
 
   // Profile header (always shown)
+  const _liveStreamForProfile=getCreatorStream(uid);
+  const _liveOverlay=_liveStreamForProfile?`<div class="profile-live-badge" data-action="joinstream" data-id="${_liveStreamForProfile.id}">🔴 LIVE</div>`:'';
   const profileHead=`
     <div class="profile-cover" style="${cover}"></div>
-    <div class="profile-head"><div class="profile-avatar" style="${avatarStyle(u,104)};cursor:pointer" data-action="viewavatar" data-uid="${uid}">${u.avatarImg?'':initials(u.name)}</div>
+    <div class="profile-head"><div style="position:relative;display:inline-block"><div class="profile-avatar" style="${avatarStyle(u,104)};cursor:pointer" data-action="viewavatar" data-uid="${uid}">${u.avatarImg?'':initials(u.name)}</div>${_liveOverlay}</div>
       <div class="profile-info"><div class="profile-name">${esc(u.name)} ${u.founder?'<span class="badge-founder">FOUNDER</span>':''}</div><div class="profile-handle">@${esc(u.handle)}</div></div></div>
     <div class="profile-stats">
       <div><b>${standaloneTracks.length+pls.reduce((n,p)=>n+p.files.length,0)}</b> <span>tracks</span></div>
@@ -2826,17 +2873,29 @@ function renderFans(){
         <button class="btn sm" data-action="rejectfollow" data-fromuid="${r.fromUid}" data-reqid="${r.id}">Decline</button>
       </div>`}).join(""):'<div class="empty">No pending fan requests.</div>';
   } else if(tab==="fanof"){
-    content=fanOf.length?fanOf.map(u=>`<div class="mrow2">
-      <div class="avatar" style="${avatarStyle(u,44)};cursor:pointer" data-action="viewavatar" data-uid="${u.id}">${u.avatarImg?'':initials(u.name)}</div>
-      <div class="minfo"><div class="mt" data-action="profile" data-uid="${u.id}">${esc(u.name)}</div><div class="ms">@${esc(u.handle)} · ${nfmt(followerCount(u.id))} fans</div></div>
-      <button class="btn sm" style="color:#e2554f;border-color:#e2554f" data-action="unfanself" data-uid="${u.id}">Un-fan</button>
-    </div>`).join(""):'<div class="empty">You\'re not a fan of anyone yet. Visit profiles and become a fan to access their full content.</div>';
+    content=fanOf.length?fanOf.map(u=>{
+      const ls=getCreatorStream(u.id);
+      const liveBadge=ls?`<span class="live-badge" data-action="joinstream" data-id="${ls.id}" style="font-size:9px;padding:2px 7px;cursor:pointer;flex-shrink:0">LIVE</span>`:'';
+      const notifyOn=isLiveNotifyEnabled(u.id);
+      return `<div class="mrow2">
+        <div class="avatar" style="${avatarStyle(u,44)};cursor:pointer" data-action="viewavatar" data-uid="${u.id}">${u.avatarImg?'':initials(u.name)}</div>
+        <div class="minfo"><div class="mt" data-action="profile" data-uid="${u.id}">${esc(u.name)} ${liveBadge}</div><div class="ms">@${esc(u.handle)} · ${nfmt(followerCount(u.id))} fans</div></div>
+        <button class="btn sm" data-action="togglelivenotify" data-uid="${u.id}" title="${notifyOn?'Live notifications on':'Notify when live'}" style="${notifyOn?'background:#e74c3c;color:#fff;border-color:#e74c3c;flex-shrink:0':'flex-shrink:0'}">${notifyOn?'🔔':'🔕'}</button>
+        <button class="btn sm" style="color:#e2554f;border-color:#e2554f;flex-shrink:0" data-action="unfanself" data-uid="${u.id}">Un-fan</button>
+      </div>`;
+    }).join(""):'<div class="empty">You\'re not a fan of anyone yet. Visit profiles and become a fan to access their full content.</div>';
   } else if(tab==="following"){
-    content=following.length?following.map(u=>`<div class="mrow2">
-      <div class="avatar" style="${avatarStyle(u,44)};cursor:pointer" data-action="viewavatar" data-uid="${u.id}">${u.avatarImg?'':initials(u.name)}</div>
-      <div class="minfo"><div class="mt" data-action="profile" data-uid="${u.id}">${esc(u.name)}</div><div class="ms">@${esc(u.handle)}</div></div>
-      <button class="btn sm" data-action="unfollowuser" data-uid="${u.id}">Unfollow</button>
-    </div>`).join(""):'<div class="empty">You\'re not following anyone yet. Visit profiles and tap Follow to get updates when they post.</div>';
+    content=following.length?following.map(u=>{
+      const ls=getCreatorStream(u.id);
+      const liveBadge=ls?`<span class="live-badge" data-action="joinstream" data-id="${ls.id}" style="font-size:9px;padding:2px 7px;cursor:pointer;flex-shrink:0">LIVE</span>`:'';
+      const notifyOn=isLiveNotifyEnabled(u.id);
+      return `<div class="mrow2">
+        <div class="avatar" style="${avatarStyle(u,44)};cursor:pointer" data-action="viewavatar" data-uid="${u.id}">${u.avatarImg?'':initials(u.name)}</div>
+        <div class="minfo"><div class="mt" data-action="profile" data-uid="${u.id}">${esc(u.name)} ${liveBadge}</div><div class="ms">@${esc(u.handle)}</div></div>
+        <button class="btn sm" data-action="togglelivenotify" data-uid="${u.id}" title="${notifyOn?'Live notifications on':'Notify when live'}" style="${notifyOn?'background:#e74c3c;color:#fff;border-color:#e74c3c;flex-shrink:0':'flex-shrink:0'}">${notifyOn?'🔔':'🔕'}</button>
+        <button class="btn sm" data-action="unfollowuser" data-uid="${u.id}" style="flex-shrink:0">Unfollow</button>
+      </div>`;
+    }).join(""):'<div class="empty">You\'re not following anyone yet. Visit profiles and tap Follow to get updates when they post.</div>';
   } else {
     content=followers.length?followers.map(u=>`<div class="mrow2">
       <div class="avatar" style="${avatarStyle(u,44)};cursor:pointer" data-action="viewavatar" data-uid="${u.id}">${u.avatarImg?'':initials(u.name)}</div>
@@ -3002,7 +3061,8 @@ function renderNotifs(){
       const isPlatform=n.fromUid==="platform";
       const isMsg=n.type==="message";
       const isFanReq=n.type==="fan_request"||n.type==="followrequest";
-      const action=isPlatform?`data-action="showguide"`:isMsg?`data-action="openchat" data-uid="${n.fromUid}"`:isFanReq?`data-action="fantab" data-t="requests"` :`data-action="profile" data-uid="${n.fromUid}"`;
+      const isLiveNotif=n.type==="creator_live";
+      const action=isPlatform?`data-action="showguide"`:isMsg?`data-action="openchat" data-uid="${n.fromUid}"`:isFanReq?`data-action="fantab" data-t="requests"`:isLiveNotif?`data-action="joinstream" data-id="${n.streamId||''}"` :`data-action="profile" data-uid="${n.fromUid}"`;
       const av=isPlatform
         ?`<div class="avatar" style="width:42px;height:42px;font-size:20px;background:var(--orange);flex-shrink:0;border-radius:50%;display:grid;place-items:center;color:#fff">◎</div>`
         :`<div class="avatar" style="${avatarStyle(userById(n.fromUid)||{color:'#FB7A28'},42)}">${(userById(n.fromUid)?.avatarImg)?'':initials(n.fromName||'?')}</div>`;
@@ -4571,7 +4631,7 @@ document.addEventListener("click",e=>{
     deletemsgmenu:()=>deleteMsgMenu(el.dataset.msgid,el.dataset.cid),
     deletemsgall:()=>deleteMsgForAll(el.dataset.msgid,el.dataset.cid),
     deletemsgme:()=>deleteMsgForMe(el.dataset.msgid,el.dataset.cid),
-    startcall:()=>startCall(el.dataset.uid), testmic:testMic,
+    startcall:()=>startCall(el.dataset.uid, el.dataset.type||'audio'), startvideocall:()=>startCall(el.dataset.uid,'video'), switchcallvideo:()=>switchCallVideo(), testmic:testMic,
     acceptcall:()=>acceptCall(el.dataset.uid),
     mutecall:muteCall,
     togglecamera:toggleCamera,
@@ -4590,7 +4650,8 @@ document.addEventListener("click",e=>{
     startstream:startLiveStream,
     endstream:stopLiveStream,
     leavestream:()=>{ leaveLiveStream(); state.view='live'; renderApp(); },
-    joinstream:()=>{ if(!ME)return openEmailAuth(); state.view='livestream';state.streamId=el.dataset.id;renderApp(); },
+    togglelivenotify:async()=>{ await toggleLiveNotify(el.dataset.uid); renderApp(); },
+    joinstream:()=>{ if(!ME)return openEmailAuth(); const sid=el.dataset.id; const ls=(CACHE.liveStreams||[]).find(s=>s.id===sid); if(!ls){toast("This stream has ended.");return;} state.view='livestream';state.streamId=sid;renderApp(); },
     togglestreammute:toggleStreamMute,
     togglestreamcam:toggleStreamCam,
     sendstreamchat:()=>sendStreamChat(el.dataset.sid),
@@ -4936,7 +4997,8 @@ function openChat(uid){
         <span style="font-size:11px;color:${statusColor};margin-left:6px">${statusLabel}</span>
       </div>
       <span title="End-to-end encrypted" style="font-size:16px;opacity:.6;flex-shrink:0">🔒</span>
-      <button class="btn sm" data-action="startcall" data-uid="${uid}" title="Voice call" style="flex-shrink:0">📞</button>
+      <button class="btn sm" data-action="startcall" data-uid="${uid}" data-type="audio" title="Voice call" style="flex-shrink:0">📞</button>
+      <button class="btn sm" data-action="startcall" data-uid="${uid}" data-type="video" title="Video call" style="flex-shrink:0">📹</button>
       <button class="btn sm" data-action="startconference" title="Conference call" style="flex-shrink:0">👥📞</button>
     </div>
     <div class="chat-msgs" id="chatMsgs"></div>
@@ -5111,23 +5173,66 @@ async function deleteMsgForMe(msgId,cid){
   catch(e){ toast("Couldn't delete: "+(e.code||e.message)); }
 }
 
-// ---- VOICE CALLS ----
-function startCall(uid){
+// ---- VOICE / VIDEO CALLS ----
+let _callType='audio'; // 'audio' | 'video' — chosen at call start
+let _callHasVideo=false; // true once a real video track is live in the RTCPeerConnection
+let _videoSender=null;   // RTCRtpSender for the video track (so we can replaceTrack without renegotiating)
+
+function createBlackVideoTrack(){
+  const canvas=document.createElement('canvas'); canvas.width=320; canvas.height=240;
+  const ctx=canvas.getContext('2d'); ctx.fillStyle='#000'; ctx.fillRect(0,0,320,240);
+  const stream=canvas.captureStream(5); return stream.getVideoTracks()[0];
+}
+
+function startCall(uid, type){
+  type=type||'audio';
   if(!navigator.mediaDevices)return toast("Microphone not available on this device.");
   if(activePc)return toast("Already in a call.");
   if(!canCall(uid)){ toast("This user has restricted who can call them."); return; }
-  openCallUI(uid,"outgoing");
+  _callType=type; _callHasVideo=false; _videoSender=null;
+  openCallUI(uid,"outgoing",type);
 }
 
-function openCallUI(uid,mode){
+async function switchCallVideo(){
+  if(!activePc)return;
+  if(!_callHasVideo){
+    try{
+      const vs=await navigator.mediaDevices.getUserMedia({video:true});
+      const vt=vs.getVideoTracks()[0]; if(!vt){toast("Camera not available");return;}
+      activeStream.addTrack(vt);
+      if(_videoSender) await _videoSender.replaceTrack(vt);
+      else _videoSender=activePc.addTrack(vt,activeStream);
+      _callHasVideo=true; _cameraOff=false;
+      const lv=$("localVideo"); if(lv){lv.srcObject=activeStream;lv.play().catch(()=>{});}
+      const va=$("callVideoArea"); if(va)va.style.display='';
+      const aw=$("callAvatarWrap"); if(aw)aw.style.display='none';
+      const cb=$("camBtn"); if(cb){cb.style.display='flex';cb.textContent='📷';}
+      const sb=$("switchVideoBtn"); if(sb)sb.textContent='📞 Voice only';
+      toast("📹 Camera on");
+    }catch(e){toast("Camera error: "+(e.message||e));}
+  } else {
+    if(_videoSender) await _videoSender.replaceTrack(createBlackVideoTrack()).catch(()=>{});
+    activeStream.getVideoTracks().forEach(t=>{t.stop();});
+    _callHasVideo=false; _cameraOff=true;
+    const va=$("callVideoArea"); if(va)va.style.display='none';
+    const aw=$("callAvatarWrap"); if(aw)aw.style.display='';
+    const cb=$("camBtn"); if(cb)cb.style.display='none';
+    const sb=$("switchVideoBtn"); if(sb)sb.textContent='📹 Add video';
+    toast("📞 Voice only");
+  }
+}
+
+function openCallUI(uid,mode,callTypeOverride){
+  const callTypeLocal=callTypeOverride||_callType||'audio';
   const other=userById(uid)||{name:"Someone",color:"#888"};
   const pulse=mode==="incoming"||mode==="outgoing";
   const panel=document.getElementById('call-panel');
   if(!panel)return;
+  const modeLabel=callTypeLocal==='video'?'📹 Video call':'📞 Voice call';
   panel.innerHTML=`
     <div class="cp-drag" id="cpDrag">
       <span class="cp-drag-dots">⠿</span>
-      <span class="cp-title">📞 ${esc(other.name)}</span>
+      <span class="cp-title">${modeLabel} · ${esc(other.name)}</span>
       <span class="cp-timer-txt" id="callTimer" style="display:none"></span>
     </div>
     <div class="cp-body">
@@ -5157,6 +5262,7 @@ function openCallUI(uid,mode){
         ${mode==="incoming"?`<button class="call-btn-accept" data-action="acceptcall" data-uid="${uid}" title="Answer">📞</button>`:''}
         <button class="call-btn-mute" id="muteBtn" data-action="mutecall" title="Mute">🎙️</button>
         <button class="cp-cbtn" id="camBtn" data-action="togglecamera" title="Toggle camera" style="display:none;width:44px;height:44px;font-size:17px">📷</button>
+        <button class="cp-cbtn" id="switchVideoBtn" data-action="switchcallvideo" title="Switch audio/video" style="width:auto;padding:0 10px;height:44px;font-size:13px">${callTypeLocal==='video'?'📞 Voice only':'📹 Add video'}</button>
         <button class="call-btn-end" data-action="endcall" title="${mode==="incoming"?"Decline":"End call"}">📵</button>
       </div>
     </div>`;
@@ -5165,18 +5271,23 @@ function openCallUI(uid,mode){
   try{const _ac=new(window.AudioContext||window.webkitAudioContext)();_ac.resume().catch(()=>{});}catch(e){}
   _preMusicVol=audio.volume||1; audio.volume=0.12;
   if(mode==="incoming") playRing();
-  if(mode==="outgoing") initiateCall(uid);
+  if(mode==="outgoing") initiateCall(uid, callTypeLocal);
 }
 
-async function initiateCall(uid){
+async function initiateCall(uid, callType){
+  callType=callType||_callType||'audio';
   const cid=[ME.id,uid].sort().join("_")+"_c"+Date.now();activeCallId=cid;
   let _remoteHasVideo=false;
   try{
     let stream;
-    try{ stream=await navigator.mediaDevices.getUserMedia({audio:true,video:true}); _cameraOff=false; }
-    catch(e){ stream=await navigator.mediaDevices.getUserMedia({audio:true}); _cameraOff=true; }
+    if(callType==='video'){
+      try{ stream=await navigator.mediaDevices.getUserMedia({audio:true,video:true}); _cameraOff=false; _callHasVideo=true; }
+      catch(e){ stream=await navigator.mediaDevices.getUserMedia({audio:true}); _cameraOff=true; _callHasVideo=false; }
+    } else {
+      stream=await navigator.mediaDevices.getUserMedia({audio:true}); _cameraOff=true; _callHasVideo=false;
+    }
     activeStream=stream;
-    if(!_cameraOff){
+    if(!_cameraOff&&_callHasVideo){
       const lv=$("localVideo");if(lv){lv.srcObject=stream;lv.play().catch(()=>{});}
       const va=$("callVideoArea");if(va)va.style.display='';
       const aw=$("callAvatarWrap");if(aw)aw.style.display='none';
@@ -5239,8 +5350,11 @@ async function initiateCall(uid){
     const offer=await pc.createOffer();
     await pc.setLocalDescription(offer); // <-- gathering starts here
 
+    // Track the video sender so we can replaceTrack without renegotiating
+    _videoSender=activePc.getSenders().find(s=>s.track&&s.track.kind==='video')||null;
     await fbDB.collection("calls").doc(cid).set({
       callerId:ME.id,calleeId:uid,
+      callType:callType||'audio',
       offer:{type:offer.type,sdp:offer.sdp},
       callerCandidates:[],calleeCandidates:[],
       status:"ringing",time:Date.now()
@@ -5278,15 +5392,20 @@ async function acceptCall(uid){
     .orderBy("time","desc").limit(1).get().catch(()=>null);
   if(!snap||snap.empty){toast("Call already ended.");$("overlay").hidden=true;$("overlayBody").innerHTML="";return;}
   const doc=snap.docs[0];const d=doc.data();const cid=doc.id;activeCallId=cid;
+  const incomingCallType=d.callType||'audio'; _callType=incomingCallType; _callHasVideo=false; _videoSender=null;
   let _remoteHasVideo=false;
   try{
     // Stop any test-mic stream before getting a fresh one for the actual call
     if(_testMicStream){_testMicStream.getTracks().forEach(t=>t.stop());_testMicStream=null;}
     let stream;
-    try{ stream=await navigator.mediaDevices.getUserMedia({audio:true,video:true}); _cameraOff=false; }
-    catch(e){ stream=await navigator.mediaDevices.getUserMedia({audio:true}); _cameraOff=true; }
+    if(incomingCallType==='video'){
+      try{ stream=await navigator.mediaDevices.getUserMedia({audio:true,video:true}); _cameraOff=false; _callHasVideo=true; }
+      catch(e){ stream=await navigator.mediaDevices.getUserMedia({audio:true}); _cameraOff=true; _callHasVideo=false; }
+    } else {
+      stream=await navigator.mediaDevices.getUserMedia({audio:true}); _cameraOff=true; _callHasVideo=false;
+    }
     activeStream=stream;
-    if(!_cameraOff){
+    if(!_cameraOff&&_callHasVideo){
       const lv=$("localVideo");if(lv){lv.srcObject=stream;lv.play().catch(()=>{});}
       const va=$("callVideoArea");if(va)va.style.display='';
       const aw=$("callAvatarWrap");if(aw)aw.style.display='none';
@@ -5346,6 +5465,9 @@ async function acceptCall(uid){
       if(docReady) fbDB.collection("calls").doc(cid).update({calleeCandidates:firebase.firestore.FieldValue.arrayUnion(j)}).catch(()=>{});
       else buf.push(j);
     };
+
+    // Track video sender for mid-call switching
+    _videoSender=pc.getSenders().find(s=>s.track&&s.track.kind==='video')||null;
 
     await pc.setRemoteDescription(new RTCSessionDescription(d.offer));
     const answer=await pc.createAnswer();
@@ -5423,7 +5545,8 @@ function listenForIncomingCalls(){
           if(d.status==="ringing"&&fresh){
             // Show OS-level notification so user sees the ring even in a different app
             showCallBrowserNotif(d.callerId);
-            openCallUI(d.callerId,"incoming");
+            _callType=d.callType||'audio'; _callHasVideo=false; _videoSender=null;
+            openCallUI(d.callerId,"incoming",d.callType||'audio');
           }
         }
       });
@@ -6129,7 +6252,7 @@ function startListeners(){
   fbDB.collection("tracks").onSnapshot(s=>{ CACHE.tracks=s.docs.map(d=>({ id:d.id, ...d.data() })); scheduleRender(); }, e=>console.warn("tracks",e.code));
   fbDB.collection("statuses").onSnapshot(s=>{ CACHE.statuses=s.docs.map(d=>({ id:d.id, ...d.data() })); scheduleRender(); }, e=>console.warn("statuses",e.code));
   fbDB.collection("follows").onSnapshot(s=>{ CACHE.follows={}; s.forEach(d=>CACHE.follows[d.id]=(d.data().following||[])); scheduleRender(); }, e=>console.warn("follows",e.code));
-  fbDB.collection("userFollows").onSnapshot(s=>{ CACHE.userFollows={}; s.forEach(d=>CACHE.userFollows[d.id]=(d.data().list||[])); scheduleRender(); }, e=>console.warn("userFollows",e.code));
+  fbDB.collection("userFollows").onSnapshot(s=>{ CACHE.userFollows={}; CACHE.liveNotify={}; s.forEach(d=>{ const dat=d.data(); CACHE.userFollows[d.id]=(dat.list||[]); CACHE.liveNotify[d.id]=(dat.liveNotify||[]); }); scheduleRender(); }, e=>console.warn("userFollows",e.code));
   fbDB.collection("reactions").onSnapshot(s=>{ CACHE.reactions={}; s.forEach(d=>CACHE.reactions[d.id]=d.data()); scheduleRender(); }, e=>console.warn("reactions",e.code));
   fbDB.collection("comments").onSnapshot(s=>{ CACHE.comments=s.docs.map(d=>({ id:d.id, ...d.data() })); scheduleRender(); }, e=>console.warn("comments",e.code));
   fbDB.collection("products").onSnapshot(s=>{ CACHE.products=s.docs.map(d=>({ id:d.id, ...d.data() })).sort((a,b)=>b.createdAt-a.createdAt); scheduleRender(); }, e=>console.warn("products",e.code));
