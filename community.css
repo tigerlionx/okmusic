@@ -375,9 +375,20 @@ body.has-page-bg .topbar{background:rgba(255,221,191,.45)}
 /* ===== MARKETPLACE ===== */
 .mp-store-header{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-bottom:18px;padding:12px 16px;background:var(--orange-1);border-radius:12px;font-size:14px}
 .mp-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:16px}
-.mp-card{background:#fff;border-radius:16px;overflow:hidden;box-shadow:0 2px 10px rgba(180,120,60,.10);transition:transform .15s}
+.mp-card{background:#fff;border-radius:16px;overflow:hidden;box-shadow:0 2px 10px rgba(180,120,60,.10);transition:transform .15s;position:relative}
 .mp-card:hover{transform:translateY(-2px)}
-.mp-photo{height:160px;display:flex;align-items:center;justify-content:center;font-size:40px;cursor:pointer;background:var(--orange-1)}
+.mp-card-sponsored{box-shadow:0 2px 16px rgba(251,122,40,.28),0 0 0 2px var(--orange)}
+.mp-photo{height:160px;display:flex;align-items:center;justify-content:center;font-size:40px;cursor:pointer;background:var(--orange-1);position:relative}
+.mp-sponsored-overlay{position:absolute;top:8px;left:8px;background:rgba(251,122,40,.92);color:#fff;font-size:9px;font-weight:800;letter-spacing:.5px;text-transform:uppercase;padding:2px 7px;border-radius:4px;pointer-events:none}
+/* Promotion dialog */
+.promo-plans{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin-top:4px}
+.promo-plan-card{border:2px solid var(--border);border-radius:14px;padding:16px 12px;text-align:center;cursor:pointer;transition:all .15s;background:var(--card)}
+.promo-plan-card:hover:not(.promo-disabled){border-color:var(--orange);background:var(--orange-1)}
+.promo-plan-card.promo-disabled{opacity:.5;cursor:default}
+.promo-plan-days{font-size:15px;font-weight:700;color:var(--fg)}
+.promo-plan-price{font-size:19px;font-weight:800;color:var(--orange);margin-top:4px}
+.promo-plan-note{font-size:11px;color:#e2554f;margin-top:4px}
+.promo-active-badge{background:var(--orange-1);color:var(--orange);font-size:12px;font-weight:700;padding:6px 12px;border-radius:8px;margin-bottom:12px;display:inline-block}
 .mp-card-body{padding:12px}
 .mp-title{font-weight:700;font-size:14px;margin-bottom:4px;cursor:pointer;line-height:1.3}
 .mp-seller-name{font-size:12px;color:var(--muted);margin-bottom:4px}

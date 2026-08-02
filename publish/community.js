@@ -49,6 +49,13 @@ const THEMES = [
 const PLATFORM_EMAIL="trendai509@gmail.com";
 const ADMIN_EMAIL="trendai509@gmail.com";
 const PLATFORM_FEE=0.03;
+// Promoted listing plans — cost in LNC, duration in days
+const PROMO_PLANS=[
+  {days:3,  lnc:50,  label:'3 days'},
+  {days:7,  lnc:100, label:'7 days'},
+  {days:14, lnc:180, label:'14 days'},
+  {days:30, lnc:300, label:'30 days'},
+];
 const MP_CATEGORIES=[
   "Electronics","Fashion & Apparel","Home & Furniture","Beauty & Health",
   "Food & Groceries","Vehicles & Parts","Books","Music & Audio",
@@ -1974,8 +1981,10 @@ function mpSellerCard(p){
       <div class="mp-title">${esc(p.title)}</div>
       <div class="mp-price">${fmtCurrency(p.price,p.currency)} <span class="mp-ship">+ ${fmtCurrency(p.shipping||0,p.currency)} ship</span></div>
       ${p.stock!=null?`<div class="mp-stock-info${oos?' oos':''}">📦 ${oos?'Out of stock':`${p.stock} in stock`}</div>`:''}
-      <div style="display:flex;gap:6px;margin-top:8px">
+      ${(()=>{const now=Date.now();const active=p.promoted&&p.promotedUntil>now;const rem=active?Math.ceil((p.promotedUntil-now)/86400000):0;return active?`<div class="promo-active-badge" style="margin-top:6px">🚀 Sponsored · ${rem}d left</div>`:'';})()}
+      <div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap">
         <button class="btn sm" data-action="editproduct" data-id="${p.id}">Edit</button>
+        <button class="btn sm" data-action="promotelisting" data-id="${p.id}" style="color:var(--orange);border-color:var(--orange)">🚀 Promote</button>
         <button class="btn sm" data-action="delproduct" data-id="${p.id}" style="color:#e2554f;border-color:#f0b3b3">Delete</button>
       </div>
     </div>
@@ -2100,6 +2109,57 @@ function deleteProduct(id){
 }
 function doDeleteProduct(id){ fbDB.collection("products").doc(id).delete().then(()=>{ closeOverlay(); toast("Product deleted"); go("mystore"); }).catch(e=>toast(e.code||e.message)); }
 
+// ---------- promoted listings ----------
+function openPromoDialog(productId){
+  if(!ME) return openEmailAuth();
+  const p=CACHE.products.find(x=>x.id===productId); if(!p) return;
+  const bal=parseFloat(CACHE.wallet?.balance||0);
+  const now=Date.now();
+  const isActive=p.promoted&&p.promotedUntil>now;
+  const remaining=isActive?Math.ceil((p.promotedUntil-now)/86400000):0;
+  openOverlay(`<h2>🚀 Promote listing</h2>
+    <p class="sub" style="margin-bottom:10px">"${esc(p.title)}"</p>
+    ${isActive?`<div class="promo-active-badge">✅ Active — ${remaining} day${remaining!==1?'s':''} left (new purchase extends this)</div>`:''}
+    <p style="font-size:13px;color:var(--muted);margin-bottom:14px">Promoted products appear <b>first</b> in the marketplace with a Sponsored badge. Deducted from your LionCoin wallet.<br>Balance: <b>🦁 ${fmtLNC(bal)} LNC</b></p>
+    <div class="promo-plans">
+      ${PROMO_PLANS.map(plan=>{
+        const canAfford=bal>=plan.lnc;
+        return `<div class="promo-plan-card${canAfford?'':' promo-disabled'}" ${canAfford?`data-action="confirmpromo" data-id="${productId}" data-days="${plan.days}" data-cost="${plan.lnc}"`:''}>
+          <div class="promo-plan-days">${plan.label}</div>
+          <div class="promo-plan-price">🦁 ${plan.lnc} LNC</div>
+          ${!canAfford?`<div class="promo-plan-note">Need ${fmtLNC(plan.lnc-bal)} more</div>`:''}
+        </div>`;
+      }).join('')}
+    </div>
+    <button class="btn block" data-action="close" style="margin-top:14px">Cancel</button>`);
+}
+async function confirmPromo(productId, days, cost){
+  const p=CACHE.products.find(x=>x.id===productId); if(!p) return;
+  const gross=parseFloat(cost);
+  const bal=parseFloat(CACHE.wallet?.balance||0);
+  if(bal<gross) return toast(`Not enough LionCoins — need ${fmtLNC(gross)} LNC, you have ${fmtLNC(bal)}`);
+  const now=Date.now();
+  const base=p.promoted&&p.promotedUntil>now?p.promotedUntil:now;
+  const promotedUntil=base+days*24*60*60*1000;
+  try{
+    const batch=fbDB.batch();
+    const walletRef=fbDB.collection('wallets').doc(ME.id);
+    batch.update(walletRef,{
+      balance:firebase.firestore.FieldValue.increment(-gross),
+      totalSpent:firebase.firestore.FieldValue.increment(gross)
+    });
+    batch.set(walletRef.collection('transactions').doc(),{
+      type:'promotion',dir:'out',amount:gross,
+      productId,productTitle:p.title,days:parseInt(days),
+      note:`Promoted listing for ${days} days`,createdAt:now
+    });
+    batch.update(fbDB.collection('products').doc(productId),{promoted:true,promotedUntil});
+    await batch.commit();
+    closeOverlay();
+    toast(`🚀 "${p.title}" promoted for ${days} days!`);
+  }catch(e){ toast('Promotion failed: '+(e.code||e.message)); }
+}
+
 // ---------- buyer browse ----------
 // _mpResults holds the current server-query result set; null = use CACHE.products
 let _mpResults=null;
@@ -2147,6 +2207,12 @@ function renderMarketplace(){
     (p.description||'').toLowerCase().includes(q)||
     (CACHE.sellers[p.sellerId]?.name||'').toLowerCase().includes(q)
   );
+
+  // Float active promoted products to the top; within each group respect the sort order
+  const _now=Date.now();
+  const _promoted=list.filter(p=>p.promoted&&p.promotedUntil>_now);
+  const _regular=list.filter(p=>!p.promoted||p.promotedUntil<=_now);
+  list=[..._promoted,..._regular];
 
   // Unique locations for the location dropdown (from CACHE so it's always fresh)
   const allLocs=[...new Set(CACHE.products.map(p=>p.location).filter(Boolean))].sort();
@@ -2210,8 +2276,9 @@ function mpBuyerCard(p){
   const isPrintify=p.source==='printify';
   const locBadge=p.location?`<span class="mp-loc-badge">📍 ${esc(p.location)}</span>`:'';
   const catBadge=p.category?`<span class="mp-cat-badge">${esc(p.category)}</span>`:'';
-  return `<div class="mp-card">
-    <div class="mp-photo" style="${photo?`background-image:url('${photo}');background-size:cover;background-position:center`:'background:var(--orange-1)'}" data-action="viewproduct" data-id="${p.id}">${photo?'':'📦'}${isPrintify?'<span class="printify-badge">🖨️ Print-on-demand</span>':''}</div>
+  const isSponsored=p.promoted&&p.promotedUntil>Date.now();
+  return `<div class="mp-card${isSponsored?' mp-card-sponsored':''}">
+    <div class="mp-photo" style="${photo?`background-image:url('${photo}');background-size:cover;background-position:center`:'background:var(--orange-1)'}" data-action="viewproduct" data-id="${p.id}">${photo?'':'📦'}${isPrintify?'<span class="printify-badge">🖨️ Print-on-demand</span>':''}${isSponsored?'<span class="mp-sponsored-overlay">Sponsored</span>':''}</div>
     <div class="mp-card-body">
       ${catBadge}
       <div class="mp-title" data-action="viewproduct" data-id="${p.id}">${esc(p.title)}</div>
@@ -4281,6 +4348,8 @@ document.addEventListener("click",e=>{
     confirmdel:()=>doDeleteTrack(el.dataset.id),
     confirmdelcmt:()=>doDeleteComment(el.dataset.id),
     confirmdelprod:()=>doDeleteProduct(el.dataset.id),
+    promotelisting:()=>openPromoDialog(el.dataset.id),
+    confirmpromo:()=>confirmPromo(el.dataset.id,el.dataset.days,el.dataset.cost),
     saveeditcmt:()=>saveEditComment(el.dataset.id),
     security:()=>openSecurityModal(),
     devicetype:()=>{ const isPublic=el.dataset.pub==='1'; closeOverlay(); _initSession(el.dataset.uid,isPublic); if(isPublic) toast('Public session active — you will be signed out in 2 hours.'); },
