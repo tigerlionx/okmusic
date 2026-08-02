@@ -992,3 +992,31 @@ body.has-page-bg .topbar{background:rgba(255,221,191,.45)}
 .cp-cbtn.cp-cend{background:#e74c3c;border-color:#e74c3c;color:#fff;}
 .cp-cbtn.cp-cend:hover{background:#c0392b;}
 @media(max-width:420px){#call-panel{width:calc(100vw - 24px);right:12px;bottom:72px;}}
+
+/* ── Video call (v87) ─────────────────────────────────── */
+#callVideoArea video{display:block;}
+#call-panel #localVideo{border-radius:8px;}
+#call-panel #remoteVideo{border-radius:0;}
+
+/* ── Conference participant video tiles ──────────────── */
+#confVid_me,video[id^="confVid_"]{display:block;}
+
+/* ── Live Streaming Page (v87) ───────────────────────── */
+.live-stream-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:14px;margin-top:4px;}
+.live-card{background:var(--card);border:1px solid var(--border);border-radius:16px;padding:14px;cursor:pointer;transition:transform .15s,box-shadow .15s;}
+.live-card:hover{transform:translateY(-2px);box-shadow:0 8px 24px rgba(0,0,0,.12);}
+.live-card-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;}
+.live-badge{background:#e74c3c;color:#fff;font-size:10px;font-weight:800;letter-spacing:.08em;padding:3px 8px;border-radius:20px;animation:livePulse 1.8s ease infinite;}
+@keyframes livePulse{0%,100%{opacity:1;}50%{opacity:.6;}}
+.live-card-title{font-weight:700;font-size:14px;margin-bottom:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.live-card-host{font-size:12px;color:var(--muted);margin-bottom:6px;}
+.live-card-viewers{font-size:12px;color:var(--muted);}
+/* Live stream view */
+.live-stream-controls{display:flex;align-items:center;justify-content:center;gap:12px;padding:10px 0 14px;flex-wrap:wrap;}
+.live-chat-section{border-top:1px solid var(--border);padding-top:14px;margin-top:4px;}
+.live-chat-title{font-weight:700;font-size:13px;margin-bottom:8px;}
+.live-chat-msgs{min-height:120px;max-height:220px;overflow-y:auto;display:flex;flex-direction:column;gap:4px;margin-bottom:10px;}
+.live-chat-msg{font-size:13px;padding:4px 6px;border-radius:8px;background:var(--bg);}
+.live-chat-msg.mine{background:var(--orange-1);}
+.live-chat-input-row{display:flex;gap:8px;align-items:center;}
+.live-chat-input-row .chat-input{flex:1;}

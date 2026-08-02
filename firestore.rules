@@ -245,6 +245,22 @@ service cloud.firestore {
       allow update, delete: if false;
     }
 
+    match /liveStreams/{streamId} {
+      allow read: if true;
+      allow create: if signedIn() && request.resource.data.hostUid == request.auth.uid;
+      allow update: if signedIn() && (
+        resource.data.hostUid == request.auth.uid ||
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['viewerCount'])
+      );
+      allow delete: if false;
+
+      match /chat/{msgId} {
+        allow read: if true;
+        allow create: if signedIn() && request.resource.data.uid == request.auth.uid;
+        allow update, delete: if false;
+      }
+    }
+
     match /contests/{id} {
       allow read: if signedIn();
       allow create, delete: if signedIn() && request.auth.token.email == "trendai509@gmail.com";

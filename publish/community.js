@@ -48,6 +48,7 @@ const THEMES = [
 
 const PLATFORM_EMAIL="trendai509@gmail.com";
 const ADMIN_EMAIL="trendai509@gmail.com";
+const AGORA_APP_ID=''; // Fill in your Agora App ID from agora.io — leave empty to see setup instructions
 const PLATFORM_FEE=0.03;
 // Promoted listing plans — cost in LNC, duration in days
 const PROMO_PLANS=[
@@ -275,7 +276,7 @@ let toastTimer; function toast(m){ const e=$("toast"); e.textContent=m; e.hidden
 let ME=null;                                   // the signed-in user's profile (Firebase)
 // live shared data, kept in sync by Firestore listeners
 const CACHE={ users:{}, tracks:[], statuses:[], follows:{}, userFollows:{}, reactions:{}, comments:[], notifications:[], products:[], sellers:{}, orders:[], convos:{}, suggestions:[], followRequests:[], fanRequestsSent:[], wallet:null, walletTxs:[], contests:[], discoveryPosts:[], customCategories:[], fxRates:{} };
-let state={ view:"discover", profileId:null, query:"", cart:JSON.parse(localStorage.getItem("okmusic_cart")||"[]"), openFolders:new Set() };
+let state={ view:"discover", profileId:null, query:"", cart:JSON.parse(localStorage.getItem("okmusic_cart")||"[]"), openFolders:new Set(), streamId:null };
 function persistCart(){ try{ localStorage.setItem("okmusic_cart",JSON.stringify(state.cart||[])); }catch(e){} }
 let playMode="continuous"; // "continuous" | "repeat" | "shuffle"
 let nowPlayingId=null;
@@ -555,6 +556,7 @@ function renderApp(){
         ${item("wallet","🦁",`LionCoin${CACHE.wallet?.balance?` · ${(CACHE.wallet.balance).toLocaleString()}`:''}`)}
         ${item("contests","🏆","Contests")}
         ${item("mymusic","🎵","My Music")}
+        ${(()=>{const liveCount=(CACHE.liveStreams||[]).filter(s=>s.status==='live').length;return`<div class="side-item ${state.view==='live'||state.view==='livestream'?'active':''}" data-action="nav" data-view="live"><span class="ic">📡</span>Live${liveCount?`<span class="bell-badge" style="position:static;margin-left:6px;background:#e74c3c">${liveCount}</span>`:''}</div>`})()}
         <div class="side-sep"></div>
         <div class="side-item" data-action="sharefolder"><span class="ic">📁</span>Add a folder</div>
         <div class="side-item" data-action="upload"><span class="ic">⬆️</span>Add single track</div>
@@ -575,7 +577,7 @@ function renderApp(){
       const isChat=state.view==='msgs'||state.view==='chat';
       const isProfile=state.view==='profile'&&state.profileId===u.id;
       const nb=(n)=>n?`<span class="mobnav-badge">${n>9?'9+':n}</span>`:'';
-      const isMore=['wallet','contests','mymusic','fans','marketplace','mystore','cart','myorders','admin','buzzing'].includes(state.view);
+      const isMore=['wallet','contests','mymusic','fans','marketplace','mystore','cart','myorders','admin','buzzing','live','livestream'].includes(state.view);
       return`<nav class="mobnav" id="mobnav">
         <div class="mobnav-item ${state.view==='discover'?'active':''}" data-action="nav" data-view="discover"><span class="mn-ic">🧭</span>Discover</div>
         <div class="mobnav-item ${state.view==='home'?'active':''}" data-action="nav" data-view="home"><span class="mn-ic">🏠</span>Feed</div>
@@ -605,6 +607,7 @@ function openMobMenu(){
 
   // Build sheet items
   const items=[
+    {ic:'📡',label:'Live'+(()=>{const n=(CACHE.liveStreams||[]).filter(s=>s.status==='live').length;return n?` (${n})`:''})(),fn:()=>go('live')},
     {ic:'🦁',label:`LionCoin · ${lnc}`,fn:()=>go('wallet')},
     {ic:'🏆',label:'Contests',fn:()=>go('contests')},
     {ic:'🎵',label:'My Music',fn:()=>go('mymusic')},
@@ -680,6 +683,8 @@ function renderMain(){
   if(state.view==="myorders") return renderMyOrders();
   if(state.view==="wallet") return renderWallet();
   if(state.view==="contests") return renderContests();
+  if(state.view==="live") return renderLivePage();
+  if(state.view==="livestream") return renderLiveStream(state.streamId);
   if(state.view==="admin"&&isAdmin()) return renderAdmin();
   renderDiscover();
 }
@@ -4569,9 +4574,11 @@ document.addEventListener("click",e=>{
     startcall:()=>startCall(el.dataset.uid), testmic:testMic,
     acceptcall:()=>acceptCall(el.dataset.uid),
     mutecall:muteCall,
+    togglecamera:toggleCamera,
     endcall:endCall,
     leavecall:leaveConference,
     confmute:confMuteToggle,
+    confcam:confCamToggle,
     togglehand:toggleCallHand,
     opencallinvite:openCallInvite,
     invitetoconf:()=>inviteToCall(el.dataset.uid),
@@ -4579,6 +4586,14 @@ document.addEventListener("click",e=>{
     beginconference:beginConference,
     joinconference:()=>joinConference(el.dataset.id),
     declineconf:()=>{ stopRing(); const p=document.getElementById('call-panel'); if(p){p.classList.remove('active');p.innerHTML='';} },
+    golive:openGoLiveDialog,
+    startstream:startLiveStream,
+    endstream:stopLiveStream,
+    leavestream:()=>{ leaveLiveStream(); state.view='live'; renderApp(); },
+    joinstream:()=>{ if(!ME)return openEmailAuth(); state.view='livestream';state.streamId=el.dataset.id;renderApp(); },
+    togglestreammute:toggleStreamMute,
+    togglestreamcam:toggleStreamCam,
+    sendstreamchat:()=>sendStreamChat(el.dataset.sid),
     confirmdel:()=>doDeleteTrack(el.dataset.id),
     confirmdelcmt:()=>doDeleteComment(el.dataset.id),
     confirmdelprod:()=>doDeleteProduct(el.dataset.id),
@@ -4705,9 +4720,13 @@ let activePc=null,activeStream=null,activeCallId=null,callUnsub=null,callInterva
 let _vizAnimId=null,_vizCtx=null,_localAn=null,_remoteAn=null,_localData=null,_remoteData=null,_testMicStream=null;
 // Conference call state
 let _confCallId=null,_confPeers={},_confAudios={},_confSignalUnsub=null,_confCallUnsub=null;
-let _confHandRaised=false,_confParticipants={},_confProcessed={};
+let _confHandRaised=false,_confParticipants={},_confProcessed={},_confStreams={};
 // Floating panel drag state
 let _cpDragging=false,_cpDragOffX=0,_cpDragOffY=0;
+// Video call state
+let _cameraOff=true;
+// Agora live streaming state
+let _agoraClient=null,_agoraLocalTracks=[],_agoraSid=null,_streamChatUnsub=null,_streamDocUnsub=null,_liveRole='audience';
 
 function _makeAn(stream){
   const src=_vizCtx.createMediaStreamSource(stream);
@@ -5112,7 +5131,11 @@ function openCallUI(uid,mode){
       <span class="cp-timer-txt" id="callTimer" style="display:none"></span>
     </div>
     <div class="cp-body">
-      <div class="call-avatar-wrap" style="position:relative;width:80px;height:80px;margin:0 auto 12px">
+      <div id="callVideoArea" style="display:none;position:relative;width:100%;border-radius:12px;overflow:hidden;margin-bottom:8px;background:#111;aspect-ratio:16/9">
+        <video id="remoteVideo" autoplay playsinline style="width:100%;height:100%;object-fit:cover"></video>
+        <video id="localVideo" autoplay playsinline muted style="position:absolute;bottom:6px;right:6px;width:72px;height:54px;border-radius:8px;object-fit:cover;border:2px solid rgba(255,255,255,.4);background:#000"></video>
+      </div>
+      <div class="call-avatar-wrap" id="callAvatarWrap" style="position:relative;width:80px;height:80px;margin:0 auto 12px">
         ${pulse?'<div class="call-pulse" style="inset:-8px"></div><div class="call-pulse d2" style="inset:-18px"></div>':''}
         <div class="avatar" style="${avatarStyle(other,80)}">${other.avatarImg?'':initials(other.name)}</div>
       </div>
@@ -5133,6 +5156,7 @@ function openCallUI(uid,mode){
       <div class="call-btns">
         ${mode==="incoming"?`<button class="call-btn-accept" data-action="acceptcall" data-uid="${uid}" title="Answer">📞</button>`:''}
         <button class="call-btn-mute" id="muteBtn" data-action="mutecall" title="Mute">🎙️</button>
+        <button class="cp-cbtn" id="camBtn" data-action="togglecamera" title="Toggle camera" style="display:none;width:44px;height:44px;font-size:17px">📷</button>
         <button class="call-btn-end" data-action="endcall" title="${mode==="incoming"?"Decline":"End call"}">📵</button>
       </div>
     </div>`;
@@ -5146,21 +5170,40 @@ function openCallUI(uid,mode){
 
 async function initiateCall(uid){
   const cid=[ME.id,uid].sort().join("_")+"_c"+Date.now();activeCallId=cid;
+  let _remoteHasVideo=false;
   try{
-    const stream=await navigator.mediaDevices.getUserMedia({audio:true});
+    let stream;
+    try{ stream=await navigator.mediaDevices.getUserMedia({audio:true,video:true}); _cameraOff=false; }
+    catch(e){ stream=await navigator.mediaDevices.getUserMedia({audio:true}); _cameraOff=true; }
     activeStream=stream;
-    startVoiceViz(stream); // local bars start animating immediately so caller can verify mic
+    if(!_cameraOff){
+      const lv=$("localVideo");if(lv){lv.srcObject=stream;lv.play().catch(()=>{});}
+      const va=$("callVideoArea");if(va)va.style.display='';
+      const aw=$("callAvatarWrap");if(aw)aw.style.display='none';
+      const cb=$("camBtn");if(cb)cb.style.display='flex';
+    }
+    startVoiceViz(stream);
     const iceServers=await getICE();
     const pc=new RTCPeerConnection({iceServers});activePc=pc;
     stream.getTracks().forEach(t=>pc.addTrack(t,stream));
 
     pc.ontrack=e=>{
-      const ra=$("remoteAudio");if(!ra)return;
       const ms=(e.streams&&e.streams.length&&e.streams[0])||new MediaStream([e.track]);
-      ra.srcObject=ms;ra.muted=false;ra.volume=1.0;
-      ra.play().catch(()=>{});
-      e.track.onunmute=()=>{if(ra.paused)ra.play().catch(()=>{});};
-      addRemoteViz(ms); // remote bars start animating when their audio arrives
+      if(e.track.kind==='video'){
+        _remoteHasVideo=true;
+        const rv=$("remoteVideo");if(rv){rv.srcObject=ms;rv.muted=false;rv.play().catch(()=>{});}
+        const ra=$("remoteAudio");if(ra){ra.srcObject=null;ra.muted=true;}
+        const va=$("callVideoArea");if(va)va.style.display='';
+        const aw=$("callAvatarWrap");if(aw)aw.style.display='none';
+        e.track.onunmute=()=>{const r=$("remoteVideo");if(r&&r.paused)r.play().catch(()=>{});};
+      } else {
+        if(!_remoteHasVideo){
+          const ra=$("remoteAudio");if(!ra)return;
+          ra.srcObject=ms;ra.muted=false;ra.volume=1.0;ra.play().catch(()=>{});
+          e.track.onunmute=()=>{const r=$("remoteAudio");if(r&&r.paused)r.play().catch(()=>{});};
+        }
+        addRemoteViz(ms);
+      }
     };
 
     pc.oniceconnectionstatechange=()=>{
@@ -5235,23 +5278,42 @@ async function acceptCall(uid){
     .orderBy("time","desc").limit(1).get().catch(()=>null);
   if(!snap||snap.empty){toast("Call already ended.");$("overlay").hidden=true;$("overlayBody").innerHTML="";return;}
   const doc=snap.docs[0];const d=doc.data();const cid=doc.id;activeCallId=cid;
+  let _remoteHasVideo=false;
   try{
     // Stop any test-mic stream before getting a fresh one for the actual call
     if(_testMicStream){_testMicStream.getTracks().forEach(t=>t.stop());_testMicStream=null;}
-    const stream=await navigator.mediaDevices.getUserMedia({audio:true});
+    let stream;
+    try{ stream=await navigator.mediaDevices.getUserMedia({audio:true,video:true}); _cameraOff=false; }
+    catch(e){ stream=await navigator.mediaDevices.getUserMedia({audio:true}); _cameraOff=true; }
     activeStream=stream;
-    startVoiceViz(stream); // local bars start animating immediately so callee can verify mic
+    if(!_cameraOff){
+      const lv=$("localVideo");if(lv){lv.srcObject=stream;lv.play().catch(()=>{});}
+      const va=$("callVideoArea");if(va)va.style.display='';
+      const aw=$("callAvatarWrap");if(aw)aw.style.display='none';
+      const cb=$("camBtn");if(cb)cb.style.display='flex';
+    }
+    startVoiceViz(stream);
     const iceServers=await getICE();
     const pc=new RTCPeerConnection({iceServers});activePc=pc;
     stream.getTracks().forEach(t=>pc.addTrack(t,stream));
 
     pc.ontrack=e=>{
-      const ra=$("remoteAudio");if(!ra)return;
       const ms=(e.streams&&e.streams.length&&e.streams[0])||new MediaStream([e.track]);
-      ra.srcObject=ms;ra.muted=false;ra.volume=1.0;
-      ra.play().catch(()=>{});
-      e.track.onunmute=()=>{if(ra.paused)ra.play().catch(()=>{});};
-      addRemoteViz(ms); // remote bars start animating when their audio arrives
+      if(e.track.kind==='video'){
+        _remoteHasVideo=true;
+        const rv=$("remoteVideo");if(rv){rv.srcObject=ms;rv.muted=false;rv.play().catch(()=>{});}
+        const ra=$("remoteAudio");if(ra){ra.srcObject=null;ra.muted=true;}
+        const va=$("callVideoArea");if(va)va.style.display='';
+        const aw=$("callAvatarWrap");if(aw)aw.style.display='none';
+        e.track.onunmute=()=>{const r=$("remoteVideo");if(r&&r.paused)r.play().catch(()=>{});};
+      } else {
+        if(!_remoteHasVideo){
+          const ra=$("remoteAudio");if(!ra)return;
+          ra.srcObject=ms;ra.muted=false;ra.volume=1.0;ra.play().catch(()=>{});
+          e.track.onunmute=()=>{const r=$("remoteAudio");if(r&&r.paused)r.play().catch(()=>{});};
+        }
+        addRemoteViz(ms);
+      }
     };
 
     pc.oniceconnectionstatechange=()=>{
@@ -5324,6 +5386,13 @@ function muteCall(){
   if(!activeStream)return;muted=!muted;
   activeStream.getAudioTracks().forEach(t=>t.enabled=!muted);
   const b=$("muteBtn");if(b)b.textContent=muted?"🔇 Unmute":"🎙️ Mute";
+}
+function toggleCamera(){
+  if(!activeStream)return;
+  _cameraOff=!_cameraOff;
+  activeStream.getVideoTracks().forEach(t=>t.enabled=!_cameraOff);
+  const btn=$("camBtn");if(btn){btn.textContent=_cameraOff?'📷 Off':'📷';btn.classList.toggle('on',_cameraOff);}
+  const lv=$("localVideo");if(lv)lv.style.opacity=_cameraOff?'0.2':'1';
 }
 async function endCall(){
   stopRing();stopVoiceViz();
@@ -5404,7 +5473,7 @@ function _openConfPanel(statusText){
   panel.innerHTML=`
     <div class="cp-drag" id="cpDrag">
       <span class="cp-drag-dots">⠿</span>
-      <span class="cp-title">📞 Conference call</span>
+      <span class="cp-title">📞 Conference</span>
       <span class="cp-timer-txt" id="callTimer" style="display:none"></span>
     </div>
     <div class="cp-body">
@@ -5419,6 +5488,7 @@ function _openConfPanel(statusText){
       <audio id="remoteAudio" autoplay playsinline style="display:none"></audio>
       <div class="cp-conf-controls">
         <button class="cp-cbtn" id="cpMuteBtn" data-action="confmute" title="Mute/unmute">🎙️</button>
+        <button class="cp-cbtn" id="cpCamBtn" data-action="confcam" title="Camera">📷</button>
         <button class="cp-cbtn" id="cpHandBtn" data-action="togglehand" title="Raise hand">✋</button>
         <button class="cp-cbtn" data-action="opencallinvite" title="Invite someone">➕</button>
         <button class="cp-cbtn cp-cend" data-action="leavecall" title="Leave call">📵</button>
@@ -5441,7 +5511,10 @@ function _updateConfPanel(){
     const isMe=uid===ME?.id;
     const avStyle=u.avatarImg?`background-image:url('${u.avatarImg}');background-size:cover;background-position:center`:`background:${u.color}`;
     return`<div class="cp-participant">
-      <div class="cp-p-av" style="${avStyle}">${u.avatarImg?'':initials(u.name)}</div>
+      <div style="position:relative;flex-shrink:0;width:44px;height:33px">
+        <video id="confVid_${uid}" autoplay playsinline ${isMe?'muted':''} style="width:44px;height:33px;border-radius:6px;object-fit:cover;background:#111;display:block"></video>
+        <div class="cp-p-av" id="confAv_${uid}" style="${avStyle};position:absolute;inset:0;border-radius:6px;width:auto;height:auto;font-size:11px">${u.avatarImg?'':initials(u.name)}</div>
+      </div>
       <span class="cp-p-name">${esc(u.name)}${isMe?' (you)':''}</span>
       <span class="cp-p-icons">
         ${p.handRaised?'<span class="cp-p-hand">✋</span>':''}
@@ -5449,6 +5522,27 @@ function _updateConfPanel(){
       </span>
     </div>`;
   }).join('');
+  // Reattach local video preview to own tile
+  if(activeStream){
+    const vt=activeStream.getVideoTracks();
+    if(vt.length&&!_cameraOff){
+      const myVid=document.getElementById('confVid_'+ME?.id);
+      if(myVid){myVid.srcObject=activeStream;myVid.play().catch(()=>{});}
+      const myAv=document.getElementById('confAv_'+ME?.id);
+      if(myAv)myAv.style.display='none';
+    }
+  }
+  // Reattach remote participant video tiles
+  Object.keys(_confStreams).forEach(uid=>{
+    const stream=_confStreams[uid];if(!stream)return;
+    const hasVideo=stream.getVideoTracks&&stream.getVideoTracks().length>0;
+    if(hasVideo){
+      const vEl=document.getElementById('confVid_'+uid);
+      if(vEl&&vEl.srcObject!==stream){vEl.srcObject=stream;vEl.play().catch(()=>{});}
+      const avEl=document.getElementById('confAv_'+uid);
+      if(avEl)avEl.style.display='none';
+    }
+  });
 }
 
 async function startConference(invitedUids){
@@ -5456,7 +5550,9 @@ async function startConference(invitedUids){
   if(activePc||_confCallId)return toast("Already in a call.");
   if(!invitedUids||!invitedUids.length)return;
   try{
-    const stream=await navigator.mediaDevices.getUserMedia({audio:true});
+    let stream;
+    try{ stream=await navigator.mediaDevices.getUserMedia({audio:true,video:true}); _cameraOff=false; }
+    catch(e){ stream=await navigator.mediaDevices.getUserMedia({audio:true}); _cameraOff=true; }
     activeStream=stream;
     const callId='conf_'+ME.id.slice(0,8)+'_'+Date.now();
     _confCallId=callId;_confPeers={};_confAudios={};_confHandRaised=false;_confProcessed={};
@@ -5490,7 +5586,9 @@ async function joinConference(callId){
   if(_confCallId)return toast("Already in a conference call.");
   stopRing();
   try{
-    const stream=await navigator.mediaDevices.getUserMedia({audio:true});
+    let stream;
+    try{ stream=await navigator.mediaDevices.getUserMedia({audio:true,video:true}); _cameraOff=false; }
+    catch(e){ stream=await navigator.mediaDevices.getUserMedia({audio:true}); _cameraOff=true; }
     activeStream=stream;
     _confCallId=callId;_confPeers={};_confAudios={};_confHandRaised=false;_confProcessed={};
     const snap=await fbDB.collection("conferences").doc(callId).get();
@@ -5522,7 +5620,7 @@ async function _makeConfOffer(callId,remoteUid){
   const pc=new RTCPeerConnection({iceServers});
   _confPeers[remoteUid]=pc;
   if(activeStream) activeStream.getTracks().forEach(t=>pc.addTrack(t,activeStream));
-  pc.ontrack=e=>_attachConfAudio(remoteUid,(e.streams&&e.streams[0])||new MediaStream([e.track]));
+  pc.ontrack=e=>_attachConfMedia(remoteUid,(e.streams&&e.streams[0])||new MediaStream([e.track]));
   pc.oniceconnectionstatechange=()=>{
     if(pc.iceConnectionState==='failed'||pc.iceConnectionState==='closed')_cleanupConfPeer(remoteUid);
     _updateConfPanel();
@@ -5556,7 +5654,7 @@ async function _answerConfOffer(callId,pairKey,sig){
   const pc=new RTCPeerConnection({iceServers});
   _confPeers[remoteUid]=pc;
   if(activeStream) activeStream.getTracks().forEach(t=>pc.addTrack(t,activeStream));
-  pc.ontrack=e=>_attachConfAudio(remoteUid,(e.streams&&e.streams[0])||new MediaStream([e.track]));
+  pc.ontrack=e=>_attachConfMedia(remoteUid,(e.streams&&e.streams[0])||new MediaStream([e.track]));
   pc.oniceconnectionstatechange=()=>{
     if(pc.iceConnectionState==='failed'||pc.iceConnectionState==='closed')_cleanupConfPeer(remoteUid);
     _updateConfPanel();
@@ -5581,15 +5679,27 @@ async function _answerConfOffer(callId,pairKey,sig){
   _updateConfPanel();
 }
 
-function _attachConfAudio(uid,stream){
-  let au=_confAudios[uid];
-  if(!au){au=new Audio();au.autoplay=true;au.volume=1.0;document.body.appendChild(au);_confAudios[uid]=au;}
-  au.srcObject=stream;au.play().catch(()=>{});
+function _attachConfMedia(uid,stream){
+  _confStreams[uid]=stream;
+  const hasVideo=stream.getVideoTracks&&stream.getVideoTracks().length>0;
+  if(hasVideo){
+    // Route video (and its audio) to the video tile in the conference panel
+    const vEl=document.getElementById('confVid_'+uid);
+    if(vEl){vEl.srcObject=stream;vEl.play().catch(()=>{});}
+    const avEl=document.getElementById('confAv_'+uid);if(avEl)avEl.style.display='none';
+    // Mute the audio element so the video element handles audio
+    if(_confAudios[uid]){_confAudios[uid].srcObject=null;}
+  } else {
+    let au=_confAudios[uid];
+    if(!au){au=new Audio();au.autoplay=true;au.volume=1.0;document.body.appendChild(au);_confAudios[uid]=au;}
+    au.srcObject=stream;au.play().catch(()=>{});
+  }
 }
 
 function _cleanupConfPeer(uid){
   if(_confPeers[uid]){try{_confPeers[uid].close();}catch(e){}delete _confPeers[uid];}
   if(_confAudios[uid]){_confAudios[uid].srcObject=null;try{_confAudios[uid].remove();}catch(e){}delete _confAudios[uid];}
+  if(_confStreams[uid])delete _confStreams[uid];
 }
 
 function _listenConfUpdates(callId){
@@ -5631,7 +5741,7 @@ async function leaveConference(){
   if(!_confCallId)return;
   const callId=_confCallId;_confCallId=null;
   Object.keys(_confPeers).forEach(uid=>_cleanupConfPeer(uid));
-  _confPeers={};_confAudios={};_confHandRaised=false;_confParticipants={};_confProcessed={};
+  _confPeers={};_confAudios={};_confStreams={};_confHandRaised=false;_confParticipants={};_confProcessed={};
   if(_confCallUnsub){_confCallUnsub();_confCallUnsub=null;}
   if(_confSignalUnsub){_confSignalUnsub();_confSignalUnsub=null;}
   stopVoiceViz();
@@ -5668,6 +5778,13 @@ async function confMuteToggle(){
   }
   const btn=document.getElementById('cpMuteBtn');if(btn){btn.classList.toggle('on',muted);btn.textContent=muted?'🔇':'🎙️';}
   const btn2=document.getElementById('muteBtn');if(btn2)btn2.textContent=muted?'🔇 Unmute':'🎙️ Mute';
+}
+function confCamToggle(){
+  if(!activeStream)return;
+  _cameraOff=!_cameraOff;
+  activeStream.getVideoTracks().forEach(t=>t.enabled=!_cameraOff);
+  const btn=document.getElementById('cpCamBtn');if(btn){btn.textContent=_cameraOff?'📷 Off':'📷';btn.classList.toggle('on',_cameraOff);}
+  _updateConfPanel();
 }
 
 function openCallInvite(){
@@ -5731,6 +5848,257 @@ function beginConference(){
   startConference(checked);
 }
 
+// ==================== LIVE STREAMING ====================
+
+function renderLivePage(){
+  const streams=(CACHE.liveStreams||[]).filter(s=>s.status==='live');
+  if(!AGORA_APP_ID){
+    $("page").innerHTML=`<div class="h-title">📡 Live</div>
+      <div style="text-align:center;padding:32px 16px;max-width:480px;margin:0 auto">
+        <div style="font-size:48px;margin-bottom:14px">🔧</div>
+        <div style="font-weight:700;font-size:18px;margin-bottom:10px">Live Streaming Setup Required</div>
+        <p style="color:var(--muted);font-size:13px;line-height:1.6;margin-bottom:18px">
+          Live streaming is powered by <b>Agora</b>. To enable it:<br>
+          1. Go to <b>agora.io</b> and create a free account.<br>
+          2. Create a project and copy your <b>App ID</b>.<br>
+          3. In your Agora console, set <b>Token Authentication</b> to disabled (test mode).<br>
+          4. Paste the App ID into <code>AGORA_APP_ID</code> in <b>community.js</b> (line ~50).
+        </p>
+        <div style="font-size:12px;color:var(--muted);background:var(--bg);border-radius:10px;padding:10px 14px;font-family:monospace">const AGORA_APP_ID = 'your-app-id-here';</div>
+      </div>`;
+    return;
+  }
+  $("page").innerHTML=`<div class="h-title">📡 Live</div>
+    <div style="display:flex;justify-content:flex-end;margin-bottom:14px">
+      <button class="btn primary" data-action="golive">🔴 Go Live</button>
+    </div>
+    ${streams.length===0
+      ?`<div class="empty" style="padding:40px 0;text-align:center">
+          <div style="font-size:40px;margin-bottom:12px">📡</div>
+          No live streams right now — be the first to go live!
+        </div>`
+      :`<div class="live-stream-grid">${streams.map(s=>{
+          const host=userById(s.hostUid)||{name:s.hostName||'Artist',color:'#888'};
+          return`<div class="live-card" data-action="joinstream" data-id="${s.id}">
+            <div class="live-card-header">
+              <div class="avatar" style="${avatarStyle(host,40)}">${host.avatarImg?'':initials(host.name)}</div>
+              <span class="live-badge">LIVE</span>
+            </div>
+            <div class="live-card-title">${esc(s.title||'Live Stream')}</div>
+            <div class="live-card-host">by ${esc(host.name)}</div>
+            <div class="live-card-viewers">👁 ${s.viewerCount||0}</div>
+          </div>`;
+        }).join('')}</div>`
+    }`;
+}
+
+async function renderLiveStream(streamId){
+  const s=(CACHE.liveStreams||[]).find(x=>x.id===streamId);
+  if(!s||s.status==='ended'){toast("Stream has ended.");state.view='live';renderApp();return;}
+  const host=userById(s.hostUid)||{name:s.hostName||'Host',color:'#888'};
+  const isHost=ME&&ME.id===s.hostUid;
+  $("page").innerHTML=`
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;flex-wrap:wrap">
+      <button class="btn sm" data-action="leavestream">← Back</button>
+      <div style="flex:1;min-width:0">
+        <div style="font-weight:700;font-size:15px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(s.title||'Live Stream')}</div>
+        <div style="font-size:12px;color:var(--muted)">by ${esc(host.name)} · 👁 <span id="viewerCount">${s.viewerCount||0}</span></div>
+      </div>
+      ${isHost?`<button class="btn sm" data-action="endstream" style="color:#e74c3c;border-color:#e74c3c;flex-shrink:0">🔴 End Stream</button>`:''}
+    </div>
+    <div id="streamVideoWrap" style="width:100%;background:#111;border-radius:16px;overflow:hidden;aspect-ratio:16/9;margin-bottom:14px;display:flex;align-items:center;justify-content:center;position:relative">
+      <div id="remoteStreamVideo" style="width:100%;height:100%;"></div>
+      <video id="hostPreviewVideo" autoplay muted playsinline style="width:100%;height:100%;object-fit:cover;display:none;position:absolute;inset:0"></video>
+      <div id="streamStatus" style="color:#fff;font-size:14px;text-align:center;padding:20px;position:absolute">Connecting…</div>
+    </div>
+    ${isHost?`<div class="live-stream-controls" id="liveControls">
+      <button class="cp-cbtn" id="streamMicBtn" data-action="togglestreammute" title="Mute mic">🎙️</button>
+      <button class="cp-cbtn" id="streamCamBtn" data-action="togglestreamcam" title="Toggle camera">📷</button>
+      <button class="cp-cbtn cp-cend" data-action="endstream" title="End stream">📵</button>
+    </div>`:`<div class="live-stream-controls" id="liveControls">
+      <div style="font-size:13px;color:var(--muted)">👀 Watching live</div>
+    </div>`}
+    <div class="live-chat-section">
+      <div class="live-chat-title">💬 Live Chat</div>
+      <div class="live-chat-msgs" id="liveChatMsgs"><div class="empty" style="padding:12px">Chat will appear here…</div></div>
+      <div class="live-chat-input-row">
+        <input class="chat-input" id="liveChatInput" placeholder="Say something…" maxlength="200"/>
+        <button class="btn primary sm" data-action="sendstreamchat" data-sid="${streamId}">Send</button>
+      </div>
+    </div>`;
+
+  if(_streamDocUnsub){_streamDocUnsub();_streamDocUnsub=null;}
+  _streamDocUnsub=fbDB.collection("liveStreams").doc(streamId).onSnapshot(snap=>{
+    if(!snap.exists||snap.data().status==='ended'){
+      leaveLiveStream(); toast("Stream has ended."); state.view='live'; renderApp(); return;
+    }
+    const vc=document.getElementById('viewerCount');if(vc)vc.textContent=snap.data().viewerCount||0;
+  });
+
+  if(_streamChatUnsub){_streamChatUnsub();_streamChatUnsub=null;}
+  _streamChatUnsub=fbDB.collection("liveStreams").doc(streamId).collection("chat")
+    .orderBy("time","asc").limitToLast(60)
+    .onSnapshot(snap=>{
+      const el=document.getElementById("liveChatMsgs");if(!el)return;
+      if(snap.empty){el.innerHTML='<div class="empty" style="padding:12px">No messages yet…</div>';return;}
+      el.innerHTML=snap.docs.map(d=>{const m=d.data();
+        const isMe=m.uid===ME?.id;
+        return`<div class="live-chat-msg${isMe?' mine':''}"><b>${esc(m.name)}</b>: ${esc(m.text)}</div>`;
+      }).join('');
+      el.scrollTop=el.scrollHeight;
+    });
+
+  if(isHost) await _startAgoraHost(streamId,s.channelName||streamId);
+  else {
+    await _startAgoraAudience(streamId,s.channelName||streamId);
+    fbDB.collection("liveStreams").doc(streamId).update({viewerCount:firebase.firestore.FieldValue.increment(1)}).catch(()=>{});
+  }
+
+  setTimeout(()=>{
+    const inp=document.getElementById('liveChatInput');
+    if(inp) inp.addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();sendStreamChat(streamId);}});
+  },100);
+}
+
+async function _startAgoraHost(streamId,channelName){
+  if(!AGORA_APP_ID){toast("Agora App ID not configured.");return;}
+  if(!window.AgoraRTC){toast("Agora SDK not loaded. Check your internet connection.");return;}
+  try{
+    _agoraSid=streamId;_liveRole='host';
+    _agoraClient=AgoraRTC.createClient({mode:'live',codec:'vp8'});
+    await _agoraClient.setClientRole('host');
+    await _agoraClient.join(AGORA_APP_ID,channelName,null,ME.id);
+    _agoraLocalTracks=await AgoraRTC.createMicrophoneAndCameraTracks({},{facingMode:'user'});
+    await _agoraClient.publish(_agoraLocalTracks);
+    const preview=document.getElementById('hostPreviewVideo');
+    if(preview){
+      preview.srcObject=new MediaStream([_agoraLocalTracks[1].getMediaStreamTrack()]);
+      preview.style.display='block';
+    }
+    const s=document.getElementById('streamStatus');if(s)s.style.display='none';
+  }catch(e){
+    const s=document.getElementById('streamStatus');if(s)s.textContent='Stream error: '+(e.message||e);
+    toast("Stream error: "+(e.message||e));
+  }
+}
+
+async function _startAgoraAudience(streamId,channelName){
+  if(!AGORA_APP_ID){
+    const s=document.getElementById('streamStatus');
+    if(s)s.textContent='Live streaming not configured — contact the app owner.';
+    return;
+  }
+  if(!window.AgoraRTC){
+    const s=document.getElementById('streamStatus');if(s)s.textContent='Agora SDK not loaded.';
+    return;
+  }
+  try{
+    _agoraSid=streamId;_liveRole='audience';
+    _agoraClient=AgoraRTC.createClient({mode:'live',codec:'vp8'});
+    await _agoraClient.setClientRole('audience');
+    _agoraClient.on('user-published',async(user,mediaType)=>{
+      await _agoraClient.subscribe(user,mediaType);
+      if(mediaType==='video'){
+        const wrap=document.getElementById('remoteStreamVideo');
+        if(wrap){wrap.innerHTML='';user.videoTrack.play('remoteStreamVideo');}
+        const s=document.getElementById('streamStatus');if(s)s.style.display='none';
+      }
+      if(mediaType==='audio') user.audioTrack.play();
+    });
+    _agoraClient.on('user-unpublished',(user,mediaType)=>{
+      if(mediaType==='audio'&&user.audioTrack) user.audioTrack.stop();
+    });
+    _agoraClient.on('user-left',()=>{
+      const s=document.getElementById('streamStatus');
+      if(s){s.style.display='';s.textContent='Host has left the stream.';}
+    });
+    await _agoraClient.join(AGORA_APP_ID,channelName,null,ME?.id||('viewer_'+Date.now()));
+    const s=document.getElementById('streamStatus');if(s)s.textContent='Waiting for host…';
+  }catch(e){
+    const s=document.getElementById('streamStatus');
+    if(s)s.textContent='Connection error: '+(e.message||e);
+  }
+}
+
+function openGoLiveDialog(){
+  if(!ME)return openEmailAuth();
+  if(!AGORA_APP_ID){toast("Live streaming is not configured. See the 📡 Live page for setup instructions.");return;}
+  openOverlay(`<h2>🔴 Go Live</h2>
+    <div class="field">
+      <label>Stream title</label>
+      <input type="text" id="liveTitleInput" placeholder="What are you performing today?" maxlength="80" style="width:100%;box-sizing:border-box"/>
+    </div>
+    <div style="display:flex;gap:10px;margin-top:14px">
+      <button class="btn block" data-action="close">Cancel</button>
+      <button class="btn block primary" data-action="startstream">🔴 Start Stream</button>
+    </div>`);
+  setTimeout(()=>{ const i=document.getElementById('liveTitleInput');if(i)i.focus(); },50);
+}
+
+async function startLiveStream(){
+  const titleInput=document.getElementById('liveTitleInput');
+  const title=(titleInput?.value.trim())||'Live Stream';
+  closeOverlay();
+  const streamId='live_'+ME.id.slice(0,8)+'_'+Date.now();
+  try{
+    await fbDB.collection("liveStreams").doc(streamId).set({
+      hostUid:ME.id,hostName:ME.name,hostColor:ME.color||'#888',
+      title,channelName:streamId,status:'live',viewerCount:0,startedAt:Date.now()
+    });
+    state.view='livestream';state.streamId=streamId;
+    renderApp();
+  }catch(e){toast("Could not start stream: "+(e.message||e));}
+}
+
+async function stopLiveStream(){
+  if(!_agoraSid)return;
+  const sid=_agoraSid;
+  await leaveLiveStream();
+  await fbDB.collection("liveStreams").doc(sid).update({status:'ended',endedAt:Date.now()}).catch(()=>{});
+  toast("Stream ended.");
+  state.view='live'; renderApp();
+}
+
+async function leaveLiveStream(){
+  if(_streamChatUnsub){_streamChatUnsub();_streamChatUnsub=null;}
+  if(_streamDocUnsub){_streamDocUnsub();_streamDocUnsub=null;}
+  if(_agoraLocalTracks.length){
+    _agoraLocalTracks.forEach(t=>{try{t.stop();t.close();}catch(e){}});
+    _agoraLocalTracks=[];
+  }
+  if(_agoraClient){
+    if(_liveRole==='audience'&&_agoraSid){
+      fbDB.collection("liveStreams").doc(_agoraSid).update({viewerCount:firebase.firestore.FieldValue.increment(-1)}).catch(()=>{});
+    }
+    try{await _agoraClient.leave();}catch(e){}
+    _agoraClient=null;
+  }
+  _agoraSid=null; _liveRole='audience';
+}
+
+async function sendStreamChat(streamId){
+  const inp=document.getElementById('liveChatInput');
+  if(!inp||!inp.value.trim())return;
+  const text=inp.value.trim();inp.value='';
+  await fbDB.collection("liveStreams").doc(streamId).collection("chat").add({
+    uid:ME.id,name:ME.name,text,time:Date.now()
+  }).catch(e=>toast("Chat error: "+e.message));
+}
+
+function toggleStreamMute(){
+  if(!_agoraLocalTracks[0])return;
+  const nowMuted=!_agoraLocalTracks[0].muted;
+  _agoraLocalTracks[0].setMuted(nowMuted);
+  const btn=document.getElementById('streamMicBtn');if(btn)btn.textContent=nowMuted?'🔇':'🎙️';
+}
+
+function toggleStreamCam(){
+  if(!_agoraLocalTracks[1])return;
+  const nowMuted=!_agoraLocalTracks[1].muted;
+  _agoraLocalTracks[1].setMuted(nowMuted);
+  const btn=document.getElementById('streamCamBtn');if(btn){btn.textContent=nowMuted?'📷 Off':'📷';btn.classList.toggle('on',nowMuted);}
+}
+
 function startListeners(){
   fbDB.collection("users").onSnapshot(s=>{ CACHE.users={}; s.forEach(d=>CACHE.users[d.id]={ id:d.id, ...d.data() }); scheduleRender(); }, e=>console.warn("users",e.code));
   fbDB.collection("tracks").onSnapshot(s=>{ CACHE.tracks=s.docs.map(d=>({ id:d.id, ...d.data() })); scheduleRender(); }, e=>console.warn("tracks",e.code));
@@ -5750,6 +6118,11 @@ function startListeners(){
   fbDB.collection("platform").doc("categories").onSnapshot(
     s=>{ CACHE.customCategories=s.exists?Object.keys(s.data()).sort((a,b)=>a.localeCompare(b)):[]; scheduleRender(); },
     ()=>{ CACHE.customCategories=[]; }
+  );
+  // Live streams — real-time list of active broadcasts
+  fbDB.collection("liveStreams").where("status","==","live").onSnapshot(
+    s=>{ CACHE.liveStreams=s.docs.map(d=>({id:d.id,...d.data()})); scheduleRender(); },
+    e=>console.warn("liveStreams",e.code)
   );
 }
 function startAuthListeners(uid){
