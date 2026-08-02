@@ -5961,9 +5961,26 @@ async function renderLiveStream(streamId){
 }
 
 async function _getAgoraToken(channelName,role){
-  const fn=firebase.functions().httpsCallable('generateAgoraToken');
-  const res=await fn({channelName,role});
-  return res.data;
+  // Use fetch + ID token instead of the compat callable SDK.
+  // The compat SDK internally triggers Firebase Messaging service-worker registration,
+  // which fails on GitHub Pages (no SW file at the root) and aborts the stream.
+  const user=firebase.auth().currentUser;
+  if(!user) throw new Error('Must be signed in to stream.');
+  const idToken=await user.getIdToken();
+  const resp=await fetch(
+    'https://us-central1-ok-music-903e7.cloudfunctions.net/generateAgoraToken',
+    {
+      method:'POST',
+      headers:{'Content-Type':'application/json','Authorization':'Bearer '+idToken},
+      body:JSON.stringify({data:{channelName,role}})
+    }
+  );
+  if(!resp.ok){
+    const txt=await resp.text().catch(()=>'');
+    throw new Error('Token server error '+resp.status+(txt?': '+txt.slice(0,200):''));
+  }
+  const json=await resp.json();
+  return json.result||json;
 }
 
 async function _startAgoraHost(streamId,channelName){
