@@ -828,11 +828,35 @@ body.has-page-bg .topbar{background:rgba(255,221,191,.45)}
 .wallet-stat-val{font-size:20px;font-weight:700;color:var(--text);}
 .wallet-stat-lbl{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-top:2px;}
 .wallet-stat-sep{width:1px;height:40px;background:var(--border);}
-.wallet-earn-grid{background:var(--card);border:1px solid var(--border);border-radius:12px;overflow:hidden;}
+.wallet-earn-grid{background:var(--card);border:1px solid var(--border);border-radius:0 0 12px 12px;overflow:hidden;}
 .wallet-earn-row{display:flex;justify-content:space-between;align-items:center;padding:10px 16px;border-bottom:1px solid var(--border);font-size:13px;}
 .wallet-earn-row:last-child{border-bottom:none;}
 .wallet-earn-amt{font-weight:700;color:var(--orange);}
+/* Wallet accordion (details/summary) */
+.wallet-accordion{border:1px solid var(--border);border-radius:12px;margin-top:12px;overflow:hidden;background:var(--card);}
+.wallet-accordion[open]>.wallet-accordion-hdr .wallet-acc-arrow{transform:rotate(90deg);}
+.wallet-accordion-hdr{display:flex;align-items:center;gap:8px;padding:14px 16px;font-size:15px;font-weight:700;cursor:pointer;list-style:none;color:var(--text);}
+.wallet-accordion-hdr::-webkit-details-marker{display:none;}
+.wallet-accordion-hdr::marker{display:none;}
+.wallet-acc-arrow{margin-left:auto;font-size:12px;color:var(--muted);transition:transform .2s;flex-shrink:0;}
+.tx-hdr-count{font-size:12px;font-weight:400;color:var(--muted);}
+/* Transaction categories */
+.tx-categories{padding:4px 0 8px;}
+.tx-category{margin:0 8px 4px;border:1px solid var(--border);border-radius:10px;overflow:hidden;}
+.tx-cat-summary{display:flex;align-items:center;gap:8px;padding:10px 12px;cursor:pointer;list-style:none;font-size:13px;background:var(--bg);}
+.tx-cat-summary::-webkit-details-marker{display:none;}
+.tx-cat-summary::marker{display:none;}
+.tx-category[open]>.tx-cat-summary{border-bottom:1px solid var(--border);}
+.tx-cat-icon{font-size:16px;flex-shrink:0;}
+.tx-cat-label{font-weight:600;color:var(--text);flex:1;}
+.tx-cat-count{font-size:11px;color:var(--muted);flex-shrink:0;}
+.tx-cat-total{font-weight:700;font-size:13px;flex-shrink:0;margin-left:8px;}
+.tx-cat-total.pos{color:#22c55e;}
+.tx-cat-total.neg{color:#e74c3c;}
+.tx-cat-body{border-radius:0;}
+/* Transaction rows */
 .tx-list{border:1px solid var(--border);border-radius:12px;overflow:hidden;}
+.tx-cat-body.tx-list{border:none;border-radius:0;}
 .tx-row{display:flex;align-items:center;gap:10px;padding:10px 14px;border-bottom:1px solid var(--border);font-size:13px;}
 .tx-row:last-child{border-bottom:none;}
 .tx-icon{font-size:18px;flex-shrink:0;}

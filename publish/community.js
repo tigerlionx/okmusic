@@ -3664,7 +3664,62 @@ async function confirmLncBuy(productId){
 function renderWallet(){
   const w=CACHE.wallet||{}; const bal=w.balance||0; const earned=w.totalEarned||0; const spent=w.totalSpent||0; const streak=w.streak||0;
   const txs=CACHE.walletTxs||[];
-  const typeIcon={track_view:'🎵',track_upload:'⬆️',status_post:'📝',comment_sent:'💬',comment_received:'💬',reaction_received:'👍',new_fan:'🫂',fan_milestone:'🏆',daily_login:'🌅',streak_7:'🔥',streak_30:'🏆',marketplace_buy:'🛍️',marketplace_sale:'💰',transfer_sent:'💸',transfer_received:'💰',contest_win:'🏆',contest_correction:'🔧'};
+  const typeIcon={track_view:'🎵',track_upload:'⬆️',status_post:'📝',comment_sent:'💬',comment_received:'💬',reaction_received:'👍',new_fan:'🫂',fan_milestone:'🏆',daily_login:'🌅',streak_7:'🔥',streak_30:'🏆',marketplace_buy:'🛍️',marketplace_sale:'💰',transfer_sent:'💸',transfer_received:'💰',contest_win:'🏆',contest_correction:'🔧',promotion:'🚀'};
+  const typeLabel={
+    track_view:'Track Views', track_upload:'Track Uploads', status_post:'Status Posts',
+    comment_sent:'Comments Written', comment_received:'Comments Received',
+    reaction_received:'Reactions Received', new_fan:'New Fans', fan_milestone:'Fan Milestones',
+    daily_login:'Daily Login', streak_7:'7-Day Streak', streak_30:'30-Day Streak',
+    marketplace_buy:'Marketplace Purchases', marketplace_sale:'Marketplace Sales',
+    transfer_sent:'LNC Sent', transfer_received:'LNC Received',
+    contest_win:'Contest Wins', contest_correction:'Contest Corrections',
+    promotion:'Promoted Listings',
+  };
+  function fmtTxDate(ts){
+    if(!ts) return '';
+    const d=new Date(ts);
+    return d.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'});
+  }
+
+  // Group transactions by type
+  const groups={};
+  txs.forEach(tx=>{
+    const key=tx.type||'other';
+    if(!groups[key]) groups[key]=[];
+    groups[key].push(tx);
+  });
+  const groupKeys=Object.keys(groups).sort((a,b)=>{
+    const la=(groups[b][0]?.createdAt||0);
+    const lb=(groups[a][0]?.createdAt||0);
+    return la-lb;
+  });
+
+  const txSection=txs.length
+    ? groupKeys.map(key=>{
+        const items=groups[key];
+        const totalAmt=items.reduce((s,t)=>s+(t.amount||0),0);
+        const label=typeLabel[key]||(key.replace(/_/g,' ').replace(/\b\w/g,c=>c.toUpperCase()));
+        const icon=typeIcon[key]||'🦁';
+        const rows=items.map(tx=>`
+          <div class="tx-row">
+            <span class="tx-icon">${icon}</span>
+            <span class="tx-desc">${esc(tx.description)}</span>
+            <span class="tx-time">${fmtTxDate(tx.createdAt)}</span>
+            <span class="tx-amount ${tx.amount>0?'pos':'neg'}">${tx.amount>0?'+':''}${tx.amount} LNC</span>
+          </div>`).join('');
+        const netSign=totalAmt>=0?'+':'';
+        return `<details class="tx-category">
+          <summary class="tx-cat-summary">
+            <span class="tx-cat-icon">${icon}</span>
+            <span class="tx-cat-label">${label}</span>
+            <span class="tx-cat-count">${items.length} transaction${items.length!==1?'s':''}</span>
+            <span class="tx-cat-total ${totalAmt>=0?'pos':'neg'}">${netSign}${totalAmt.toFixed(2)} LNC</span>
+          </summary>
+          <div class="tx-list tx-cat-body">${rows}</div>
+        </details>`;
+      }).join('')
+    : '<div class="empty" style="padding:16px 0">No transactions yet — start posting and uploading to earn LionCoins! 🦁</div>';
+
   $("page").innerHTML=`
     <div class="h-title">🦁 LionCoin Wallet</div>
     <div class="wallet-card">
@@ -3684,32 +3739,32 @@ function renderWallet(){
       </div>
       <button class="btn primary block" data-action="sendlnc" style="margin-top:16px;font-size:15px">💸 Send LionCoins</button>
     </div>
-    <div class="h-title" style="margin-top:24px">How to earn LionCoins</div>
-    <div class="wallet-earn-grid">
-      <div class="wallet-earn-row"><span>🎵 Track view (unique per day)</span><span class="wallet-earn-amt">+1 LNC</span></div>
-      <div class="wallet-earn-row"><span>⬆️ Upload a track</span><span class="wallet-earn-amt">+10 LNC</span></div>
-      <div class="wallet-earn-row"><span>📝 Post a status</span><span class="wallet-earn-amt">+3 LNC</span></div>
-      <div class="wallet-earn-row"><span>💬 Write a comment</span><span class="wallet-earn-amt">+1 LNC</span></div>
-      <div class="wallet-earn-row"><span>💬 Receive a comment</span><span class="wallet-earn-amt">+2 LNC</span></div>
-      <div class="wallet-earn-row"><span>👍 Receive a reaction</span><span class="wallet-earn-amt">+0.5 LNC</span></div>
-      <div class="wallet-earn-row"><span>🫂 New fan follows you</span><span class="wallet-earn-amt">+5 LNC</span></div>
-      <div class="wallet-earn-row"><span>🌅 Daily login</span><span class="wallet-earn-amt">+2 LNC</span></div>
-      <div class="wallet-earn-row"><span>🔥 7-day login streak</span><span class="wallet-earn-amt">+50 LNC</span></div>
-      <div class="wallet-earn-row"><span>🏆 30-day login streak</span><span class="wallet-earn-amt">+300 LNC</span></div>
-      <div class="wallet-earn-row"><span>🏅 Reach 10 fans</span><span class="wallet-earn-amt">+100 LNC</span></div>
-      <div class="wallet-earn-row"><span>🏅 Reach 100 fans</span><span class="wallet-earn-amt">+500 LNC</span></div>
-      <div class="wallet-earn-row"><span>🏅 Reach 1,000 fans</span><span class="wallet-earn-amt">+2,000 LNC</span></div>
-      <div class="wallet-earn-row"><span>🏅 Reach 10,000 fans</span><span class="wallet-earn-amt">+10,000 LNC</span></div>
-    </div>
-    <div class="h-title" style="margin-top:24px">Transaction History</div>
-    ${txs.length?`<div class="tx-list">${txs.map(tx=>`
-      <div class="tx-row">
-        <span class="tx-icon">${typeIcon[tx.type]||'🦁'}</span>
-        <span class="tx-desc">${esc(tx.description)}</span>
-        <span class="tx-time">${timeAgo(tx.createdAt)}</span>
-        <span class="tx-amount ${tx.amount>0?'pos':'neg'}">${tx.amount>0?'+':''}${tx.amount} LNC</span>
-      </div>`).join('')}</div>`
-    :'<div class="empty">No transactions yet — start posting and uploading to earn LionCoins! 🦁</div>'}`;
+
+    <details class="wallet-accordion">
+      <summary class="wallet-accordion-hdr">How to Earn LionCoins <span class="wallet-acc-arrow">▸</span></summary>
+      <div class="wallet-earn-grid">
+        <div class="wallet-earn-row"><span>🎵 Track view (unique per day)</span><span class="wallet-earn-amt">+1 LNC</span></div>
+        <div class="wallet-earn-row"><span>⬆️ Upload a track</span><span class="wallet-earn-amt">+10 LNC</span></div>
+        <div class="wallet-earn-row"><span>📝 Post a status</span><span class="wallet-earn-amt">+3 LNC</span></div>
+        <div class="wallet-earn-row"><span>💬 Write a comment</span><span class="wallet-earn-amt">+1 LNC</span></div>
+        <div class="wallet-earn-row"><span>💬 Receive a comment</span><span class="wallet-earn-amt">+2 LNC</span></div>
+        <div class="wallet-earn-row"><span>👍 Receive a reaction</span><span class="wallet-earn-amt">+0.5 LNC</span></div>
+        <div class="wallet-earn-row"><span>🫂 New fan follows you</span><span class="wallet-earn-amt">+5 LNC</span></div>
+        <div class="wallet-earn-row"><span>🌅 Daily login</span><span class="wallet-earn-amt">+2 LNC</span></div>
+        <div class="wallet-earn-row"><span>🔥 7-day login streak</span><span class="wallet-earn-amt">+50 LNC</span></div>
+        <div class="wallet-earn-row"><span>🏆 30-day login streak</span><span class="wallet-earn-amt">+300 LNC</span></div>
+        <div class="wallet-earn-row"><span>🏅 Reach 10 fans</span><span class="wallet-earn-amt">+100 LNC</span></div>
+        <div class="wallet-earn-row"><span>🏅 Reach 100 fans</span><span class="wallet-earn-amt">+500 LNC</span></div>
+        <div class="wallet-earn-row"><span>🏅 Reach 1,000 fans</span><span class="wallet-earn-amt">+2,000 LNC</span></div>
+        <div class="wallet-earn-row"><span>🏅 Reach 10,000 fans</span><span class="wallet-earn-amt">+10,000 LNC</span></div>
+      </div>
+    </details>
+
+    <details class="wallet-accordion">
+      <summary class="wallet-accordion-hdr">Transaction History <span class="tx-hdr-count">(${txs.length})</span><span class="wallet-acc-arrow">▸</span></summary>
+      <div class="tx-categories">${txSection}</div>
+    </details>`;
+
   setTimeout(()=>{
     const chk=$('walletPublicChk');
     if(chk) chk.onchange=async()=>{ await fbDB.collection('wallets').doc(ME.id).set({isPublic:chk.checked},{merge:true}).catch(()=>{}); toast(chk.checked?'Balance is now public 👁️':'Balance is now private 🔒'); };
