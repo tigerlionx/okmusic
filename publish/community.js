@@ -5194,14 +5194,12 @@ function startCall(uid, type){
 }
 
 async function switchCallVideo(){
-  if(!activePc)return;
+  if(!activePc||!_videoSender)return;
   if(!_callHasVideo){
     try{
       const vs=await navigator.mediaDevices.getUserMedia({video:true});
       const vt=vs.getVideoTracks()[0]; if(!vt){toast("Camera not available");return;}
-      activeStream.addTrack(vt);
-      if(_videoSender) await _videoSender.replaceTrack(vt);
-      else _videoSender=activePc.addTrack(vt,activeStream);
+      await _videoSender.replaceTrack(vt); // no renegotiation needed — sender already exists
       _callHasVideo=true; _cameraOff=false;
       const lv=$("localVideo"); if(lv){lv.srcObject=activeStream;lv.play().catch(()=>{});}
       const va=$("callVideoArea"); if(va)va.style.display='';
@@ -5211,8 +5209,8 @@ async function switchCallVideo(){
       toast("📹 Camera on");
     }catch(e){toast("Camera error: "+(e.message||e));}
   } else {
-    if(_videoSender) await _videoSender.replaceTrack(createBlackVideoTrack()).catch(()=>{});
-    activeStream.getVideoTracks().forEach(t=>{t.stop();});
+    activeStream.getVideoTracks().forEach(t=>t.stop());
+    await _videoSender.replaceTrack(createBlackVideoTrack()).catch(()=>{});
     _callHasVideo=false; _cameraOff=true;
     const va=$("callVideoArea"); if(va)va.style.display='none';
     const aw=$("callAvatarWrap"); if(aw)aw.style.display='';
@@ -5287,7 +5285,7 @@ async function initiateCall(uid, callType){
       stream=await navigator.mediaDevices.getUserMedia({audio:true}); _cameraOff=true; _callHasVideo=false;
     }
     activeStream=stream;
-    if(!_cameraOff&&_callHasVideo){
+    if(_callHasVideo){
       const lv=$("localVideo");if(lv){lv.srcObject=stream;lv.play().catch(()=>{});}
       const va=$("callVideoArea");if(va)va.style.display='';
       const aw=$("callAvatarWrap");if(aw)aw.style.display='none';
@@ -5296,7 +5294,11 @@ async function initiateCall(uid, callType){
     startVoiceViz(stream);
     const iceServers=await getICE();
     const pc=new RTCPeerConnection({iceServers});activePc=pc;
-    stream.getTracks().forEach(t=>pc.addTrack(t,stream));
+    // Always add audio track(s); always add a video sender (black placeholder when audio-only)
+    // so replaceTrack() works mid-call without SDP renegotiation
+    stream.getAudioTracks().forEach(t=>pc.addTrack(t,stream));
+    const videoTrack=stream.getVideoTracks()[0]||createBlackVideoTrack();
+    _videoSender=pc.addTrack(videoTrack,stream);
 
     pc.ontrack=e=>{
       const ms=(e.streams&&e.streams.length&&e.streams[0])||new MediaStream([e.track]);
@@ -5350,8 +5352,6 @@ async function initiateCall(uid, callType){
     const offer=await pc.createOffer();
     await pc.setLocalDescription(offer); // <-- gathering starts here
 
-    // Track the video sender so we can replaceTrack without renegotiating
-    _videoSender=activePc.getSenders().find(s=>s.track&&s.track.kind==='video')||null;
     await fbDB.collection("calls").doc(cid).set({
       callerId:ME.id,calleeId:uid,
       callType:callType||'audio',
@@ -5405,7 +5405,7 @@ async function acceptCall(uid){
       stream=await navigator.mediaDevices.getUserMedia({audio:true}); _cameraOff=true; _callHasVideo=false;
     }
     activeStream=stream;
-    if(!_cameraOff&&_callHasVideo){
+    if(_callHasVideo){
       const lv=$("localVideo");if(lv){lv.srcObject=stream;lv.play().catch(()=>{});}
       const va=$("callVideoArea");if(va)va.style.display='';
       const aw=$("callAvatarWrap");if(aw)aw.style.display='none';
@@ -5414,7 +5414,9 @@ async function acceptCall(uid){
     startVoiceViz(stream);
     const iceServers=await getICE();
     const pc=new RTCPeerConnection({iceServers});activePc=pc;
-    stream.getTracks().forEach(t=>pc.addTrack(t,stream));
+    stream.getAudioTracks().forEach(t=>pc.addTrack(t,stream));
+    const acceptVideoTrack=stream.getVideoTracks()[0]||createBlackVideoTrack();
+    _videoSender=pc.addTrack(acceptVideoTrack,stream);
 
     pc.ontrack=e=>{
       const ms=(e.streams&&e.streams.length&&e.streams[0])||new MediaStream([e.track]);
@@ -5465,9 +5467,6 @@ async function acceptCall(uid){
       if(docReady) fbDB.collection("calls").doc(cid).update({calleeCandidates:firebase.firestore.FieldValue.arrayUnion(j)}).catch(()=>{});
       else buf.push(j);
     };
-
-    // Track video sender for mid-call switching
-    _videoSender=pc.getSenders().find(s=>s.track&&s.track.kind==='video')||null;
 
     await pc.setRemoteDescription(new RTCSessionDescription(d.offer));
     const answer=await pc.createAnswer();
