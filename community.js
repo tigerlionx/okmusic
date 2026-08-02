@@ -6070,10 +6070,13 @@ async function renderLiveStream(streamId){
       el.scrollTop=el.scrollHeight;
     });
 
-  if(isHost) await _startAgoraHost(streamId,s.channelName||streamId);
-  else {
-    await _startAgoraAudience(streamId,s.channelName||streamId);
-    fbDB.collection("liveStreams").doc(streamId).update({viewerCount:firebase.firestore.FieldValue.increment(1)}).catch(()=>{});
+  // Only join Agora if not already in this stream — prevents UID_CONFLICT on re-renders
+  if(_agoraSid!==streamId){
+    if(isHost) await _startAgoraHost(streamId,s.channelName||streamId);
+    else {
+      await _startAgoraAudience(streamId,s.channelName||streamId);
+      fbDB.collection("liveStreams").doc(streamId).update({viewerCount:firebase.firestore.FieldValue.increment(1)}).catch(()=>{});
+    }
   }
 
   setTimeout(()=>{
@@ -6113,7 +6116,8 @@ async function _startAgoraHost(streamId,channelName){
     const {token,appId}=await _getAgoraToken(channelName,'host');
     _agoraClient=AgoraRTC.createClient({mode:'live',codec:'vp8'});
     await _agoraClient.setClientRole('host');
-    await _agoraClient.join(appId,channelName,token,ME.id);
+    const agoraUid=Math.floor(Math.random()*999999)+1; // random int — token built with uid=0 accepts any
+    await _agoraClient.join(appId,channelName,token,agoraUid);
     _agoraLocalTracks=await AgoraRTC.createMicrophoneAndCameraTracks({},{facingMode:'user'});
     await _agoraClient.publish(_agoraLocalTracks);
     const preview=document.getElementById('hostPreviewVideo');
@@ -6159,7 +6163,8 @@ async function _startAgoraAudience(streamId,channelName){
       const s=document.getElementById('streamStatus');
       if(s){s.style.display='';s.textContent='Host has left the stream.';}
     });
-    await _agoraClient.join(appId,channelName,token,ME?.id||('viewer_'+Date.now()));
+    const agoraUid=Math.floor(Math.random()*999999)+1;
+    await _agoraClient.join(appId,channelName,token,agoraUid);
     const s=document.getElementById('streamStatus');if(s)s.textContent='Waiting for host…';
   }catch(e){
     const s=document.getElementById('streamStatus');
