@@ -24,6 +24,11 @@ service cloud.firestore {
       allow write: if signedIn() && request.auth.uid == uid;
     }
 
+    match /userFollows/{uid} {
+      allow read: if true;
+      allow write: if signedIn() && request.auth.uid == uid;
+    }
+
     match /tracks/{id} {
       allow read: if true;
       allow create: if signedIn() && request.resource.data.userId == request.auth.uid;
@@ -32,6 +37,7 @@ service cloud.firestore {
 
     match /statuses/{id} {
       allow read: if true;
+      // Author must be the signed-in user; wallUid (if set) is the page owner
       allow create: if signedIn() && request.resource.data.userId == request.auth.uid;
       allow update, delete: if signedIn() && resource.data.userId == request.auth.uid;
     }

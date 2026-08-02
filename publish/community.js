@@ -239,12 +239,20 @@ function playlistsByUser(uid){
   return [...local,...Object.values(cloudMap).sort((a,b)=>b.createdAt-a.createdAt)];
 }
 function allStatuses(){ const s=SEED_STATUSES.map(x=>({ ...x, time:seedAt(x.ageHrs) })); return CACHE.statuses.map(x=>({ ...x })).concat(s); }
-function statusesByUser(uid){ return allStatuses().filter(s=>s.userId===uid).sort((a,b)=>b.time-a.time); }
+function statusesByUser(uid){ return allStatuses().filter(s=>s.userId===uid||(s.wallUid&&s.wallUid===uid)).sort((a,b)=>b.time-a.time); }
 function currentUser(){ return ME; }
 function isAdmin(){ return fbAuth.currentUser?.email===ADMIN_EMAIL; }
 function followerCount(uid){ let n=SEED_FOLLOWERS[uid]||0; for(const f in CACHE.follows) if(CACHE.follows[f].includes(uid)) n++; return n; }
 function followingCount(uid){ return (CACHE.follows[uid]||[]).length; }
 function isFollowing(uid){ return ME&&(CACHE.follows[ME.id]||[]).includes(uid); }
+// New one-way follow system (separate from fan/follows)
+function isFollowingUser(uid){ return ME&&(CACHE.userFollows[ME.id]||[]).includes(uid); }
+function userFollowerCount(uid){ let n=0; for(const f in CACHE.userFollows) if(CACHE.userFollows[f].includes(uid)) n++; return n; }
+function followersOfUser(uid){ const r=[]; for(const f in CACHE.userFollows){ if(CACHE.userFollows[f].includes(uid)) r.push(f); } return r; }
+// isFanOf: ME is an accepted fan of uid (ME is in uid's followersOf list)
+function isFanOf(uid){ return ME&&followersOf(uid).includes(ME.id); }
+// hasPendingFanRequest: ME sent a fan request to uid (not yet accepted)
+function hasPendingFanRequestTo(uid){ return (CACHE.fanRequestsSent||[]).some(r=>r.toUid===uid&&r.status==='pending'); }
 function likeCount(t){ return (SEED_STATS[t]?.likes||0)+((CACHE.reactions["t_"+t]?.likes||[]).length); }
 function dislikeCount(t){ return (CACHE.reactions["t_"+t]?.dislikes||[]).length; }
 function hasLiked(t){ return ME&&(CACHE.reactions["t_"+t]?.likes||[]).includes(ME.id); }
@@ -266,7 +274,7 @@ let toastTimer; function toast(m){ const e=$("toast"); e.textContent=m; e.hidden
 // ---------- state ----------
 let ME=null;                                   // the signed-in user's profile (Firebase)
 // live shared data, kept in sync by Firestore listeners
-const CACHE={ users:{}, tracks:[], statuses:[], follows:{}, reactions:{}, comments:[], notifications:[], products:[], sellers:{}, orders:[], convos:{}, suggestions:[], followRequests:[], wallet:null, walletTxs:[], contests:[], discoveryPosts:[] };
+const CACHE={ users:{}, tracks:[], statuses:[], follows:{}, userFollows:{}, reactions:{}, comments:[], notifications:[], products:[], sellers:{}, orders:[], convos:{}, suggestions:[], followRequests:[], fanRequestsSent:[], wallet:null, walletTxs:[], contests:[], discoveryPosts:[], customCategories:[], fxRates:{} };
 let state={ view:"discover", profileId:null, query:"", cart:JSON.parse(localStorage.getItem("okmusic_cart")||"[]"), openFolders:new Set() };
 function persistCart(){ try{ localStorage.setItem("okmusic_cart",JSON.stringify(state.cart||[])); }catch(e){} }
 let playMode="continuous"; // "continuous" | "repeat" | "shuffle"
@@ -942,8 +950,11 @@ function card(t){
 
 // ---------- home feed (status timeline) ----------
 function renderHome(){
-  const u=currentUser(); const f=CACHE.follows[u.id]||[];
-  const list=allStatuses().filter(s=>s.userId===u.id||f.includes(s.userId)).sort((a,b)=>b.time-a.time);
+  const u=currentUser();
+  const fanOf=CACHE.follows[u.id]||[];
+  const following=CACHE.userFollows[u.id]||[];
+  const feedUids=new Set([...fanOf,...following]);
+  const list=allStatuses().filter(s=>s.userId===u.id||feedUids.has(s.userId)).sort((a,b)=>b.time-a.time);
   $("page").innerHTML=`<div class="h-title">My Feed</div>
     ${composer()}
     ${list.length?list.map(statusCard).join(""):'<div class="empty">Follow artists to see their updates here — or post your own status above.</div>'}`;
@@ -961,21 +972,56 @@ function renderProfile(uid){
   const plIds=new Set(pls.map(p=>p.id));
   const standaloneTracks=tracks.filter(t=>!t.playlistId||!plIds.has(t.playlistId));
   const blocked=hasBlocked(uid);
+  const isFan=isFollowing(uid);               // ME is an accepted fan of this page
+  const fanPending=!isFan&&hasPendingFanRequestTo(uid);
+  const isFollowUser=isFollowingUser(uid);     // ME follows this user (one-way, instant)
+  const requiresApproval=!!(u.privacy?.requireFollowApproval);
+
+  // Fan button: "Become fan" / "Requested ↗" / "Fan ✓" + "Un-fan" if already fan
+  const fanBtn=(()=>{
+    if(isFan) return `<button class="btn" data-action="unfanself" data-uid="${uid}">🫂 Fan ✓</button>`;
+    if(fanPending) return `<button class="btn" data-action="cancelfanrequest" data-uid="${uid}">Requested ↗</button>`;
+    return `<button class="btn primary" data-action="follow" data-uid="${uid}">🫂 Become fan</button>`;
+  })();
+  // Follow button: always available (separate from fan)
+  const followBtn=`<button class="btn${isFollowUser?' follow-active':''}" data-action="toggleuserfollow" data-uid="${uid}">${isFollowUser?'Following ✓':'Follow'}</button>`;
+
   const headActions=mine
     ? `<button class="btn primary" data-action="customize">🎨 Edit profile</button><button class="btn" data-action="invite">✉️ Invite</button><button class="btn" data-action="settings">⚙️ Settings</button>`
-    : `${(()=>{const following=isFollowing(uid);const requested=!following&&(CACHE.followRequests||[]).some(r=>r.fromUid===ME?.id&&r.toUid===uid&&r.status==='pending');return`<button class="btn ${following?'':'primary'}" data-action="follow" data-uid="${uid}">${following?'Following ✓':requested?'Requested ↗':'Follow'}</button>`;})()}
+    : `${fanBtn} ${followBtn}
        ${!blocked&&canMessage(uid)?`<button class="btn" data-action="openchat" data-uid="${uid}">💬 Message</button>`:''}
        ${!blocked?`<button class="btn" data-action="sendlnc" data-uid="${uid}">🦁 Send LNC</button>`:''}
        <button class="btn" data-action="blockuser" data-uid="${uid}" style="${blocked?'background:#e2554f;color:#fff;border-color:#e2554f':''}">${blocked?'🚫 Blocked':'🚫 Block'}</button>
        <button class="btn" data-action="reportuser" data-uid="${uid}">⚑ Report</button>`;
-  // Private profile gate
+
+  // Profile header (always shown)
+  const profileHead=`
+    <div class="profile-cover" style="${cover}"></div>
+    <div class="profile-head"><div class="profile-avatar" style="${avatarStyle(u,104)};cursor:pointer" data-action="viewavatar" data-uid="${uid}">${u.avatarImg?'':initials(u.name)}</div>
+      <div class="profile-info"><div class="profile-name">${esc(u.name)} ${u.founder?'<span class="badge-founder">FOUNDER</span>':''}</div><div class="profile-handle">@${esc(u.handle)}</div></div></div>
+    <div class="profile-stats">
+      <div><b>${standaloneTracks.length+pls.reduce((n,p)=>n+p.files.length,0)}</b> <span>tracks</span></div>
+      <div><b>${nfmt(followerCount(uid))}</b> <span>fans</span></div>
+      <div><b>${nfmt(userFollowerCount(uid))}</b> <span>followers</span></div>
+      <div><b>${nfmt(followingCount(uid))}</b> <span>fan of</span></div>
+    </div>
+    <div class="profile-bio">${esc(u.bio||"")}</div>
+    <div class="profile-actions" style="margin-top:14px">${headActions}</div>`;
+
+  // Private profile gate (full lock — profilePrivate setting)
   if(!mine && isProfilePrivate(uid)){
-    $("page").innerHTML=`
-      <div class="profile-cover" style="${cover}"></div>
-      <div class="profile-head"><div class="profile-avatar" style="${avatarStyle(u,104)}">${u.avatarImg?'':initials(u.name)}</div>
-        <div class="profile-info"><div class="profile-name">${esc(u.name)}</div><div class="profile-handle">@${esc(u.handle)}</div></div></div>
-      <div class="profile-actions" style="margin-top:14px">${headActions}</div>
-      <div class="private-gate">🔒<div>This profile is private</div><div style="font-size:13px;color:var(--muted);margin-top:4px">Follow ${esc(u.name)} to see their tracks and posts.</div></div>`;
+    $("page").innerHTML=`${profileHead}
+      <div class="private-gate">🔒<div>This profile is private</div><div style="font-size:13px;color:var(--muted);margin-top:4px">Become a fan of ${esc(u.name)} to see their content.</div></div>`;
+    return;
+  }
+  // Fan approval gate — requireFollowApproval: non-fans see profile header + message only
+  if(!mine && requiresApproval && !isFan){
+    $("page").innerHTML=`${profileHead}
+      <div class="fan-gate">
+        <div class="fan-gate-icon">🫂</div>
+        <div class="fan-gate-title">Fan access required</div>
+        <div class="fan-gate-sub">${esc(u.name)} approves fans manually. ${fanPending?'Your request is pending.':'Send a fan request to see their music and posts.'}</div>
+      </div>`;
     return;
   }
   // MUSIC column
@@ -984,23 +1030,16 @@ function renderProfile(uid){
   if(pls.length) music+=pls.map(p=>playlistBlock(p,mine)).join("");
   if(standaloneTracks.length) music+=standaloneTracks.map(musicRow).join("");
   if(!pls.length&&!tracks.length) music+=`<div class="empty" style="padding:24px">No tracks yet.</div>`;
-  // WALL column
-  let wall = mine?composer():"";
+  // WALL column — owner can always compose; accepted fans can post to owner's wall
+  let wall = (mine||(!mine&&isFan&&ME))?fanWallComposer(uid,mine):"";
   wall += sts.length?sts.map(statusCard).join(""):`<div class="empty" style="padding:24px">No posts yet.${mine?' Share a status to talk to your fans 👆':''}</div>`;
-  $("page").innerHTML=`
-    <div class="profile-cover" style="${cover}"></div>
-    <div class="profile-head"><div class="profile-avatar" style="${avatarStyle(u,104)};cursor:pointer" data-action="viewavatar" data-uid="${uid}">${u.avatarImg?'':initials(u.name)}</div>
-      <div class="profile-info"><div class="profile-name">${esc(u.name)} ${u.founder?'<span class="badge-founder">FOUNDER</span>':''}</div><div class="profile-handle">@${esc(u.handle)}</div></div></div>
-    <div class="profile-stats"><div><b>${standaloneTracks.length+pls.reduce((n,p)=>n+p.files.length,0)}</b> <span>tracks</span></div>
-      <div><b>${nfmt(followerCount(uid))}</b> <span>fans</span></div><div><b>${nfmt(followingCount(uid))}</b> <span>following</span></div></div>
-    <div class="profile-bio">${esc(u.bio||"")}</div>
-    <div class="profile-actions" style="margin-top:14px">${headActions}</div>
+  $("page").innerHTML=`${profileHead}
     <div class="divider"></div>
     <div class="streamer-cols">
       <div class="col-music"><div class="col-h">🎵 Music <span class="col-hint">· like or dislike</span></div>${music}</div>
       <div class="col-wall"><div class="col-h">💬 Wall <span class="col-hint">· comment & react here</span></div>${wall}</div>
     </div>`;
-  pls.forEach(loadCovers); setTimeout(bindComposer,0);
+  pls.forEach(loadCovers); setTimeout(()=>bindComposer(uid),0);
 }
 
 // ---------- music row (like/dislike only) ----------
@@ -1020,7 +1059,15 @@ function composer(){
   return `<div class="status-composer"><textarea id="statusText" placeholder="Share a status with your fans… e.g. I just posted new tracks — please listen, like & share! 💜"></textarea>
     <div style="text-align:right"><button class="btn primary sm" data-action="poststatus">Post status</button></div></div>`;
 }
-function bindComposer(){ /* nothing extra; handled via delegation */ }
+// Wall composer for profile pages — owner posts normally; accepted fans post to the wall
+function fanWallComposer(pageOwnerUid, isOwner){
+  if(isOwner) return composer();
+  return `<div class="status-composer fan-wall-composer">
+    <textarea id="statusText" placeholder="Post to ${esc(userById(pageOwnerUid)?.name||'their')} wall…"></textarea>
+    <div style="text-align:right"><button class="btn primary sm" data-action="poststatus" data-walluid="${pageOwnerUid}">Post to wall</button></div>
+  </div>`;
+}
+function bindComposer(wallUid){ /* nothing extra; handled via delegation */ }
 // ---- link preview helpers ----
 const _URL_RE=/https?:\/\/[^\s<>"']+/g;
 function linkifyText(raw){
@@ -1105,10 +1152,16 @@ function statusCard(s){
     <div class="scomments">${cmts}
       <div class="cmt-add"><input id="sc_${s.id}" placeholder="Write a comment…" /><button class="btn sm primary" data-action="scomment" data-id="${s.id}">Post</button></div></div></div>`;
 }
-function postStatus(){
+function postStatus(el){
   const t=($("statusText").value||"").trim(); if(!t) return toast("Write something to share");
   if(!ME) return openEmailAuth();
-  fbDB.collection("statuses").add({ userId:ME.id, text:t, time:Date.now() }).then(()=>{ toast("Posted to your wall 📣"); WALLET.credit(ME.id,3,'status_post','Status post'); }).catch(e=>toast("Couldn't post: "+(e.code||e.message)));
+  const wallUid=(el&&el.dataset&&el.dataset.walluid)||null;
+  const doc={ userId:ME.id, text:t, time:Date.now() };
+  if(wallUid&&wallUid!==ME.id) doc.wallUid=wallUid;
+  fbDB.collection("statuses").add(doc).then(()=>{
+    toast(wallUid&&wallUid!==ME.id?"Posted to their wall 📣":"Posted to your wall 📣");
+    WALLET.credit(ME.id,3,'status_post','Status post');
+  }).catch(e=>toast("Couldn't post: "+(e.code||e.message)));
 }
 function stLike(id){ if(!ME) return openEmailAuth(); const F=firebase.firestore.FieldValue; const has=(CACHE.reactions["s_"+id]?.likes||[]).includes(ME.id);
   fbDB.collection("reactions").doc("s_"+id).set({ likes: has?F.arrayRemove(ME.id):F.arrayUnion(ME.id), dislikes:F.arrayRemove(ME.id) },{merge:true}).catch(e=>toast(e.code||e.message));
@@ -1340,10 +1393,12 @@ async function doPublish(){
       closeOverlay(); window._trackCover=null; window._audioFile=null;
       toast(isPublic?"Published! 🎵":"Saved private 🔒"); go("mymusic");
       WALLET.credit(ME.id,10,'track_upload','Track uploaded: '+title);
-      // Notify all followers about the new public track
+      // Notify all fans + followers about the new public track
       if(isPublic){
         const fans=followersOf(ME.id).filter(uid=>!String(uid).startsWith("u_"));
-        fans.forEach(uid=>{ fbDB.collection("notifications").add({ forUid:uid, type:"new_track", fromUid:ME.id, fromName:ME.name, text:`🎵 ${ME.name} posted a new track: ${title}`, time:Date.now(), read:false }).catch(()=>{}); });
+        const followersArr=followersOfUser(ME.id).filter(uid=>!String(uid).startsWith("u_"));
+        const allToNotify=[...new Set([...fans,...followersArr])];
+        allToNotify.forEach(uid=>{ fbDB.collection("notifications").add({ forUid:uid, type:"new_track", fromUid:ME.id, fromName:ME.name, text:`🎵 ${ME.name} posted a new track: ${title}`, time:Date.now(), read:false }).catch(()=>{}); });
       }
     })
     .catch(e=>toast("Couldn't save: "+(e.code||e.message))); }
@@ -1656,7 +1711,7 @@ function toggleFollow(uid){
       t.set(rewardRef,{followerId:ME.id,followeeId:uid,createdAt:Date.now()});
     }).then(()=>{ WALLET.credit(uid,5,'new_fan',`${ME.name} is now your fan`); checkFanMilestone(uid); }).catch(()=>{});
   }).catch(e=>toast(e.code||e.message));
-  notify(uid,"follow",`${ME.name} is now one of your fans 🎉`);
+  notify(uid,"new_fan",`${ME.name} is now one of your fans 🎉`);
 }
 function logout(){ fbAuth.signOut(); }
 
@@ -2092,7 +2147,17 @@ async function doSaveProduct(productId){
   }
   try{
     if(productId){ await fbDB.collection("products").doc(productId).update(data); closeOverlay(); toast("Product updated ✓"); }
-    else{ data.createdAt=Date.now(); await fbDB.collection("products").add(data); closeOverlay(); toast("Product listed! 🎉"); }
+    else{
+      data.createdAt=Date.now();
+      await fbDB.collection("products").add(data);
+      closeOverlay(); toast("Product listed! 🎉");
+      // Notify fans + followers about new marketplace item
+      const fans=followersOf(ME.id).filter(uid=>!String(uid).startsWith("u_"));
+      const followersArr=followersOfUser(ME.id).filter(uid=>!String(uid).startsWith("u_"));
+      [...new Set([...fans,...followersArr])].forEach(uid=>{
+        fbDB.collection("notifications").add({ forUid:uid, type:"new_product", fromUid:ME.id, fromName:ME.name, text:`🛍️ ${ME.name} listed a new product: ${data.title}`, time:Date.now(), read:false }).catch(()=>{});
+      });
+    }
     go("mystore");
   } catch(e){
     if(saveBtn){saveBtn.disabled=false;saveBtn.textContent=productId?'Save changes':'List product';}
@@ -2735,7 +2800,9 @@ function renderFans(){
   const me=currentUser(); if(!me) return;
   const tab=state.fanTab||"fans";
   const fans=followersOf(me.id).map(userById).filter(Boolean);
-  const following=followingOf(me.id).map(userById).filter(Boolean);
+  const fanOf=followingOf(me.id).map(userById).filter(Boolean);                     // people ME is a fan of
+  const following=(CACHE.userFollows[me.id]||[]).map(userById).filter(Boolean);     // one-way follows
+  const followers=followersOfUser(me.id).map(userById).filter(Boolean);             // one-way followers
   const pendingReqs=(CACHE.followRequests||[]).filter(r=>r.toUid===me.id&&r.status==='pending');
   const reqCount=pendingReqs.length;
   let content="";
@@ -2753,15 +2820,32 @@ function renderFans(){
         <button class="btn sm primary" data-action="acceptfollow" data-fromuid="${r.fromUid}" data-reqid="${r.id}">Accept</button>
         <button class="btn sm" data-action="rejectfollow" data-fromuid="${r.fromUid}" data-reqid="${r.id}">Decline</button>
       </div>`}).join(""):'<div class="empty">No pending fan requests.</div>';
+  } else if(tab==="fanof"){
+    content=fanOf.length?fanOf.map(u=>`<div class="mrow2">
+      <div class="avatar" style="${avatarStyle(u,44)};cursor:pointer" data-action="viewavatar" data-uid="${u.id}">${u.avatarImg?'':initials(u.name)}</div>
+      <div class="minfo"><div class="mt" data-action="profile" data-uid="${u.id}">${esc(u.name)}</div><div class="ms">@${esc(u.handle)} · ${nfmt(followerCount(u.id))} fans</div></div>
+      <button class="btn sm" style="color:#e2554f;border-color:#e2554f" data-action="unfanself" data-uid="${u.id}">Un-fan</button>
+    </div>`).join(""):'<div class="empty">You\'re not a fan of anyone yet. Visit profiles and become a fan to access their full content.</div>';
+  } else if(tab==="following"){
+    content=following.length?following.map(u=>`<div class="mrow2">
+      <div class="avatar" style="${avatarStyle(u,44)};cursor:pointer" data-action="viewavatar" data-uid="${u.id}">${u.avatarImg?'':initials(u.name)}</div>
+      <div class="minfo"><div class="mt" data-action="profile" data-uid="${u.id}">${esc(u.name)}</div><div class="ms">@${esc(u.handle)}</div></div>
+      <button class="btn sm" data-action="unfollowuser" data-uid="${u.id}">Unfollow</button>
+    </div>`).join(""):'<div class="empty">You\'re not following anyone yet. Visit profiles and tap Follow to get updates when they post.</div>';
   } else {
-    content=following.length?following.map(userCard).join(""):'<div class="empty">You\'re not following anyone yet. Open Discover and follow creators you love.</div>';
+    content=followers.length?followers.map(u=>`<div class="mrow2">
+      <div class="avatar" style="${avatarStyle(u,44)};cursor:pointer" data-action="viewavatar" data-uid="${u.id}">${u.avatarImg?'':initials(u.name)}</div>
+      <div class="minfo"><div class="mt" data-action="profile" data-uid="${u.id}">${esc(u.name)}</div><div class="ms">@${esc(u.handle)}</div></div>
+    </div>`).join(""):'<div class="empty">No followers yet — share your profile to get followed.</div>';
   }
   $("page").innerHTML=`<div class="h-title">My Fanbase</div>
     ${myBusyToggle()}
-    <div class="tabs" style="margin-top:10px">
-      <button class="tab ${tab==='fans'?'active':''}" data-action="fantab" data-t="fans">Fans (${fans.length})</button>
-      <button class="tab ${tab==='requests'?'active':''}" data-action="fantab" data-t="requests">Requests${reqCount?` <span class="bell-badge" style="position:static;margin-left:4px">${reqCount}</span>`:''}  </button>
+    <div class="tabs" style="margin-top:10px;flex-wrap:wrap">
+      <button class="tab ${tab==='fans'?'active':''}" data-action="fantab" data-t="fans">🫂 Fans (${fans.length})</button>
+      <button class="tab ${tab==='requests'?'active':''}" data-action="fantab" data-t="requests">Requests${reqCount?` <span class="bell-badge" style="position:static;margin-left:4px">${reqCount}</span>`:` (0)`}</button>
+      <button class="tab ${tab==='fanof'?'active':''}" data-action="fantab" data-t="fanof">Fan of (${fanOf.length})</button>
       <button class="tab ${tab==='following'?'active':''}" data-action="fantab" data-t="following">Following (${following.length})</button>
+      <button class="tab ${tab==='followers'?'active':''}" data-action="fantab" data-t="followers">Followers (${followers.length})</button>
     </div>${content}`;
 }
 
@@ -2886,8 +2970,8 @@ function renderNotifs(){
     list.length?list.map(n=>{
       const isPlatform=n.fromUid==="platform";
       const isMsg=n.type==="message";
-      const isFollowReq=n.type==="followrequest";
-      const action=isPlatform?`data-action="showguide"`:isMsg?`data-action="openchat" data-uid="${n.fromUid}"`:isFollowReq?`data-action="fantab" data-t="requests"` :`data-action="profile" data-uid="${n.fromUid}"`;
+      const isFanReq=n.type==="fan_request"||n.type==="followrequest";
+      const action=isPlatform?`data-action="showguide"`:isMsg?`data-action="openchat" data-uid="${n.fromUid}"`:isFanReq?`data-action="fantab" data-t="requests"` :`data-action="profile" data-uid="${n.fromUid}"`;
       const av=isPlatform
         ?`<div class="avatar" style="width:42px;height:42px;font-size:20px;background:var(--orange);flex-shrink:0;border-radius:50%;display:grid;place-items:center;color:#fff">◎</div>`
         :`<div class="avatar" style="${avatarStyle(userById(n.fromUid)||{color:'#FB7A28'},42)}">${(userById(n.fromUid)?.avatarImg)?'':initials(n.fromName||'?')}</div>`;
@@ -3321,7 +3405,7 @@ async function sendFollowRequest(targetUid){
   const reqData={fromUid:ME.id,fromName:ME.name,toUid:targetUid,time:Date.now(),status:'pending'};
   try{
     await fbDB.collection('followRequests').add(reqData);
-    notify(targetUid,'followrequest',`${ME.name} wants to be your fan`);
+    notify(targetUid,'fan_request',`${ME.name} wants to be your fan`);
     toast('Follow request sent');
     scheduleRender();
   }catch(e){toast(e.message||'Could not send request');}
@@ -3333,10 +3417,11 @@ async function acceptFollowRequest(fromUid,reqId){
   try{
     await fbDB.collection('follows').doc(fromUid).set({following:F.arrayUnion(ME.id)},{merge:true});
     await fbDB.collection('followRequests').doc(reqId).delete();
-    notify(fromUid,'follow',`${ME.name} accepted your fan request 🎉`);
+    notify(fromUid,'fan_accepted',`${ME.name} accepted your fan request 🎉`);
     WALLET.credit(ME.id,5,'new_fan',`New fan: ${userById(fromUid)?.name||fromUid}`);
     checkFanMilestone(ME.id);
     toast('Fan request accepted ✓');
+    scheduleRender();
   }catch(e){toast(e.message||'Error');}
 }
 
@@ -3355,6 +3440,46 @@ async function removeFan(fanUid){
     toast('Fan removed');
   }catch(e){toast(e.message||'Error');}
 }
+
+// Cancel a pending fan request that ME sent to toUid
+async function cancelFanRequest(toUid){
+  if(!ME) return;
+  const req=(CACHE.fanRequestsSent||[]).find(r=>r.toUid===toUid&&r.status==='pending');
+  if(!req) return toast('No pending request found');
+  try{
+    await fbDB.collection('followRequests').doc(req.id).delete();
+    toast('Fan request cancelled');
+    scheduleRender();
+  }catch(e){toast(e.message||'Error');}
+}
+
+// ME removes themselves from pageOwner's fanbase (un-fan)
+async function unfanSelf(pageOwnerUid){
+  if(!ME) return;
+  const F=firebase.firestore.FieldValue;
+  try{
+    await fbDB.collection('follows').doc(ME.id).set({following:F.arrayRemove(pageOwnerUid)},{merge:true});
+    toast('You left their fanbase');
+    scheduleRender();
+  }catch(e){toast(e.message||'Error');}
+}
+
+// ── One-way follow system (instant, separate from fan) ──────────────────────
+async function toggleUserFollow(uid){
+  if(!ME) return openEmailAuth();
+  const F=firebase.firestore.FieldValue;
+  const has=(CACHE.userFollows[ME.id]||[]).includes(uid);
+  if(has){
+    await fbDB.collection('userFollows').doc(ME.id).set({list:F.arrayRemove(uid)},{merge:true})
+      .then(()=>toast('Unfollowed')).catch(e=>toast(e.message||'Error'));
+  } else {
+    await fbDB.collection('userFollows').doc(ME.id).set({list:F.arrayUnion(uid)},{merge:true})
+      .then(()=>{ toast('Following ✓'); notify(uid,'new_follow',`${ME.name} started following you`); })
+      .catch(e=>toast(e.message||'Error'));
+  }
+}
+// Unfollow alias (used from My Fans "Following" tab)
+async function unfollowUser(uid){ return toggleUserFollow(uid); }
 
 // ============ LIONCOIN WALLET ============
 const WALLET={
@@ -4118,10 +4243,24 @@ async function confirmBlock(targetUid){
   if(!ME) return;
   const blocked=[...(ME.blockedUsers||[])];
   if(!blocked.includes(targetUid)) blocked.push(targetUid);
+  const F=firebase.firestore.FieldValue;
   try{
+    // 1. Add to blockedUsers
     await fbDB.collection('users').doc(ME.id).update({ blockedUsers:blocked });
     ME.blockedUsers=blocked;
     const d=db(); if(d.usersById[ME.id]) d.usersById[ME.id].blockedUsers=blocked; commit(d);
+    // 2. Remove fan relationship both directions
+    await fbDB.collection('follows').doc(ME.id).set({following:F.arrayRemove(targetUid)},{merge:true}).catch(()=>{});
+    await fbDB.collection('follows').doc(targetUid).set({following:F.arrayRemove(ME.id)},{merge:true}).catch(()=>{});
+    // 3. Remove one-way follows both directions
+    await fbDB.collection('userFollows').doc(ME.id).set({list:F.arrayRemove(targetUid)},{merge:true}).catch(()=>{});
+    await fbDB.collection('userFollows').doc(targetUid).set({list:F.arrayRemove(ME.id)},{merge:true}).catch(()=>{});
+    // 4. Delete any pending follow requests between the two
+    const reqsOut=await fbDB.collection('followRequests').where('fromUid','==',ME.id).where('toUid','==',targetUid).get();
+    const reqsIn=await fbDB.collection('followRequests').where('fromUid','==',targetUid).where('toUid','==',ME.id).get();
+    const batch=fbDB.batch();
+    [...reqsOut.docs,...reqsIn.docs].forEach(d=>batch.delete(d.ref));
+    await batch.commit().catch(()=>{});
     toast('User blocked.');
     closeOverlay();
     render();
@@ -4295,8 +4434,13 @@ document.addEventListener("click",e=>{
     upload:openUpload, dopublish:doPublish, customize:openCustomize, savecustom:saveCustom, openresetcustom:openResetCustom, resetcustom:resetCustom, removebanner:removeBanner, removepagebg:removePageBg, invite:openInvite, setbgmode:()=>setBgMode(el.dataset.mode),
     copyinvite:()=>{ const i=$("invLink"); i.select(); if(navigator.clipboard)navigator.clipboard.writeText(i.value); toast("Invite link copied ✓"); },
     play:()=>playTrack(el.dataset.id), like:()=>toggleLike(el.dataset.id), dislike:()=>toggleDislike(el.dataset.id),
-    poststatus:postStatus, slike:()=>stLike(el.dataset.id), sdislike:()=>stDislike(el.dataset.id), scomment:()=>stComment(el.dataset.id),
-    follow:()=>toggleFollow(el.dataset.uid), share:()=>share(el.dataset.id), logout:logout, close:closeOverlay,
+    poststatus:()=>postStatus(el), slike:()=>stLike(el.dataset.id), sdislike:()=>stDislike(el.dataset.id), scomment:()=>stComment(el.dataset.id),
+    follow:()=>toggleFollow(el.dataset.uid),
+    toggleuserfollow:()=>toggleUserFollow(el.dataset.uid),
+    unfanself:()=>unfanSelf(el.dataset.uid),
+    cancelfanrequest:()=>cancelFanRequest(el.dataset.uid),
+    unfollowuser:()=>unfollowUser(el.dataset.uid),
+    share:()=>share(el.dataset.id), logout:logout, close:closeOverlay,
     publish:()=>setVisibility(el.dataset.id,"public"), unpublish:()=>setVisibility(el.dataset.id,"private"), deltrack:()=>deleteTrack(el.dataset.id),
     editcmt:()=>editComment(el.dataset.id), delcmt:()=>deleteComment(el.dataset.id),
     fantab:()=>{ state.fanTab=el.dataset.t; state.view='fans'; renderFans(); }, suggest:openSuggest, sendsuggest:sendSuggest,
@@ -5119,6 +5263,7 @@ function startListeners(){
   fbDB.collection("tracks").onSnapshot(s=>{ CACHE.tracks=s.docs.map(d=>({ id:d.id, ...d.data() })); scheduleRender(); }, e=>console.warn("tracks",e.code));
   fbDB.collection("statuses").onSnapshot(s=>{ CACHE.statuses=s.docs.map(d=>({ id:d.id, ...d.data() })); scheduleRender(); }, e=>console.warn("statuses",e.code));
   fbDB.collection("follows").onSnapshot(s=>{ CACHE.follows={}; s.forEach(d=>CACHE.follows[d.id]=(d.data().following||[])); scheduleRender(); }, e=>console.warn("follows",e.code));
+  fbDB.collection("userFollows").onSnapshot(s=>{ CACHE.userFollows={}; s.forEach(d=>CACHE.userFollows[d.id]=(d.data().list||[])); scheduleRender(); }, e=>console.warn("userFollows",e.code));
   fbDB.collection("reactions").onSnapshot(s=>{ CACHE.reactions={}; s.forEach(d=>CACHE.reactions[d.id]=d.data()); scheduleRender(); }, e=>console.warn("reactions",e.code));
   fbDB.collection("comments").onSnapshot(s=>{ CACHE.comments=s.docs.map(d=>({ id:d.id, ...d.data() })); scheduleRender(); }, e=>console.warn("comments",e.code));
   fbDB.collection("products").onSnapshot(s=>{ CACHE.products=s.docs.map(d=>({ id:d.id, ...d.data() })).sort((a,b)=>b.createdAt-a.createdAt); scheduleRender(); }, e=>console.warn("products",e.code));
@@ -5142,9 +5287,12 @@ function startAuthListeners(uid){
     ?fbDB.collection("orders")
     :fbDB.collection("orders").where("buyerId","==",uid);
   ordersQ.onSnapshot(s=>{ CACHE.orders=s.docs.map(d=>({ id:d.id, ...d.data() })); scheduleRender(); }, e=>console.warn("orders",e.code));
-  // follow requests (incoming: someone wants to follow me)
+  // follow requests incoming (someone wants to be my fan)
   fbDB.collection("followRequests").where("toUid","==",uid).where("status","==","pending")
     .onSnapshot(s=>{ CACHE.followRequests=s.docs.map(d=>({ id:d.id, ...d.data() })); scheduleRender(); }, e=>console.warn("followRequests",e.code));
+  // follow requests outgoing (requests ME sent, for cancel button)
+  fbDB.collection("followRequests").where("fromUid","==",uid).where("status","==","pending")
+    .onSnapshot(s=>{ CACHE.fanRequestsSent=s.docs.map(d=>({ id:d.id, ...d.data() })); scheduleRender(); }, e=>console.warn("fanRequestsSent",e.code));
   // LionCoin wallet
   fbDB.collection("wallets").doc(uid).onSnapshot(s=>{ CACHE.wallet=s.exists?{ id:s.id,...s.data() }:null; scheduleRender(); }, e=>console.warn("wallet",e.code));
   fbDB.collection("wallets").doc(uid).collection("transactions").orderBy("createdAt","desc").limit(60)

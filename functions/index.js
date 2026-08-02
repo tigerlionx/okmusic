@@ -1,12 +1,15 @@
 // ============================================================
 //  OK Music — Firebase Cloud Functions
-//  Sends FCM push notifications to users' devices whenever
-//  a new document is written to the `notifications` collection.
+//  • FCM push notifications on new `notifications` documents
+//  • Email notifications via nodemailer (Gmail SMTP)
+//  • Weekly digest email (scheduled, Monday 9am UTC)
 //
-//  This covers all three trigger types:
-//    • New message  (type: "message")
-//    • New track    (type: "new_track")
-//    • Incoming call (type: "call")
+//  Email setup — set environment variables in Firebase Console:
+//    Firebase Console → Functions → (function) → Edit → Environment variables
+//      EMAIL_USER = trendai509@gmail.com
+//      EMAIL_PASS = <Gmail App Password, 16 chars, no spaces>
+//    To create a Gmail App Password:
+//      myaccount.google.com → Security → 2-Step Verification → App passwords
 //
 //  Deploy:
 //    npm install -g firebase-tools   (once)
@@ -16,22 +19,167 @@
 // ============================================================
 
 const { onDocumentCreated }    = require("firebase-functions/v2/firestore");
+const { onSchedule }           = require("firebase-functions/v2/scheduler");
 const { onCall, HttpsError }   = require("firebase-functions/v2/https");
 const { initializeApp }        = require("firebase-admin/app");
 const { getFirestore }         = require("firebase-admin/firestore");
 const { getMessaging }         = require("firebase-admin/messaging");
+const nodemailer               = require("nodemailer");
 
 initializeApp();
 const db  = getFirestore();
 const fcm = getMessaging();
 
+// Read email credentials from environment variables (set in Firebase Console)
+function getEmailSecrets(){
+  return { user: process.env.EMAIL_USER || "", pass: process.env.EMAIL_PASS || "" };
+}
+
+// ── Email helper ─────────────────────────────────────────────────────────────
+function createTransport(user, pass){
+  return nodemailer.createTransport({
+    service: "gmail",
+    auth: { user, pass },
+  });
+}
+
+function emailHtml(title, body, cta=null){
+  return `<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+  body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#f5f5f5;margin:0;padding:20px;}
+  .card{background:#fff;border-radius:16px;max-width:520px;margin:0 auto;overflow:hidden;box-shadow:0 2px 12px rgba(0,0,0,.08);}
+  .hdr{background:linear-gradient(135deg,#FB7A28,#ff5c7c);padding:24px 28px;text-align:center;}
+  .hdr-logo{color:#fff;font-size:22px;font-weight:800;letter-spacing:.5px;}
+  .body{padding:24px 28px;}
+  .body h2{margin:0 0 12px;font-size:18px;color:#1a1a1a;}
+  .body p{margin:0 0 16px;font-size:15px;line-height:1.6;color:#444;}
+  .cta{display:inline-block;background:#FB7A28;color:#fff;text-decoration:none;border-radius:10px;padding:12px 24px;font-weight:700;font-size:15px;margin-top:8px;}
+  .foot{text-align:center;padding:16px 28px;font-size:12px;color:#999;}
+</style></head><body>
+<div class="card">
+  <div class="hdr"><div class="hdr-logo">◎ OK Music</div></div>
+  <div class="body">
+    <h2>${title}</h2>
+    ${body}
+    ${cta?`<div style="text-align:center;margin-top:20px"><a class="cta" href="${cta.url}">${cta.label}</a></div>`:''}
+  </div>
+  <div class="foot">You're receiving this because you have an OK Music account. <br>© OK Music — AI Music Community</div>
+</div>
+</body></html>`;
+}
+
+async function sendEmail(to, subject, html, secrets){
+  if(!to||!secrets.user||!secrets.pass) return;
+  const transporter=createTransport(secrets.user, secrets.pass);
+  await transporter.sendMail({ from:`"OK Music" <${secrets.user}>`, to, subject, html });
+}
+
+// ── Email content per notification type ──────────────────────────────────────
+function buildEmailContent(notif, recipientEmail){
+  const siteUrl = "https://ok-music-903e7.web.app/community.html";
+  const from = notif.fromName || "Someone";
+  const type = notif.type || "";
+
+  if(type === "fan_request"){
+    return {
+      subject: `🫂 ${from} wants to be your fan on OK Music`,
+      html: emailHtml(
+        `${from} sent you a fan request`,
+        `<p><b>${from}</b> wants to become one of your fans on OK Music.</p><p>Accept their request to give them full access to your music and wall.</p>`,
+        { url: siteUrl, label: "Review fan requests →" }
+      ),
+    };
+  }
+  if(type === "fan_accepted"){
+    return {
+      subject: `✅ ${from} accepted your fan request on OK Music`,
+      html: emailHtml(
+        "Your fan request was accepted!",
+        `<p><b>${from}</b> accepted your fan request. You now have full access to their music, posts, and wall on OK Music.</p>`,
+        { url: siteUrl, label: "Visit their page →" }
+      ),
+    };
+  }
+  if(type === "message"){
+    return {
+      subject: `💬 New message from ${from} on OK Music`,
+      html: emailHtml(
+        `${from} sent you a message`,
+        `<p>You have a new message from <b>${from}</b> on OK Music.</p>`,
+        { url: siteUrl, label: "Read the message →" }
+      ),
+    };
+  }
+  if(type === "new_track"){
+    return {
+      subject: `🎵 ${from} posted new music on OK Music`,
+      html: emailHtml(
+        `${from} posted new music`,
+        `<p><b>${from}</b> just shared a new track. Listen now on OK Music!</p>`,
+        { url: siteUrl, label: "Listen now →" }
+      ),
+    };
+  }
+  if(type === "new_follow"){
+    return {
+      subject: `👋 ${from} started following you on OK Music`,
+      html: emailHtml(
+        `${from} is now following you`,
+        `<p><b>${from}</b> started following you on OK Music. They'll be notified when you post new music.</p>`,
+        { url: siteUrl, label: "View your profile →" }
+      ),
+    };
+  }
+  if(type === "new_fan"){
+    return {
+      subject: `🎉 ${from} is now your fan on OK Music`,
+      html: emailHtml(
+        `You have a new fan: ${from}`,
+        `<p><b>${from}</b> became one of your fans on OK Music — you earned <b>+5 LionCoins</b>!</p>`,
+        { url: siteUrl, label: "See your fanbase →" }
+      ),
+    };
+  }
+  if(type === "new_product"){
+    return {
+      subject: `🛍️ ${from} listed a new product on OK Music Marketplace`,
+      html: emailHtml(
+        `${from} has something new for sale`,
+        `<p><b>${from}</b> just listed a new product on the OK Music Marketplace. Check it out before it sells out!</p>`,
+        { url: siteUrl, label: "Browse marketplace →" }
+      ),
+    };
+  }
+  // Generic fallback
+  return {
+    subject: `◎ OK Music — ${notif.text?.slice(0,60)||'New notification'}`,
+    html: emailHtml(
+      "New notification",
+      `<p>${notif.text||'You have a new notification on OK Music.'}</p>`,
+      { url: siteUrl, label: "Open OK Music →" }
+    ),
+  };
+}
+
+// Email types that warrant an email (not every push notification)
+const EMAIL_TYPES = new Set([
+  "fan_request", "fan_accepted", "message", "new_track",
+  "new_follow", "new_fan", "new_product",
+]);
+
+
 // Icon and sound per notification type
 const TYPE_META = {
-  message:   { icon: "ic_message",   sound: "message_ping",  channel: "messages" },
-  new_track: { icon: "ic_music",     sound: "default",       channel: "tracks"   },
-  call:      { icon: "ic_call",      sound: "ringtone",      channel: "calls"    },
-  follow:    { icon: "ic_follow",    sound: "default",       channel: "social"   },
-  default:   { icon: "ic_launcher",  sound: "default",       channel: "general"  },
+  message:      { icon: "ic_message",   sound: "message_ping",  channel: "messages" },
+  new_track:    { icon: "ic_music",     sound: "default",       channel: "tracks"   },
+  call:         { icon: "ic_call",      sound: "ringtone",      channel: "calls"    },
+  follow:       { icon: "ic_follow",    sound: "default",       channel: "social"   },
+  new_follow:   { icon: "ic_follow",    sound: "default",       channel: "social"   },
+  new_fan:      { icon: "ic_follow",    sound: "default",       channel: "social"   },
+  fan_request:  { icon: "ic_follow",    sound: "default",       channel: "social"   },
+  fan_accepted: { icon: "ic_follow",    sound: "default",       channel: "social"   },
+  new_product:  { icon: "ic_launcher",  sound: "default",       channel: "general"  },
+  default:      { icon: "ic_launcher",  sound: "default",       channel: "general"  },
 };
 
 // ── Printify helper ───────────────────────────────────────────────────────────
@@ -208,10 +356,10 @@ exports.submitPrintifyOrder = onCall({ region: "us-central1" }, async (request) 
   return { printifyOrderId: result.id };
 });
 
-// ── Push notifications ─────────────────────────────────────────────────────────
+// ── Push + email notifications ─────────────────────────────────────────────────
 // Triggered whenever a new notification document is created
 exports.sendPushOnNotification = onDocumentCreated(
-  "notifications/{notifId}",
+  { document: "notifications/{notifId}" },
   async (event) => {
     const notif = event.data?.data();
     if (!notif) return null;
@@ -221,9 +369,24 @@ exports.sendPushOnNotification = onDocumentCreated(
     // Never push to seed/demo users
     if (String(forUid).startsWith("u_")) return null;
 
-    // Look up the recipient's FCM token
+    // Look up the recipient's FCM token and email
     const userDoc = await db.collection("users").doc(forUid).get();
-    const fcmToken = userDoc.data()?.fcmToken;
+    const userData = userDoc.data() || {};
+    const fcmToken = userData.fcmToken;
+    const recipientEmail = userData.email;
+
+    // ── Send email notification ───────────────────────────────────────────────
+    if(recipientEmail && EMAIL_TYPES.has(type)){
+      try{
+        const { subject, html } = buildEmailContent(notif, recipientEmail);
+        await sendEmail(recipientEmail, subject, html, getEmailSecrets());
+        console.log(`Email sent to uid=${forUid} type=${type}`);
+      }catch(emailErr){
+        console.error("Email send failed:", emailErr.message);
+      }
+    }
+
+    // ── Send FCM push ─────────────────────────────────────────────────────────
     if (!fcmToken) {
       console.log(`No FCM token for uid=${forUid}, skipping push.`);
       return null;
@@ -311,5 +474,85 @@ exports.sendPushOnNotification = onDocumentCreated(
     }
 
     return null;
+  }
+);
+
+// ── Weekly digest email (every Monday at 9:00 AM UTC) ─────────────────────────
+exports.sendWeeklyDigest = onSchedule(
+  { schedule: "every monday 09:00", timeZone: "UTC" },
+  async () => {
+    const secrets = getEmailSecrets();
+    if (!secrets.user || !secrets.pass) {
+      console.log("Email credentials not configured, skipping weekly digest.");
+      return;
+    }
+
+    const siteUrl = "https://ok-music-903e7.web.app/community.html";
+    const now = Date.now();
+    const weekAgo = now - 7 * 24 * 60 * 60 * 1000;
+
+    // Fetch all real users (skip seed users starting with "u_")
+    const usersSnap = await db.collection("users").get();
+    const users = usersSnap.docs
+      .filter(d => !d.id.startsWith("u_") && d.data().email)
+      .map(d => ({ id: d.id, ...d.data() }));
+
+    console.log(`Sending weekly digest to ${users.length} users`);
+
+    for (const user of users) {
+      try {
+        // Wallet balance
+        const walletSnap = await db.collection("wallets").doc(user.id).get();
+        const wallet = walletSnap.exists ? walletSnap.data() : {};
+        const balance = (wallet.balance || 0).toFixed(2);
+
+        // Recent earnings (transactions from last 7 days)
+        const txSnap = await db.collection("wallets").doc(user.id)
+          .collection("transactions")
+          .where("createdAt", ">=", weekAgo)
+          .get();
+        const weekEarnings = txSnap.docs
+          .filter(d => (d.data().amount || 0) > 0)
+          .reduce((sum, d) => sum + (d.data().amount || 0), 0);
+
+        // Tracks published this week
+        const tracksSnap = await db.collection("tracks")
+          .where("userId", "==", user.id)
+          .where("createdAt", ">=", weekAgo)
+          .get();
+        const newTracks = tracksSnap.size;
+
+        // New fans this week (follows where followeeId = user.id, from followRewards)
+        const rewardsSnap = await db.collection("followRewards")
+          .where("followeeId", "==", user.id)
+          .where("createdAt", ">=", weekAgo)
+          .get();
+        const newFans = rewardsSnap.size;
+
+        // Orders (as seller) this week
+        const ordersSnap = await db.collection("orders")
+          .where("sellerId", "==", user.id)
+          .where("createdAt", ">=", weekAgo)
+          .get();
+        const newOrders = ordersSnap.size;
+
+        const bodyHtml = `
+          <p>Hi <b>${user.name || "there"}</b>, here's your OK Music activity for the past 7 days:</p>
+          <table style="width:100%;border-collapse:collapse;font-size:15px;margin-bottom:16px">
+            <tr style="border-bottom:1px solid #eee"><td style="padding:8px 4px;color:#666">🦁 LNC Balance</td><td style="padding:8px 4px;text-align:right;font-weight:700">${balance} LNC</td></tr>
+            <tr style="border-bottom:1px solid #eee"><td style="padding:8px 4px;color:#666">💰 Earned this week</td><td style="padding:8px 4px;text-align:right;font-weight:700">+${weekEarnings.toFixed(2)} LNC</td></tr>
+            <tr style="border-bottom:1px solid #eee"><td style="padding:8px 4px;color:#666">🎵 Tracks published</td><td style="padding:8px 4px;text-align:right;font-weight:700">${newTracks}</td></tr>
+            <tr style="border-bottom:1px solid #eee"><td style="padding:8px 4px;color:#666">🫂 New fans</td><td style="padding:8px 4px;text-align:right;font-weight:700">${newFans}</td></tr>
+            <tr><td style="padding:8px 4px;color:#666">📦 Marketplace orders</td><td style="padding:8px 4px;text-align:right;font-weight:700">${newOrders}</td></tr>
+          </table>
+          <p style="font-size:13px;color:#888">Keep posting, engaging, and earning LionCoins. See you next week!</p>`;
+
+        const html = emailHtml("Your weekly OK Music digest 📊", bodyHtml, { url: siteUrl, label: "Open OK Music →" });
+        await sendEmail(user.email, "◎ Your weekly OK Music summary", html, secrets);
+        console.log(`Weekly digest sent to uid=${user.id}`);
+      } catch (err) {
+        console.error(`Weekly digest failed for uid=${user.id}:`, err.message);
+      }
+    }
   }
 );

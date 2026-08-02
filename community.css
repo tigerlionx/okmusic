@@ -793,6 +793,12 @@ body.has-page-bg .topbar{background:rgba(255,221,191,.45)}
 /* Private profile gate */
 .private-gate{text-align:center;padding:48px 20px;font-size:32px;display:flex;flex-direction:column;align-items:center;gap:10px;color:var(--muted);}
 .private-gate div:first-of-type{font-size:16px;font-weight:700;color:var(--text);}
+.fan-gate{text-align:center;padding:40px 20px;display:flex;flex-direction:column;align-items:center;gap:8px;}
+.fan-gate-icon{font-size:40px;}
+.fan-gate-title{font-size:17px;font-weight:700;color:var(--text);}
+.fan-gate-sub{font-size:13px;color:var(--muted);max-width:280px;line-height:1.5;}
+.follow-active{background:var(--card);border-color:var(--orange);color:var(--orange);}
+.fan-wall-composer{border-top:1px solid var(--border);padding-top:10px;}
 
 /* =========================================================
    PRESENCE — Status dot, Busy toggle
