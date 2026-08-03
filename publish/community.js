@@ -2343,7 +2343,7 @@ function renderMarketplace(){
 
   $("page").innerHTML=`<div class="h-title">🛍️ Marketplace</div>
     <div class="mp-filter-bar">
-      <input class="fb-field mp-search-inp" id="mpSearch" placeholder="Search…" value="${esc(state.mpSearch||'')}" />
+      <input class="fb-field mp-search-inp" id="mpSearch" placeholder="Search products or vendor name…" value="${esc(state.mpSearch||'')}" />
       <select class="fb-field mp-filter-sel" id="mpCatSel">
         <option value="">All categories</option>
         ${allCats.map(c=>`<option value="${esc(c)}" ${activeCat===c?'selected':''}>${esc(c)}</option>`).join('')}
@@ -2391,17 +2391,19 @@ function clearMpFilters(){
 function mpBuyerCard(p){
   const photo=p.photos&&p.photos[0]; const seller=CACHE.sellers[p.sellerId]; const inCart=(state.cart||[]).includes(p.id); const oos=isOutOfStock(p);
   const isPrintify=p.source==='printify';
+  const isOwn=ME&&ME.id===p.sellerId;
   const locBadge=p.location?`<span class="mp-loc-badge">📍 ${esc(p.location)}</span>`:'';
   const catBadge=p.category?`<span class="mp-cat-badge">${esc(p.category)}</span>`:'';
   const isSponsored=p.promoted&&p.promotedUntil>Date.now();
   return `<div class="mp-card${isSponsored?' mp-card-sponsored':''}">
-    <div class="mp-photo" style="${photo?`background-image:url('${photo}');background-size:cover;background-position:center`:'background:var(--orange-1)'}" data-action="viewproduct" data-id="${p.id}">${photo?'':'📦'}${isPrintify?'<span class="printify-badge">🖨️ Print-on-demand</span>':''}${isSponsored?'<span class="mp-sponsored-overlay">Sponsored</span>':''}</div>
+    <div class="mp-photo" style="${photo?`background-image:url('${photo}');background-size:cover;background-position:center`:'background:var(--orange-1)'}" data-action="viewproduct" data-id="${p.id}">${photo?'':'📦'}${isPrintify?'<span class="printify-badge">🖨️ Print-on-demand</span>':''}${isSponsored?'<span class="mp-sponsored-overlay">Sponsored</span>':''}${isOwn?'<span class="mp-own-badge">Your listing</span>':''}</div>
     <div class="mp-card-body">
       ${catBadge}
       <div class="mp-title" data-action="viewproduct" data-id="${p.id}">${esc(p.title)}</div>
       <div class="mp-seller-name">
-        <span class="mp-seller-link" data-action="contactseller" data-uid="${p.sellerId}" data-productid="${p.id}">${esc(seller?.name||'Seller')}</span>
-        ${locBadge}
+        ${isOwn
+          ?`<b>${esc(seller?.name||'You')}</b> ${locBadge}`
+          :`<span class="mp-seller-link" data-action="contactseller" data-uid="${p.sellerId}" data-productid="${p.id}">${esc(seller?.name||'Seller')}</span> ${locBadge}`}
       </div>
       ${p.price>0?(()=>{const eq=usdEquiv(p.price,p.currency);return`<div class="mp-price">${fmtCurrency(p.price,p.currency)}${p.shipping>0?`<span class="mp-ship"> + ${fmtCurrency(p.shipping,p.currency)} ship</span>`:''}</div>${eq?`<div class="mp-usd-equiv">${eq}</div>`:''}`})():''}
       ${isPrintify
@@ -2436,9 +2438,11 @@ function viewProduct(id){
     ${p.price>0?priceBreakdown:''}
     <div class="mp-detail-desc">${esc(p.description)}</div>
     <div class="mp-seller-card">
-      👤 <span class="mp-seller-link" data-action="contactseller" data-uid="${p.sellerId}" data-productid="${id}"><b>${esc(seller?.name||'Unknown')}</b></span>
+      👤 ${ME&&ME.id===p.sellerId
+        ?`<b>${esc(seller?.name||'You')}</b> <span style="font-size:11px;background:#e74c3c;color:#fff;border-radius:10px;padding:1px 7px;margin-left:4px">Your listing</span>`
+        :`<span class="mp-seller-link" data-action="contactseller" data-uid="${p.sellerId}" data-productid="${id}"><b>${esc(seller?.name||'Unknown')}</b></span>
       · ${locLine}
-      <span style="font-size:12px;color:var(--muted)">Tap name to message or call seller</span>
+      <span style="font-size:12px;color:var(--muted)">Tap name to message or call seller</span>`}
     </div>
     ${isPrintify
       ?`<button class="btn primary block" data-action="printifycheckout" data-id="${id}" style="margin-top:14px">🛒 Buy Now</button>
@@ -2476,10 +2480,11 @@ function contactSeller(sellerUid, productId){
 function openReserveDialog(productId){
   if(!ME) return openEmailAuth();
   const p=CACHE.products.find(x=>x.id===productId); if(!p) return;
-  if(p.sellerId===ME.id) return toast("This is your own product.");
+  const isSelfTest=p.sellerId===ME.id;
   openOverlay(`<div style="padding:4px">
     <h2>📦 Reserve this product</h2>
-    <p class="sub" style="margin:4px 0 16px">${esc(p.title)}</p>
+    <p class="sub" style="margin:4px 0 ${isSelfTest?'8px':'16px'}">${esc(p.title)}</p>
+    ${isSelfTest?'<div style="background:#fff3cd;border:1px solid #ffc107;border-radius:8px;padding:8px 12px;font-size:12px;margin-bottom:12px">🧪 <b>Test mode</b> — you are buying your own listing</div>':''}
     <div class="field">
       <label>Quantity</label>
       <input class="fb-field" id="resQty" type="number" min="1" step="1" value="1" style="width:90px" />
@@ -2575,9 +2580,13 @@ async function submitReservation(productId){
     if(note) summary+=`\n💬 ${note}`;
     notify(p.sellerId,'reservation',`📦 ${ME.name} wants to reserve "${p.title}" (${method==='pickup'?'pickup':'delivery'})`);
     closeOverlay();
-    state.chatUid=p.sellerId; state.view='chat'; renderApp();
-    setTimeout(()=>{ const inp=$('chatInput'); if(inp&&!inp.value) inp.value=summary; },300);
-    toast('Reservation sent! Continue in chat with the seller 💬');
+    if(p.sellerId===ME.id){
+      toast('🧪 Test reservation saved! (Seller = you, so no chat opened.)');
+    } else {
+      state.chatUid=p.sellerId; state.view='chat'; renderApp();
+      setTimeout(()=>{ const inp=$('chatInput'); if(inp&&!inp.value) inp.value=summary; },300);
+      toast('Reservation sent! Continue in chat with the seller 💬');
+    }
   }catch(e){
     console.warn('submitReservation',e);
     if(btn){btn.disabled=false;btn.textContent='Send reservation 📨';}
