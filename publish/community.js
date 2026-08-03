@@ -4796,7 +4796,7 @@ let _cpDragging=false,_cpDragOffX=0,_cpDragOffY=0;
 // Video call state
 let _cameraOff=true;
 // Agora live streaming state
-let _agoraClient=null,_agoraLocalTracks=[],_agoraSid=null,_streamChatUnsub=null,_streamDocUnsub=null,_liveRole='audience';
+let _agoraClient=null,_agoraLocalTracks=[],_agoraSid=null,_streamChatUnsub=null,_streamDocUnsub=null,_liveRole='audience',_hostAgoraUid=null;
 
 function _makeAn(stream){
   const src=_vizCtx.createMediaStreamSource(stream);
@@ -6025,7 +6025,14 @@ function renderLivePage(){
 
 async function renderLiveStream(streamId){
   const s=(CACHE.liveStreams||[]).find(x=>x.id===streamId);
-  if(!s||s.status==='ended'){toast("Stream has ended.");state.view='live';renderApp();return;}
+  if(!s||s.status==='ended'){leaveLiveStream();toast("Stream has ended.");state.view='live';renderApp();return;}
+
+  // CRITICAL: if already connected to this stream and the video container is present in the DOM,
+  // return immediately — rebuilding the DOM destroys the Agora video player, which is why
+  // existing viewers lose video whenever a new viewer joins (viewerCount update → scheduleRender).
+  // The _streamDocUnsub per-document listener updates the viewer count directly without a re-render.
+  if(_agoraSid===streamId && document.getElementById('streamVideoWrap')) return;
+
   const host=userById(s.hostUid)||{name:s.hostName||'Host',color:'#888'};
   const isHost=ME&&ME.id===s.hostUid;
   $("page").innerHTML=`
@@ -6079,12 +6086,28 @@ async function renderLiveStream(streamId){
       el.scrollTop=el.scrollHeight;
     });
 
-  // Only join Agora if not already in this stream — prevents UID_CONFLICT on re-renders
   if(_agoraSid!==streamId){
+    // First entry — join Agora
     if(isHost) await _startAgoraHost(streamId,s.channelName||streamId);
     else {
       await _startAgoraAudience(streamId,s.channelName||streamId);
       fbDB.collection("liveStreams").doc(streamId).update({viewerCount:firebase.firestore.FieldValue.increment(1)}).catch(()=>{});
+    }
+  } else {
+    // Re-entering stream view (user navigated away without Back) — Agora still active, just re-attach tracks to new DOM
+    if(isHost && _agoraLocalTracks.length>=2){
+      const preview=document.getElementById('hostPreviewVideo');
+      if(preview){preview.srcObject=new MediaStream([_agoraLocalTracks[1].getMediaStreamTrack()]);preview.style.display='block';}
+      const st=document.getElementById('streamStatus');if(st)st.style.display='none';
+    } else if(!isHost && _agoraClient){
+      for(const u of (_agoraClient.remoteUsers||[])){
+        if(u.videoTrack){
+          const wrap=document.getElementById('remoteStreamVideo');
+          if(wrap){wrap.innerHTML='';u.videoTrack.play('remoteStreamVideo');}
+          const st=document.getElementById('streamStatus');if(st)st.style.display='none';
+        }
+        if(u.audioTrack) u.audioTrack.play();
+      }
     }
   }
 
@@ -6152,11 +6175,12 @@ async function _startAgoraAudience(streamId,channelName){
     return;
   }
   try{
-    _agoraSid=streamId;_liveRole='audience';
+    _agoraSid=streamId;_liveRole='audience';_hostAgoraUid=null;
     const {token,appId}=await _getAgoraToken(channelName,'audience');
     _agoraClient=AgoraRTC.createClient({mode:'live',codec:'vp8'});
     await _agoraClient.setClientRole('audience');
     _agoraClient.on('user-published',async(user,mediaType)=>{
+      _hostAgoraUid=user.uid; // only the host publishes in live mode
       await _agoraClient.subscribe(user,mediaType);
       if(mediaType==='video'){
         const wrap=document.getElementById('remoteStreamVideo');
@@ -6168,7 +6192,9 @@ async function _startAgoraAudience(streamId,channelName){
     _agoraClient.on('user-unpublished',(user,mediaType)=>{
       if(mediaType==='audio'&&user.audioTrack) user.audioTrack.stop();
     });
-    _agoraClient.on('user-left',()=>{
+    _agoraClient.on('user-left',(user)=>{
+      // In live mode only the host publishes — ignore audience members leaving
+      if(user.uid!==_hostAgoraUid) return;
       const s=document.getElementById('streamStatus');
       if(s){s.style.display='';s.textContent='Host has left the stream.';}
     });
@@ -6234,7 +6260,7 @@ async function leaveLiveStream(){
     try{await _agoraClient.leave();}catch(e){}
     _agoraClient=null;
   }
-  _agoraSid=null; _liveRole='audience';
+  _agoraSid=null; _liveRole='audience'; _hostAgoraUid=null;
 }
 
 async function sendStreamChat(streamId){
