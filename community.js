@@ -339,6 +339,7 @@ function renderLanding(){
 }
 function signInGoogle(){
   const provider=new firebase.auth.GoogleAuthProvider();
+  provider.setCustomParameters({prompt:'select_account'}); // always show account picker so users can switch accounts
   fbAuth.signInWithPopup(provider).catch(e=>{
     if(e.code==="auth/popup-blocked"||e.code==="auth/popup-closed-by-user"){
       fbAuth.signInWithRedirect(provider).catch(e2=>toast("Google sign-in failed: "+(e2.code||e2.message)));
