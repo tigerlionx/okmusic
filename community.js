@@ -48,7 +48,6 @@ const THEMES = [
 
 const PLATFORM_EMAIL="trendai509@gmail.com";
 const ADMIN_EMAIL="trendai509@gmail.com";
-const AGORA_APP_ID='abe047eaf0f04fa1a445b763991f56b7'; // OK Music Live project (agora.io)
 const PLATFORM_FEE=0.03;
 // Promoted listing plans — cost in LNC, duration in days
 const PROMO_PLANS=[
@@ -252,17 +251,6 @@ function userFollowerCount(uid){ let n=0; for(const f in CACHE.userFollows) if(C
 function followersOfUser(uid){ const r=[]; for(const f in CACHE.userFollows){ if(CACHE.userFollows[f].includes(uid)) r.push(f); } return r; }
 // isFanOf: ME is an accepted fan of uid (ME is in uid's followersOf list)
 function isFanOf(uid){ return ME&&followersOf(uid).includes(ME.id); }
-// Live stream helpers
-function isCreatorLive(uid){ return (CACHE.liveStreams||[]).some(s=>s.hostUid===uid); }
-function getCreatorStream(uid){ return (CACHE.liveStreams||[]).find(s=>s.hostUid===uid)||null; }
-function isLiveNotifyEnabled(creatorUid){ return ME&&((CACHE.liveNotify||{})[ME.id]||[]).includes(creatorUid); }
-async function toggleLiveNotify(creatorUid){
-  if(!ME){openEmailAuth();return;}
-  const F=firebase.firestore.FieldValue;
-  const on=isLiveNotifyEnabled(creatorUid);
-  await fbDB.collection('userFollows').doc(ME.id).set({liveNotify:F[on?'arrayRemove':'arrayUnion'](creatorUid)},{merge:true});
-  toast(on?"Live notifications off":"🔔 You'll be notified when they go live");
-}
 // hasPendingFanRequest: ME sent a fan request to uid (not yet accepted)
 function hasPendingFanRequestTo(uid){ return (CACHE.fanRequestsSent||[]).some(r=>r.toUid===uid&&r.status==='pending'); }
 function likeCount(t){ return (SEED_STATS[t]?.likes||0)+((CACHE.reactions["t_"+t]?.likes||[]).length); }
@@ -286,8 +274,8 @@ let toastTimer; function toast(m){ const e=$("toast"); e.textContent=m; e.hidden
 // ---------- state ----------
 let ME=null;                                   // the signed-in user's profile (Firebase)
 // live shared data, kept in sync by Firestore listeners
-const CACHE={ users:{}, tracks:[], statuses:[], follows:{}, userFollows:{}, liveNotify:{}, reactions:{}, comments:[], notifications:[], products:[], sellers:{}, orders:[], convos:{}, suggestions:[], followRequests:[], fanRequestsSent:[], wallet:null, walletTxs:[], contests:[], discoveryPosts:[], customCategories:[], fxRates:{} };
-let state={ view:"discover", profileId:null, query:"", cart:JSON.parse(localStorage.getItem("okmusic_cart")||"[]"), openFolders:new Set(), streamId:null };
+const CACHE={ users:{}, tracks:[], statuses:[], follows:{}, userFollows:{}, reactions:{}, comments:[], notifications:[], products:[], sellers:{}, orders:[], convos:{}, suggestions:[], followRequests:[], fanRequestsSent:[], wallet:null, walletTxs:[], contests:[], discoveryPosts:[], customCategories:[], fxRates:{} };
+let state={ view:"discover", profileId:null, query:"", cart:JSON.parse(localStorage.getItem("okmusic_cart")||"[]"), openFolders:new Set() };
 function persistCart(){ try{ localStorage.setItem("okmusic_cart",JSON.stringify(state.cart||[])); }catch(e){} }
 let playMode="continuous"; // "continuous" | "repeat" | "shuffle"
 let nowPlayingId=null;
@@ -324,8 +312,8 @@ function renderLanding(){
   $("miniplayer").classList.remove("show");
   $("root").innerHTML=`
   <div class="authwrap"><div class="authbox">
-    <div class="logo">◎ OK Music</div><h1>Where AI music finds its fans.</h1>
-    <p class="landing-desc">OK Music helps you share your AI music creation to your family, friends and fans. Log in to become famous...</p>
+    <div class="logo">◎ OK Music</div><h1>The Music Network.</h1>
+    <p class="landing-desc">OK Music is a social music network where creators share AI music, connect with fans, trade in the marketplace, and build a community — all in one place.</p>
     <div class="authcard">
       <button class="social-btn" data-action="auth" data-p="google"><span class="ic" style="color:#EA4335">G</span> Continue with Google</button>
       <button class="social-btn" data-action="auth" data-p="apple"><span class="ic"></span> Continue with Apple</button>
@@ -568,7 +556,6 @@ function renderApp(){
         ${item("wallet","🦁",`LionCoin${CACHE.wallet?.balance?` · ${(CACHE.wallet.balance).toLocaleString()}`:''}`)}
         ${item("contests","🏆","Contests")}
         ${item("mymusic","🎵","My Music")}
-        ${(()=>{const liveCount=(CACHE.liveStreams||[]).filter(s=>s.status==='live').length;return`<div class="side-item ${state.view==='live'||state.view==='livestream'?'active':''}" data-action="nav" data-view="live"><span class="ic">📡</span>Live${liveCount?`<span class="bell-badge" style="position:static;margin-left:6px;background:#e74c3c">${liveCount}</span>`:''}</div>`})()}
         <div class="side-sep"></div>
         <div class="side-item" data-action="sharefolder"><span class="ic">📁</span>Add a folder</div>
         <div class="side-item" data-action="upload"><span class="ic">⬆️</span>Add single track</div>
@@ -589,7 +576,7 @@ function renderApp(){
       const isChat=state.view==='msgs'||state.view==='chat';
       const isProfile=state.view==='profile'&&state.profileId===u.id;
       const nb=(n)=>n?`<span class="mobnav-badge">${n>9?'9+':n}</span>`:'';
-      const isMore=['wallet','contests','mymusic','fans','marketplace','mystore','cart','myorders','admin','buzzing','live','livestream'].includes(state.view);
+      const isMore=['wallet','contests','mymusic','fans','marketplace','mystore','cart','myorders','admin','buzzing'].includes(state.view);
       return`<nav class="mobnav" id="mobnav">
         <div class="mobnav-item ${state.view==='discover'?'active':''}" data-action="nav" data-view="discover"><span class="mn-ic">🧭</span>Discover</div>
         <div class="mobnav-item ${state.view==='home'?'active':''}" data-action="nav" data-view="home"><span class="mn-ic">🏠</span>Feed</div>
@@ -619,7 +606,6 @@ function openMobMenu(){
 
   // Build sheet items
   const items=[
-    {ic:'📡',label:'Live'+(()=>{const n=(CACHE.liveStreams||[]).filter(s=>s.status==='live').length;return n?` (${n})`:''})(),fn:()=>go('live')},
     {ic:'🦁',label:`LionCoin · ${lnc}`,fn:()=>go('wallet')},
     {ic:'🏆',label:'Contests',fn:()=>go('contests')},
     {ic:'🎵',label:'My Music',fn:()=>go('mymusic')},
@@ -695,8 +681,6 @@ function renderMain(){
   if(state.view==="myorders") return renderMyOrders();
   if(state.view==="wallet") return renderWallet();
   if(state.view==="contests") return renderContests();
-  if(state.view==="live") return renderLivePage();
-  if(state.view==="livestream") return renderLiveStream(state.streamId);
   if(state.view==="admin"&&isAdmin()) return renderAdmin();
   renderDiscover();
 }
@@ -741,42 +725,9 @@ function renderDiscover(){
   // Discovery feed posts
   const discPosts=(CACHE.discoveryPosts||[]).filter(p=>!blockedList.includes(p.userId));
 
-  const liveStreams=(CACHE.liveStreams||[]).filter(s=>s.status==='live');
-  const liveSorted=liveStreams.slice().sort((a,b)=>{
-    const af=ME&&(isFollowing(a.hostUid)||isFollowingUser(a.hostUid))?1:0;
-    const bf=ME&&(isFollowing(b.hostUid)||isFollowingUser(b.hostUid))?1:0;
-    if(bf!==af) return bf-af;
-    return (b.viewerCount||0)-(a.viewerCount||0);
-  });
-  let liveSection='';
-  if(liveSorted.length){
-    const sid='_live_'; const open=state.openFolders.has(sid);
-    const liveRows=liveSorted.map(s=>{
-      const host=userById(s.hostUid)||{name:s.hostName||'?',id:s.hostUid,color:'#e74c3c'};
-      return `<div class="mf-track" data-action="joinstream" data-id="${s.id}" style="cursor:pointer">
-        <div class="mf-art" style="${avatarStyle(host,36)};border-radius:50%">${host.avatarImg?'':initials(host.name)}</div>
-        <div class="mf-info">
-          <div class="mf-title">${esc(s.title||'Live Stream')}</div>
-          <div class="mf-artist">${esc(host.name)}</div>
-        </div>
-        <span class="live-badge" style="flex-shrink:0;font-size:9px;padding:2px 7px">LIVE</span>
-        <span class="mf-plays">👁 ${s.viewerCount||0}</span>
-      </div>`;
-    }).join('');
-    liveSection=`<div class="music-folder${open?' open':''}" id="mfolder-${sid}" style="border-left:3px solid #e74c3c;margin-bottom:8px">
-      <div class="music-folder-hd" data-action="togglefolder" data-genre="${sid}">
-        <span class="mf-arrow" id="mfarrow-${sid}">${open?'▼':'▶'}</span>
-        <span class="mf-icon">📡</span>
-        <span class="mf-name" style="color:#e74c3c">Live Now</span>
-        <span class="live-badge" style="font-size:9px;padding:2px 7px;animation:none">${liveSorted.length}</span>
-      </div>
-      <div class="music-folder-body" id="mfbody-${sid}" style="display:${open?'block':'none'}">${liveRows}</div>
-    </div>`;
-  }
   $('page').innerHTML=`<div class="h-title">Discover</div>
     <div class="discover-layout">
       <div class="discover-music">
-        ${liveSection}
         <div class="col-h" style="margin-top:0">🎵 Music Library</div>
         ${artistSec}
         ${foldersHtml||'<div class="empty" style="padding:20px 0">No tracks found'+(q?` for "${esc(state.query)}"`:' yet')+'.</div>'}
@@ -1041,16 +992,13 @@ function renderProfile(uid){
     : `${fanBtn} ${followBtn}
        ${!blocked&&canMessage(uid)?`<button class="btn" data-action="openchat" data-uid="${uid}">💬 Message</button>`:''}
        ${!blocked?`<button class="btn" data-action="sendlnc" data-uid="${uid}">🦁 Send LNC</button>`:''}
-       ${!blocked&&ME&&(isFollowing(uid)||isFollowingUser(uid))?`<button class="btn${isLiveNotifyEnabled(uid)?' active':''}" data-action="togglelivenotify" data-uid="${uid}" style="${isLiveNotifyEnabled(uid)?'background:#e74c3c;color:#fff;border-color:#e74c3c':''}" title="${isLiveNotifyEnabled(uid)?'Live notifications on — tap to turn off':'Notify me when live'}">${isLiveNotifyEnabled(uid)?'🔔 Notified':'🔕 Notify live'}</button>`:''}
        <button class="btn" data-action="blockuser" data-uid="${uid}" style="${blocked?'background:#e2554f;color:#fff;border-color:#e2554f':''}">${blocked?'🚫 Blocked':'🚫 Block'}</button>
        <button class="btn" data-action="reportuser" data-uid="${uid}">⚑ Report</button>`;
 
   // Profile header (always shown)
-  const _liveStreamForProfile=getCreatorStream(uid);
-  const _liveOverlay=_liveStreamForProfile?`<div class="profile-live-badge" data-action="joinstream" data-id="${_liveStreamForProfile.id}">🔴 LIVE</div>`:'';
   const profileHead=`
     <div class="profile-cover" style="${cover}"></div>
-    <div class="profile-head"><div style="position:relative;display:inline-block"><div class="profile-avatar" style="${avatarStyle(u,104)};cursor:pointer" data-action="viewavatar" data-uid="${uid}">${u.avatarImg?'':initials(u.name)}</div>${_liveOverlay}</div>
+    <div class="profile-head"><div style="position:relative;display:inline-block"><div class="profile-avatar" style="${avatarStyle(u,104)};cursor:pointer" data-action="viewavatar" data-uid="${uid}">${u.avatarImg?'':initials(u.name)}</div></div>
       <div class="profile-info"><div class="profile-name">${esc(u.name)} ${u.founder?'<span class="badge-founder">FOUNDER</span>':''}</div><div class="profile-handle">@${esc(u.handle)}</div></div></div>
     <div class="profile-stats">
       <div><b>${standaloneTracks.length+pls.reduce((n,p)=>n+p.files.length,0)}</b> <span>tracks</span></div>
@@ -2884,25 +2832,17 @@ function renderFans(){
       </div>`}).join(""):'<div class="empty">No pending fan requests.</div>';
   } else if(tab==="fanof"){
     content=fanOf.length?fanOf.map(u=>{
-      const ls=getCreatorStream(u.id);
-      const liveBadge=ls?`<span class="live-badge" data-action="joinstream" data-id="${ls.id}" style="font-size:9px;padding:2px 7px;cursor:pointer;flex-shrink:0">LIVE</span>`:'';
-      const notifyOn=isLiveNotifyEnabled(u.id);
       return `<div class="mrow2">
         <div class="avatar" style="${avatarStyle(u,44)};cursor:pointer" data-action="viewavatar" data-uid="${u.id}">${u.avatarImg?'':initials(u.name)}</div>
-        <div class="minfo"><div class="mt" data-action="profile" data-uid="${u.id}">${esc(u.name)} ${liveBadge}</div><div class="ms">@${esc(u.handle)} · ${nfmt(followerCount(u.id))} fans</div></div>
-        <button class="btn sm" data-action="togglelivenotify" data-uid="${u.id}" title="${notifyOn?'Live notifications on':'Notify when live'}" style="${notifyOn?'background:#e74c3c;color:#fff;border-color:#e74c3c;flex-shrink:0':'flex-shrink:0'}">${notifyOn?'🔔':'🔕'}</button>
+        <div class="minfo"><div class="mt" data-action="profile" data-uid="${u.id}">${esc(u.name)}</div><div class="ms">@${esc(u.handle)} · ${nfmt(followerCount(u.id))} fans</div></div>
         <button class="btn sm" style="color:#e2554f;border-color:#e2554f;flex-shrink:0" data-action="unfanself" data-uid="${u.id}">Un-fan</button>
       </div>`;
     }).join(""):'<div class="empty">You\'re not a fan of anyone yet. Visit profiles and become a fan to access their full content.</div>';
   } else if(tab==="following"){
     content=following.length?following.map(u=>{
-      const ls=getCreatorStream(u.id);
-      const liveBadge=ls?`<span class="live-badge" data-action="joinstream" data-id="${ls.id}" style="font-size:9px;padding:2px 7px;cursor:pointer;flex-shrink:0">LIVE</span>`:'';
-      const notifyOn=isLiveNotifyEnabled(u.id);
       return `<div class="mrow2">
         <div class="avatar" style="${avatarStyle(u,44)};cursor:pointer" data-action="viewavatar" data-uid="${u.id}">${u.avatarImg?'':initials(u.name)}</div>
-        <div class="minfo"><div class="mt" data-action="profile" data-uid="${u.id}">${esc(u.name)} ${liveBadge}</div><div class="ms">@${esc(u.handle)}</div></div>
-        <button class="btn sm" data-action="togglelivenotify" data-uid="${u.id}" title="${notifyOn?'Live notifications on':'Notify when live'}" style="${notifyOn?'background:#e74c3c;color:#fff;border-color:#e74c3c;flex-shrink:0':'flex-shrink:0'}">${notifyOn?'🔔':'🔕'}</button>
+        <div class="minfo"><div class="mt" data-action="profile" data-uid="${u.id}">${esc(u.name)}</div><div class="ms">@${esc(u.handle)}</div></div>
         <button class="btn sm" data-action="unfollowuser" data-uid="${u.id}" style="flex-shrink:0">Unfollow</button>
       </div>`;
     }).join(""):'<div class="empty">You\'re not following anyone yet. Visit profiles and tap Follow to get updates when they post.</div>';
@@ -3071,8 +3011,7 @@ function renderNotifs(){
       const isPlatform=n.fromUid==="platform";
       const isMsg=n.type==="message";
       const isFanReq=n.type==="fan_request"||n.type==="followrequest";
-      const isLiveNotif=n.type==="creator_live";
-      const action=isPlatform?`data-action="showguide"`:isMsg?`data-action="openchat" data-uid="${n.fromUid}"`:isFanReq?`data-action="fantab" data-t="requests"`:isLiveNotif?`data-action="joinstream" data-id="${n.streamId||''}"` :`data-action="profile" data-uid="${n.fromUid}"`;
+      const action=isPlatform?`data-action="showguide"`:isMsg?`data-action="openchat" data-uid="${n.fromUid}"`:isFanReq?`data-action="fantab" data-t="requests"`:`data-action="profile" data-uid="${n.fromUid}"`;
       const av=isPlatform
         ?`<div class="avatar" style="width:42px;height:42px;font-size:20px;background:var(--orange);flex-shrink:0;border-radius:50%;display:grid;place-items:center;color:#fff">◎</div>`
         :`<div class="avatar" style="${avatarStyle(userById(n.fromUid)||{color:'#FB7A28'},42)}">${(userById(n.fromUid)?.avatarImg)?'':initials(n.fromName||'?')}</div>`;
@@ -4656,15 +4595,6 @@ document.addEventListener("click",e=>{
     beginconference:beginConference,
     joinconference:()=>joinConference(el.dataset.id),
     declineconf:()=>{ stopRing(); const p=document.getElementById('call-panel'); if(p){p.classList.remove('active');p.innerHTML='';} },
-    golive:openGoLiveDialog,
-    startstream:startLiveStream,
-    endstream:stopLiveStream,
-    leavestream:()=>{ leaveLiveStream(); state.view='live'; renderApp(); },
-    togglelivenotify:async()=>{ await toggleLiveNotify(el.dataset.uid); renderApp(); },
-    joinstream:()=>{ if(!ME)return openEmailAuth(); const sid=el.dataset.id; const ls=(CACHE.liveStreams||[]).find(s=>s.id===sid); if(!ls){toast("This stream has ended.");return;} state.view='livestream';state.streamId=sid;renderApp(); },
-    togglestreammute:toggleStreamMute,
-    togglestreamcam:toggleStreamCam,
-    sendstreamchat:()=>sendStreamChat(el.dataset.sid),
     confirmdel:()=>doDeleteTrack(el.dataset.id),
     confirmdelcmt:()=>doDeleteComment(el.dataset.id),
     confirmdelprod:()=>doDeleteProduct(el.dataset.id),
@@ -4796,9 +4726,6 @@ let _confHandRaised=false,_confParticipants={},_confProcessed={},_confStreams={}
 let _cpDragging=false,_cpDragOffX=0,_cpDragOffY=0;
 // Video call state
 let _cameraOff=true;
-// Agora live streaming state
-let _agoraClient=null,_agoraLocalTracks=[],_agoraSid=null,_streamChatUnsub=null,_streamDocUnsub=null,_liveRole='audience',_hostAgoraUid=null;
-
 function _makeAn(stream){
   const src=_vizCtx.createMediaStreamSource(stream);
   const an=_vizCtx.createAnalyser();
@@ -5980,321 +5907,15 @@ function beginConference(){
   startConference(checked);
 }
 
-// ==================== LIVE STREAMING ====================
-
-function renderLivePage(){
-  const streams=(CACHE.liveStreams||[]).filter(s=>s.status==='live');
-  if(!AGORA_APP_ID){
-    $("page").innerHTML=`<div class="h-title">📡 Live</div>
-      <div style="text-align:center;padding:32px 16px;max-width:480px;margin:0 auto">
-        <div style="font-size:48px;margin-bottom:14px">🔧</div>
-        <div style="font-weight:700;font-size:18px;margin-bottom:10px">Live Streaming Setup Required</div>
-        <p style="color:var(--muted);font-size:13px;line-height:1.6;margin-bottom:18px">
-          Live streaming is powered by <b>Agora</b>. To enable it:<br>
-          1. Go to <b>agora.io</b> and create a free account.<br>
-          2. Create a project and copy your <b>App ID</b>.<br>
-          3. In your Agora console, set <b>Token Authentication</b> to disabled (test mode).<br>
-          4. Paste the App ID into <code>AGORA_APP_ID</code> in <b>community.js</b> (line ~50).
-        </p>
-        <div style="font-size:12px;color:var(--muted);background:var(--bg);border-radius:10px;padding:10px 14px;font-family:monospace">const AGORA_APP_ID = 'your-app-id-here';</div>
-      </div>`;
-    return;
-  }
-  $("page").innerHTML=`<div class="h-title">📡 Live</div>
-    <div style="display:flex;justify-content:flex-end;margin-bottom:14px">
-      <button class="btn primary" data-action="golive">🔴 Go Live</button>
-    </div>
-    ${streams.length===0
-      ?`<div class="empty" style="padding:40px 0;text-align:center">
-          <div style="font-size:40px;margin-bottom:12px">📡</div>
-          No live streams right now — be the first to go live!
-        </div>`
-      :`<div class="live-stream-grid">${streams.map(s=>{
-          const host=userById(s.hostUid)||{name:s.hostName||'Artist',color:'#888'};
-          return`<div class="live-card" data-action="joinstream" data-id="${s.id}">
-            <div class="live-card-header">
-              <div class="avatar" style="${avatarStyle(host,40)}">${host.avatarImg?'':initials(host.name)}</div>
-              <span class="live-badge">LIVE</span>
-            </div>
-            <div class="live-card-title">${esc(s.title||'Live Stream')}</div>
-            <div class="live-card-host">by ${esc(host.name)}</div>
-            <div class="live-card-viewers">👁 ${s.viewerCount||0}</div>
-          </div>`;
-        }).join('')}</div>`
-    }`;
-}
-
-async function renderLiveStream(streamId){
-  const s=(CACHE.liveStreams||[]).find(x=>x.id===streamId);
-  if(!s||s.status==='ended'){leaveLiveStream();toast("Stream has ended.");state.view='live';renderApp();return;}
-
-  // CRITICAL: if already connected to this stream and the video container is present in the DOM,
-  // return immediately — rebuilding the DOM destroys the Agora video player, which is why
-  // existing viewers lose video whenever a new viewer joins (viewerCount update → scheduleRender).
-  // The _streamDocUnsub per-document listener updates the viewer count directly without a re-render.
-  if(_agoraSid===streamId && document.getElementById('streamVideoWrap')) return;
-
-  const host=userById(s.hostUid)||{name:s.hostName||'Host',color:'#888'};
-  const isHost=ME&&ME.id===s.hostUid;
-  $("page").innerHTML=`
-    <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;flex-wrap:wrap">
-      <button class="btn sm" data-action="leavestream">← Back</button>
-      <div style="flex:1;min-width:0">
-        <div style="font-weight:700;font-size:15px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(s.title||'Live Stream')}</div>
-        <div style="font-size:12px;color:var(--muted)">by ${esc(host.name)} · 👁 <span id="viewerCount">${s.viewerCount||0}</span></div>
-      </div>
-      ${isHost?`<button class="btn sm" data-action="endstream" style="color:#e74c3c;border-color:#e74c3c;flex-shrink:0">🔴 End Stream</button>`:''}
-    </div>
-    <div id="streamVideoWrap" style="width:100%;background:#111;border-radius:16px;overflow:hidden;aspect-ratio:16/9;margin-bottom:14px;display:flex;align-items:center;justify-content:center;position:relative">
-      <div id="remoteStreamVideo" style="width:100%;height:100%;"></div>
-      <video id="hostPreviewVideo" autoplay muted playsinline style="width:100%;height:100%;object-fit:cover;display:none;position:absolute;inset:0"></video>
-      <div id="streamStatus" style="color:#fff;font-size:14px;text-align:center;padding:20px;position:absolute">Connecting…</div>
-    </div>
-    ${isHost?`<div class="live-stream-controls" id="liveControls">
-      <button class="cp-cbtn" id="streamMicBtn" data-action="togglestreammute" title="Mute mic">🎙️</button>
-      <button class="cp-cbtn" id="streamCamBtn" data-action="togglestreamcam" title="Toggle camera">📷</button>
-      <button class="cp-cbtn cp-cend" data-action="endstream" title="End stream">📵</button>
-    </div>`:`<div class="live-stream-controls" id="liveControls">
-      <div style="font-size:13px;color:var(--muted)">👀 Watching live</div>
-    </div>`}
-    <div class="live-chat-section">
-      <div class="live-chat-title">💬 Live Chat</div>
-      <div class="live-chat-msgs" id="liveChatMsgs"><div class="empty" style="padding:12px">Chat will appear here…</div></div>
-      <div class="live-chat-input-row">
-        <input class="chat-input" id="liveChatInput" placeholder="Say something…" maxlength="200"/>
-        <button class="btn primary sm" data-action="sendstreamchat" data-sid="${streamId}">Send</button>
-      </div>
-    </div>`;
-
-  if(_streamDocUnsub){_streamDocUnsub();_streamDocUnsub=null;}
-  _streamDocUnsub=fbDB.collection("liveStreams").doc(streamId).onSnapshot(snap=>{
-    if(!snap.exists||snap.data().status==='ended'){
-      leaveLiveStream(); toast("Stream has ended."); state.view='live'; renderApp(); return;
-    }
-    const vc=document.getElementById('viewerCount');if(vc)vc.textContent=snap.data().viewerCount||0;
-  });
-
-  if(_streamChatUnsub){_streamChatUnsub();_streamChatUnsub=null;}
-  _streamChatUnsub=fbDB.collection("liveStreams").doc(streamId).collection("chat")
-    .orderBy("time","asc").limitToLast(60)
-    .onSnapshot(snap=>{
-      const el=document.getElementById("liveChatMsgs");if(!el)return;
-      if(snap.empty){el.innerHTML='<div class="empty" style="padding:12px">No messages yet…</div>';return;}
-      el.innerHTML=snap.docs.map(d=>{const m=d.data();
-        const isMe=m.uid===ME?.id;
-        return`<div class="live-chat-msg${isMe?' mine':''}"><b>${esc(m.name)}</b>: ${esc(m.text)}</div>`;
-      }).join('');
-      el.scrollTop=el.scrollHeight;
-    });
-
-  if(_agoraSid!==streamId){
-    // First entry — join Agora
-    if(isHost) await _startAgoraHost(streamId,s.channelName||streamId);
-    else {
-      await _startAgoraAudience(streamId,s.channelName||streamId);
-      fbDB.collection("liveStreams").doc(streamId).update({viewerCount:firebase.firestore.FieldValue.increment(1)}).catch(()=>{});
-    }
-  } else {
-    // Re-entering stream view (user navigated away without Back) — Agora still active, just re-attach tracks to new DOM
-    if(isHost && _agoraLocalTracks.length>=2){
-      const preview=document.getElementById('hostPreviewVideo');
-      if(preview){preview.srcObject=new MediaStream([_agoraLocalTracks[1].getMediaStreamTrack()]);preview.style.display='block';}
-      const st=document.getElementById('streamStatus');if(st)st.style.display='none';
-    } else if(!isHost && _agoraClient){
-      for(const u of (_agoraClient.remoteUsers||[])){
-        if(u.videoTrack){
-          const wrap=document.getElementById('remoteStreamVideo');
-          if(wrap){wrap.innerHTML='';u.videoTrack.play('remoteStreamVideo');}
-          const st=document.getElementById('streamStatus');if(st)st.style.display='none';
-        }
-        if(u.audioTrack) u.audioTrack.play();
-      }
-    }
-  }
-
-  setTimeout(()=>{
-    const inp=document.getElementById('liveChatInput');
-    if(inp) inp.addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();sendStreamChat(streamId);}});
-  },100);
-}
-
-async function _getAgoraToken(channelName,role){
-  // Use fetch + ID token instead of the compat callable SDK.
-  // The compat SDK internally triggers Firebase Messaging service-worker registration,
-  // which fails on GitHub Pages (no SW file at the root) and aborts the stream.
-  const user=firebase.auth().currentUser;
-  if(!user) throw new Error('Must be signed in to stream.');
-  const idToken=await user.getIdToken();
-  const resp=await fetch(
-    'https://us-central1-ok-music-903e7.cloudfunctions.net/generateAgoraToken',
-    {
-      method:'POST',
-      headers:{'Content-Type':'application/json','Authorization':'Bearer '+idToken},
-      body:JSON.stringify({data:{channelName,role}})
-    }
-  );
-  if(!resp.ok){
-    const txt=await resp.text().catch(()=>'');
-    throw new Error('Token server error '+resp.status+(txt?': '+txt.slice(0,200):''));
-  }
-  const json=await resp.json();
-  return json.result||json;
-}
-
-async function _startAgoraHost(streamId,channelName){
-  if(!AGORA_APP_ID){toast("Agora App ID not configured.");return;}
-  if(!window.AgoraRTC){toast("Agora SDK not loaded. Check your internet connection.");return;}
-  try{
-    _agoraSid=streamId;_liveRole='host';
-    const {token,appId}=await _getAgoraToken(channelName,'host');
-    _agoraClient=AgoraRTC.createClient({mode:'live',codec:'vp8'});
-    await _agoraClient.setClientRole('host');
-    const agoraUid=Math.floor(Math.random()*999999)+1; // random int — token built with uid=0 accepts any
-    await _agoraClient.join(appId,channelName,token,agoraUid);
-    _agoraLocalTracks=await AgoraRTC.createMicrophoneAndCameraTracks({},{facingMode:'user'});
-    await _agoraClient.publish(_agoraLocalTracks);
-    const preview=document.getElementById('hostPreviewVideo');
-    if(preview){
-      preview.srcObject=new MediaStream([_agoraLocalTracks[1].getMediaStreamTrack()]);
-      preview.style.display='block';
-    }
-    const s=document.getElementById('streamStatus');if(s)s.style.display='none';
-  }catch(e){
-    const s=document.getElementById('streamStatus');if(s)s.textContent='Stream error: '+(e.message||e);
-    toast("Stream error: "+(e.message||e));
-  }
-}
-
-async function _startAgoraAudience(streamId,channelName){
-  if(!AGORA_APP_ID){
-    const s=document.getElementById('streamStatus');
-    if(s)s.textContent='Live streaming not configured — contact the app owner.';
-    return;
-  }
-  if(!window.AgoraRTC){
-    const s=document.getElementById('streamStatus');if(s)s.textContent='Agora SDK not loaded.';
-    return;
-  }
-  try{
-    _agoraSid=streamId;_liveRole='audience';_hostAgoraUid=null;
-    const {token,appId}=await _getAgoraToken(channelName,'audience');
-    _agoraClient=AgoraRTC.createClient({mode:'live',codec:'vp8'});
-    await _agoraClient.setClientRole('audience');
-    _agoraClient.on('user-published',async(user,mediaType)=>{
-      _hostAgoraUid=user.uid; // only the host publishes in live mode
-      await _agoraClient.subscribe(user,mediaType);
-      if(mediaType==='video'){
-        const wrap=document.getElementById('remoteStreamVideo');
-        if(wrap){wrap.innerHTML='';user.videoTrack.play('remoteStreamVideo');}
-        const s=document.getElementById('streamStatus');if(s)s.style.display='none';
-      }
-      if(mediaType==='audio') user.audioTrack.play();
-    });
-    _agoraClient.on('user-unpublished',(user,mediaType)=>{
-      if(mediaType==='audio'&&user.audioTrack) user.audioTrack.stop();
-    });
-    _agoraClient.on('user-left',(user)=>{
-      // In live mode only the host publishes — ignore audience members leaving
-      if(user.uid!==_hostAgoraUid) return;
-      const s=document.getElementById('streamStatus');
-      if(s){s.style.display='';s.textContent='Host has left the stream.';}
-    });
-    const agoraUid=Math.floor(Math.random()*999999)+1;
-    await _agoraClient.join(appId,channelName,token,agoraUid);
-    const s=document.getElementById('streamStatus');if(s)s.textContent='Waiting for host…';
-  }catch(e){
-    const s=document.getElementById('streamStatus');
-    if(s)s.textContent='Connection error: '+(e.message||e);
-  }
-}
-
-function openGoLiveDialog(){
-  if(!ME)return openEmailAuth();
-  if(!AGORA_APP_ID){toast("Live streaming is not configured. See the 📡 Live page for setup instructions.");return;}
-  openOverlay(`<h2>🔴 Go Live</h2>
-    <div class="field">
-      <label>Stream title</label>
-      <input type="text" id="liveTitleInput" placeholder="What are you performing today?" maxlength="80" style="width:100%;box-sizing:border-box"/>
-    </div>
-    <div style="display:flex;gap:10px;margin-top:14px">
-      <button class="btn block" data-action="close">Cancel</button>
-      <button class="btn block primary" data-action="startstream">🔴 Start Stream</button>
-    </div>`);
-  setTimeout(()=>{ const i=document.getElementById('liveTitleInput');if(i)i.focus(); },50);
-}
-
-async function startLiveStream(){
-  const titleInput=document.getElementById('liveTitleInput');
-  const title=(titleInput?.value.trim())||'Live Stream';
-  closeOverlay();
-  const streamId='live_'+ME.id.slice(0,8)+'_'+Date.now();
-  try{
-    await fbDB.collection("liveStreams").doc(streamId).set({
-      hostUid:ME.id,hostName:ME.name,hostColor:ME.color||'#888',
-      title,channelName:streamId,status:'live',viewerCount:0,startedAt:Date.now()
-    });
-    state.view='livestream';state.streamId=streamId;
-    renderApp();
-  }catch(e){toast("Could not start stream: "+(e.message||e));}
-}
-
-async function stopLiveStream(){
-  if(!_agoraSid)return;
-  const sid=_agoraSid;
-  await leaveLiveStream();
-  await fbDB.collection("liveStreams").doc(sid).update({status:'ended',endedAt:Date.now()}).catch(()=>{});
-  toast("Stream ended.");
-  state.view='live'; renderApp();
-}
-
-async function leaveLiveStream(){
-  if(_streamChatUnsub){_streamChatUnsub();_streamChatUnsub=null;}
-  if(_streamDocUnsub){_streamDocUnsub();_streamDocUnsub=null;}
-  if(_agoraLocalTracks.length){
-    _agoraLocalTracks.forEach(t=>{try{t.stop();t.close();}catch(e){}});
-    _agoraLocalTracks=[];
-  }
-  if(_agoraClient){
-    if(_liveRole==='audience'&&_agoraSid){
-      fbDB.collection("liveStreams").doc(_agoraSid).update({viewerCount:firebase.firestore.FieldValue.increment(-1)}).catch(()=>{});
-    }
-    try{await _agoraClient.leave();}catch(e){}
-    _agoraClient=null;
-  }
-  _agoraSid=null; _liveRole='audience'; _hostAgoraUid=null;
-}
-
-async function sendStreamChat(streamId){
-  const inp=document.getElementById('liveChatInput');
-  if(!inp||!inp.value.trim())return;
-  const text=inp.value.trim();inp.value='';
-  await fbDB.collection("liveStreams").doc(streamId).collection("chat").add({
-    uid:ME.id,name:ME.name,text,time:Date.now()
-  }).catch(e=>toast("Chat error: "+e.message));
-}
-
-function toggleStreamMute(){
-  if(!_agoraLocalTracks[0])return;
-  const nowMuted=!_agoraLocalTracks[0].muted;
-  _agoraLocalTracks[0].setMuted(nowMuted);
-  const btn=document.getElementById('streamMicBtn');if(btn)btn.textContent=nowMuted?'🔇':'🎙️';
-}
-
-function toggleStreamCam(){
-  if(!_agoraLocalTracks[1])return;
-  const nowMuted=!_agoraLocalTracks[1].muted;
-  _agoraLocalTracks[1].setMuted(nowMuted);
-  const btn=document.getElementById('streamCamBtn');if(btn){btn.textContent=nowMuted?'📷 Off':'📷';btn.classList.toggle('on',nowMuted);}
-}
 
 function startListeners(){
-  fbDB.collection("users").onSnapshot(s=>{ CACHE.users={}; s.forEach(d=>CACHE.users[d.id]={ id:d.id, ...d.data() }); scheduleRender(); }, e=>console.warn("users",e.code));
-  fbDB.collection("tracks").onSnapshot(s=>{ CACHE.tracks=s.docs.map(d=>({ id:d.id, ...d.data() })); scheduleRender(); }, e=>console.warn("tracks",e.code));
-  fbDB.collection("statuses").onSnapshot(s=>{ CACHE.statuses=s.docs.map(d=>({ id:d.id, ...d.data() })); scheduleRender(); }, e=>console.warn("statuses",e.code));
+  fbDB.collection("users").limit(2000).onSnapshot(s=>{ CACHE.users={}; s.forEach(d=>CACHE.users[d.id]={ id:d.id, ...d.data() }); scheduleRender(); }, e=>console.warn("users",e.code));
+  fbDB.collection("tracks").limit(500).onSnapshot(s=>{ CACHE.tracks=s.docs.map(d=>({ id:d.id, ...d.data() })); scheduleRender(); }, e=>console.warn("tracks",e.code));
+  fbDB.collection("statuses").limit(300).onSnapshot(s=>{ CACHE.statuses=s.docs.map(d=>({ id:d.id, ...d.data() })); scheduleRender(); }, e=>console.warn("statuses",e.code));
   fbDB.collection("follows").onSnapshot(s=>{ CACHE.follows={}; s.forEach(d=>CACHE.follows[d.id]=(d.data().following||[])); scheduleRender(); }, e=>console.warn("follows",e.code));
-  fbDB.collection("userFollows").onSnapshot(s=>{ CACHE.userFollows={}; CACHE.liveNotify={}; s.forEach(d=>{ const dat=d.data(); CACHE.userFollows[d.id]=(dat.list||[]); CACHE.liveNotify[d.id]=(dat.liveNotify||[]); }); scheduleRender(); }, e=>console.warn("userFollows",e.code));
+  fbDB.collection("userFollows").onSnapshot(s=>{ CACHE.userFollows={}; s.forEach(d=>{ const dat=d.data(); CACHE.userFollows[d.id]=(dat.list||[]); }); scheduleRender(); }, e=>console.warn("userFollows",e.code));
   fbDB.collection("reactions").onSnapshot(s=>{ CACHE.reactions={}; s.forEach(d=>CACHE.reactions[d.id]=d.data()); scheduleRender(); }, e=>console.warn("reactions",e.code));
-  fbDB.collection("comments").onSnapshot(s=>{ CACHE.comments=s.docs.map(d=>({ id:d.id, ...d.data() })); scheduleRender(); }, e=>console.warn("comments",e.code));
+  fbDB.collection("comments").limit(500).onSnapshot(s=>{ CACHE.comments=s.docs.map(d=>({ id:d.id, ...d.data() })); scheduleRender(); }, e=>console.warn("comments",e.code));
   fbDB.collection("products").onSnapshot(s=>{ CACHE.products=s.docs.map(d=>({ id:d.id, ...d.data() })).sort((a,b)=>b.createdAt-a.createdAt); scheduleRender(); }, e=>console.warn("products",e.code));
   fbDB.collection("sellers").onSnapshot(s=>{ CACHE.sellers={}; s.forEach(d=>CACHE.sellers[d.id]={ id:d.id, ...d.data() }); scheduleRender(); }, e=>console.warn("sellers",e.code));
   // Daily FX rates (USD base) for multi-currency display
@@ -6306,11 +5927,6 @@ function startListeners(){
   fbDB.collection("platform").doc("categories").onSnapshot(
     s=>{ CACHE.customCategories=s.exists?Object.keys(s.data()).sort((a,b)=>a.localeCompare(b)):[]; scheduleRender(); },
     ()=>{ CACHE.customCategories=[]; }
-  );
-  // Live streams — real-time list of active broadcasts
-  fbDB.collection("liveStreams").where("status","==","live").onSnapshot(
-    s=>{ CACHE.liveStreams=s.docs.map(d=>({id:d.id,...d.data()})); scheduleRender(); },
-    e=>console.warn("liveStreams",e.code)
   );
 }
 function startAuthListeners(uid){

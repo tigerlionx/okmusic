@@ -25,8 +25,6 @@ const { initializeApp }        = require("firebase-admin/app");
 const { getFirestore }         = require("firebase-admin/firestore");
 const { getMessaging }         = require("firebase-admin/messaging");
 const nodemailer               = require("nodemailer");
-const { RtcTokenBuilder, RtcRole } = require("agora-access-token");
-
 initializeApp();
 const db  = getFirestore();
 const fcm = getMessaging();
@@ -182,27 +180,6 @@ const TYPE_META = {
   new_product:  { icon: "ic_launcher",  sound: "default",       channel: "general"  },
   default:      { icon: "ic_launcher",  sound: "default",       channel: "general"  },
 };
-
-// ── Agora token generation ────────────────────────────────────────────────────
-// Called from the browser before joining/hosting a live stream.
-// Reads App ID + Certificate from Firestore /config/agora (Admin SDK bypasses rules).
-exports.generateAgoraToken = onCall({ region: "us-central1" }, async (request) => {
-  if (!request.auth) throw new HttpsError("unauthenticated", "Must be signed in.");
-
-  const { channelName, role } = request.data || {};
-  if (!channelName) throw new HttpsError("invalid-argument", "channelName is required.");
-
-  const configSnap = await db.collection("config").doc("agora").get();
-  if (!configSnap.exists) throw new HttpsError("internal", "Agora not configured.");
-  const { appId, appCertificate } = configSnap.data();
-  if (!appId || !appCertificate) throw new HttpsError("internal", "Agora credentials incomplete.");
-
-  const rtcRole = role === "host" ? RtcRole.PUBLISHER : RtcRole.SUBSCRIBER;
-  const expiresAt = Math.floor(Date.now() / 1000) + 3600; // 1-hour token
-  const token = RtcTokenBuilder.buildTokenWithUid(appId, appCertificate, channelName, 0, rtcRole, expiresAt);
-
-  return { token, appId, expiresAt };
-});
 
 // ── Printify helper ───────────────────────────────────────────────────────────
 function stripHtml(html) {
@@ -380,76 +357,6 @@ exports.submitPrintifyOrder = onCall({ region: "us-central1" }, async (request) 
 
 // ── Push + email notifications ─────────────────────────────────────────────────
 // Triggered whenever a new notification document is created
-// ── Live stream started → fan-out notifications ───────────────────────────────
-exports.onLiveStreamCreated = onDocumentCreated(
-  { document: "liveStreams/{streamId}" },
-  async (event) => {
-    const stream = event.data?.data();
-    if (!stream || stream.status !== "live") return null;
-    const { hostUid, hostName, title } = stream;
-    const streamId = event.params.streamId;
-    if (!hostUid) return null;
-
-    // Find users who opted in to live notifications for this creator
-    const subsSnap = await db.collection("userFollows")
-      .where("liveNotify", "array-contains", hostUid)
-      .get();
-    if (subsSnap.empty) return null;
-
-    const batch = db.batch();
-    const pushJobs = [];
-
-    for (const doc of subsSnap.docs) {
-      const uid = doc.id;
-      if (uid === hostUid) continue; // never notify yourself
-      // In-app notification
-      const notifRef = db.collection("notifications").doc();
-      batch.set(notifRef, {
-        forUid: uid,
-        type: "creator_live",
-        fromUid: hostUid,
-        fromName: hostName || "Someone",
-        streamId: streamId,
-        text: `📡 ${hostName || "Someone"} is live now${title ? ": " + title : ""}`,
-        time: Date.now(),
-        read: false,
-      });
-      pushJobs.push(uid);
-    }
-    await batch.commit();
-
-    // FCM push notifications
-    for (const uid of pushJobs) {
-      const userDoc = await db.collection("users").doc(uid).get();
-      const fcmToken = userDoc.data()?.fcmToken;
-      if (!fcmToken) continue;
-      try {
-        await fcm.send({
-          token: fcmToken,
-          notification: {
-            title: `📡 ${hostName || "Someone"} is live!`,
-            body: title || "A live stream just started.",
-          },
-          webpush: {
-            notification: {
-              icon: "/favicon.ico",
-              badge: "/favicon.ico",
-              tag: "creator_live",
-              requireInteraction: false,
-            },
-            fcmOptions: { link: "https://ok-music-903e7.web.app/community.html" },
-          },
-        });
-      } catch (err) {
-        if (err.code === "messaging/registration-token-not-registered") {
-          await db.collection("users").doc(uid).update({ fcmToken: null }).catch(() => {});
-        }
-      }
-    }
-    return null;
-  }
-);
-
 exports.sendPushOnNotification = onDocumentCreated(
   { document: "notifications/{notifId}" },
   async (event) => {
