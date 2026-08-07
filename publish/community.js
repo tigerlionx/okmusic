@@ -5912,12 +5912,12 @@ function startListeners(){
   fbDB.collection("users").limit(2000).onSnapshot(s=>{ CACHE.users={}; s.forEach(d=>CACHE.users[d.id]={ id:d.id, ...d.data() }); scheduleRender(); }, e=>console.warn("users",e.code));
   fbDB.collection("tracks").limit(500).onSnapshot(s=>{ CACHE.tracks=s.docs.map(d=>({ id:d.id, ...d.data() })); scheduleRender(); }, e=>console.warn("tracks",e.code));
   fbDB.collection("statuses").limit(300).onSnapshot(s=>{ CACHE.statuses=s.docs.map(d=>({ id:d.id, ...d.data() })); scheduleRender(); }, e=>console.warn("statuses",e.code));
-  fbDB.collection("follows").onSnapshot(s=>{ CACHE.follows={}; s.forEach(d=>CACHE.follows[d.id]=(d.data().following||[])); scheduleRender(); }, e=>console.warn("follows",e.code));
-  fbDB.collection("userFollows").onSnapshot(s=>{ CACHE.userFollows={}; s.forEach(d=>{ const dat=d.data(); CACHE.userFollows[d.id]=(dat.list||[]); }); scheduleRender(); }, e=>console.warn("userFollows",e.code));
-  fbDB.collection("reactions").onSnapshot(s=>{ CACHE.reactions={}; s.forEach(d=>CACHE.reactions[d.id]=d.data()); scheduleRender(); }, e=>console.warn("reactions",e.code));
+  fbDB.collection("follows").limit(2000).onSnapshot(s=>{ CACHE.follows={}; s.forEach(d=>CACHE.follows[d.id]=(d.data().following||[])); scheduleRender(); }, e=>console.warn("follows",e.code));
+  fbDB.collection("userFollows").limit(2000).onSnapshot(s=>{ CACHE.userFollows={}; s.forEach(d=>{ const dat=d.data(); CACHE.userFollows[d.id]=(dat.list||[]); }); scheduleRender(); }, e=>console.warn("userFollows",e.code));
+  fbDB.collection("reactions").limit(2000).onSnapshot(s=>{ CACHE.reactions={}; s.forEach(d=>CACHE.reactions[d.id]=d.data()); scheduleRender(); }, e=>console.warn("reactions",e.code));
   fbDB.collection("comments").limit(500).onSnapshot(s=>{ CACHE.comments=s.docs.map(d=>({ id:d.id, ...d.data() })); scheduleRender(); }, e=>console.warn("comments",e.code));
-  fbDB.collection("products").onSnapshot(s=>{ CACHE.products=s.docs.map(d=>({ id:d.id, ...d.data() })).sort((a,b)=>b.createdAt-a.createdAt); scheduleRender(); }, e=>console.warn("products",e.code));
-  fbDB.collection("sellers").onSnapshot(s=>{ CACHE.sellers={}; s.forEach(d=>CACHE.sellers[d.id]={ id:d.id, ...d.data() }); scheduleRender(); }, e=>console.warn("sellers",e.code));
+  fbDB.collection("products").limit(500).onSnapshot(s=>{ CACHE.products=s.docs.map(d=>({ id:d.id, ...d.data() })).sort((a,b)=>b.createdAt-a.createdAt); scheduleRender(); }, e=>console.warn("products",e.code));
+  fbDB.collection("sellers").limit(2000).onSnapshot(s=>{ CACHE.sellers={}; s.forEach(d=>CACHE.sellers[d.id]={ id:d.id, ...d.data() }); scheduleRender(); }, e=>console.warn("sellers",e.code));
   // Daily FX rates (USD base) for multi-currency display
   fetch('https://open.er-api.com/v6/latest/USD')
     .then(r=>r.json())
