@@ -339,21 +339,27 @@ function signInGoogle(){
 fbAuth.getRedirectResult().then(result=>{ if(result&&result.user) console.log("Redirect sign-in OK:",result.user.email); }).catch(e=>{ if(e.code==="auth/unauthorized-domain") toast("Login blocked: domain not authorised in Firebase. ("+location.hostname+")"); else if(e.code&&e.code!=="auth/credential-already-in-use") toast("Google sign-in failed: "+(e.code||e.message)); });
 function openEmailAuth(email){
   openOverlay(`<h2>Continue with email</h2><p class="sub">Log in, or create a new account.</p>
-    <div class="field"><label>Email</label><input class="fb-field" id="emEmail" type="email" value="${esc(email||'')}" /></div>
-    <div class="field"><label>Password</label><input class="fb-field" id="emPass" type="password" placeholder="at least 6 characters" /></div>
-    <button class="btn primary block" data-action="emailgo" data-mode="login">Log in</button>
+    <div class="field"><label>Email</label><input class="fb-field" id="emEmail" type="email" autocomplete="email" value="${esc(email||'')}" onkeydown="if(event.key==='Enter'){event.preventDefault();document.getElementById('emPass').focus();}" /></div>
+    <div class="field"><label>Password</label><input class="fb-field" id="emPass" type="password" autocomplete="current-password" placeholder="at least 6 characters" onkeydown="if(event.key==='Enter'){event.preventDefault();emailGo('login');}" /></div>
+    <div id="emErr" style="color:#e2554f;font-size:13px;min-height:18px;margin-bottom:6px"></div>
+    <button class="btn primary block" id="emLoginBtn" data-action="emailgo" data-mode="login">Log in</button>
     <button class="btn block" data-action="emailgo" data-mode="signup" style="margin-top:8px">Create new account</button>`);
+  setTimeout(()=>{ const f=$("emEmail"); if(f&&!f.value) f.focus(); else if(f&&f.value){ const p=$("emPass"); if(p) p.focus(); } },50);
 }
 function emailGo(mode){
-  const email=($("emEmail").value||"").trim(), pass=$("emPass").value||"";
+  const email=($("emEmail")?.value||"").trim(), pass=$("emPass")?.value||"";
   if(!email||!email.includes("@")) return toast("Enter a valid email");
   if(pass.length<6) return toast("Password must be at least 6 characters");
-  closeOverlay();
+  const btn=$("emLoginBtn"); if(btn){ btn.disabled=true; btn.textContent="…"; }
+  const errEl=$("emErr"); if(errEl) errEl.textContent="";
   const p = mode==="signup" ? fbAuth.createUserWithEmailAndPassword(email,pass) : fbAuth.signInWithEmailAndPassword(email,pass);
-  p.catch(e=>{
-    if(e.code==="auth/email-already-in-use") toast("That email already has an account — choose Log in.");
-    else if(e.code==="auth/user-not-found"||e.code==="auth/invalid-credential"||e.code==="auth/wrong-password") toast("No account or wrong password — try Create new account.");
-    else toast("Sign-in failed: "+(e.code||e.message));
+  p.then(()=>closeOverlay()).catch(e=>{
+    if(btn){ btn.disabled=false; btn.textContent="Log in"; }
+    let msg;
+    if(e.code==="auth/email-already-in-use") msg="That email already has an account — use Log in.";
+    else if(e.code==="auth/user-not-found"||e.code==="auth/invalid-credential"||e.code==="auth/wrong-password") msg="Wrong email or password. Try again or create a new account.";
+    else msg="Sign-in failed: "+(e.code||e.message);
+    if(errEl) errEl.textContent=msg; else toast(msg);
   });
 }
 async function loadProfile(uid){ try{ const s=await fbDB.collection("users").doc(uid).get(); return s.exists?{ id:uid, ...s.data() }:null; }catch(e){ console.warn(e); return null; } }
@@ -2244,18 +2250,9 @@ async function handleLoginSecurity(uid){
       _startSessionListener(uid,sid);
       if(d.expiresAt&&d.expiresAt>Date.now()) _schedulePublicExpiry(d.expiresAt);
     } else {
-      _showDeviceTypePrompt(uid);
+      _initSession(uid, false);
     }
   }catch(e){ console.warn('Security init error:',e); }
-}
-function _showDeviceTypePrompt(uid){
-  openOverlay(`<div style="text-align:center;padding:4px 0 8px">
-    <div style="font-size:48px;margin-bottom:12px">🔒</div>
-    <h2>Quick Security Check</h2>
-    <p class="sub">Is this a private or shared device? This helps protect your account.</p>
-    <button class="btn primary block" style="margin-bottom:10px" data-action="devicetype" data-pub="0" data-uid="${uid}">🏠 Private device — keep me signed in</button>
-    <button class="btn block" data-action="devicetype" data-pub="1" data-uid="${uid}">🖥️ Public / shared device — 2-hour session</button>
-  </div>`);
 }
 async function _initSession(uid,isPublic){
   const sid=getSessionId(); const devInfo=getDeviceInfo(); const now=Date.now();
