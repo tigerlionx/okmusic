@@ -807,7 +807,13 @@ function renderApp(){
   renderMain();
   setTimeout(()=>{
     const s=$("search"); if(s) s.oninput=e=>{ state.query=e.target.value; if(state.view!=='discover') state.view='discover'; renderMain(); };
-    const acct=$("snavAcct"); if(acct) acct.onclick=e=>{ e.stopPropagation(); toggleNavMenu(); };
+    const acct=$("snavAcct"); if(acct) acct.onclick=e=>{
+      if(e.target.closest('.snav-acct-menu')){
+        const m=document.querySelector('.snav-acct-menu'); if(m){ m.remove(); _navMenuOpen=false; }
+        return;
+      }
+      e.stopPropagation(); toggleNavMenu();
+    };
     const nav=$("mobnav"); const mp=$("miniplayer");
     if(nav&&mp){ const h=nav.getBoundingClientRect().height; if(h>0) mp.style.bottom=h+"px"; }
   },0);
