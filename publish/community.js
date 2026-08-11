@@ -736,6 +736,9 @@ function toggleNavMenu(){
     <div class="snav-acct-menu-divider"></div>
     <div class="snav-acct-menu-item" data-action="customize">🎨 Edit profile</div>
     <div class="snav-acct-menu-item" data-action="suggest">💡 Suggest a feature</div>
+    ${isAdmin()?`<div class="snav-acct-menu-divider"></div>
+    <div class="snav-acct-menu-item" data-action="nav" data-view="admin">📊 Admin Stats</div>
+    <div class="snav-acct-menu-item" data-action="nav" data-view="contests">🏆 Resolve Contests</div>`:''}
     <div class="snav-acct-menu-divider"></div>
     <div class="snav-acct-menu-item danger" data-action="logout">↩️ Log out</div>`;
   acct.appendChild(menu);
@@ -2077,7 +2080,7 @@ function toggleFollow(uid){
   }).catch(e=>toast(e.code||e.message));
   notify(uid,"new_fan",`${ME.name} is now one of your fans 🎉`);
 }
-function logout(){ fbAuth.signOut(); }
+function logout(){ fbAuth.signOut().then(()=>location.reload()); }
 
 // ---------- avatar lightbox ----------
 function viewAvatar(uid){
