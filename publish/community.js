@@ -302,28 +302,204 @@ function _clearBg(){
   document.body.style.backgroundImage=""; document.body.classList.remove("has-page-bg");
 }
 function render(){
-  if(!ME){ renderLanding(); return; }
+  if(!ME){ renderPublicDiscover(); return; }
   if(!ME.handle){ renderLanding(); openOnboard(); return; }   // signed in but no profile yet
   renderApp();
 }
 
-// ============ AUTH (Claude-style) ============
+// ============ AUTH ============
 function renderLanding(){
   $("miniplayer").classList.remove("show");
   $("root").innerHTML=`
-  <div class="authwrap"><div class="authbox">
-    <div class="logo">◎ OK Music</div><h1>The Music Network.</h1>
-    <p class="landing-desc">OK Music is a social music network where creators share AI music, connect with fans, trade in the marketplace, and build a community — all in one place.</p>
-    <div class="authcard">
-      <button class="social-btn" data-action="auth" data-p="google"><span class="ic" style="color:#EA4335">G</span> Continue with Google</button>
-      <button class="social-btn" data-action="auth" data-p="apple"><span class="ic"></span> Continue with Apple</button>
-      <div class="divider-or">OR</div>
-      <input class="fb-field" id="liEmail" type="email" placeholder="Enter your email" />
-      <button class="btn primary block" data-action="authemail" style="margin-top:10px">Continue with email</button>
+  <div class="auth-v2-wrap">
+    <div class="auth-v2-left">
+      <div class="auth-v2-logo">OK<span>MUSIC</span></div>
+      <h1 class="auth-v2-pitch-h1">Share Your Music,<br><em>Connect &amp; Do Business</em></h1>
+      <p class="auth-v2-pitch-sub">Upload tracks from any AI music platform, build a fanbase, earn 🦁 LionCoins for every play, and trade in the community marketplace.</p>
+      <ul class="auth-v2-features">
+        <li><span>⬆️</span> Share tracks from Suno, Udio &amp; more</li>
+        <li><span>🦁</span> Earn LionCoins for plays, likes &amp; shares</li>
+        <li><span>🛍️</span> Buy &amp; sell in the marketplace</li>
+        <li><span>💬</span> Connect with fans &amp; collaborators</li>
+      </ul>
     </div>
-    <div class="authfoot">No account needed to listen — sign in to share & follow.</div>
-  </div></div>
-  <div class="landing-copyright">Copyright OK Music&#x2122; Company &mdash; Contact: trendai509@gmail.com &mdash; Jul 2026</div>`;
+    <div class="auth-v2-right">
+      <div class="auth-v2-card">
+        <div class="auth-v2-tab-bar">
+          <button class="auth-v2-tab active">Sign In</button>
+          <button class="auth-v2-tab">Sign Up</button>
+        </div>
+        <button class="social-btn" data-action="auth" data-p="google">
+          <svg width="20" height="20" viewBox="0 0 24 24"><path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/><path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/><path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/><path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/></svg>
+          Continue with Google
+        </button>
+        <button class="social-btn" data-action="auth" data-p="apple">
+          <span style="font-size:17px;line-height:1">🍎</span> Continue with Apple
+        </button>
+        <div class="divider-or">OR</div>
+        <input class="fb-field" id="liEmail" type="email" placeholder="Enter your email" />
+        <button class="btn primary block" data-action="authemail" style="margin-top:10px">Continue with email →</button>
+        <div class="authfoot" style="margin-top:16px">Visitors can browse music freely — sign in to share, like &amp; earn 🦁 LionCoins.</div>
+      </div>
+    </div>
+  </div>
+  <div class="landing-copyright">Copyright OK Music&#x2122; Company &mdash; trendai509@gmail.com &mdash; 2026</div>`;
+}
+
+// ============ PUBLIC DISCOVER (unauthenticated visitors) ============
+function renderPublicDiscover(){
+  $("miniplayer").classList.remove("show");
+  // Build music library from public tracks
+  const publicTracks=(allTracks()||[]).filter(t=>t.visibility==='public');
+  const genreMap={};
+  publicTracks.forEach(t=>{ const g=(t.genre&&t.genre.trim())||'Unknown'; if(!genreMap[g])genreMap[g]=[]; genreMap[g].push(t); });
+  const sortedGenres=Object.keys(genreMap).sort();
+  let foldersHtml='';
+  sortedGenres.forEach(g=>{
+    const tracks=genreMap[g].slice().sort((a,b)=>b.createdAt-a.createdAt).slice(0,10);
+    const sid=g.replace(/[^a-zA-Z0-9]/g,'_');
+    // Use open state from existing state for continuity
+    const isOpen=state.openFolders&&state.openFolders.has(sid);
+    const rows=tracks.map(t=>{
+      const u=userById(t.userId);
+      const artStyle=t.coverImg?`background-image:url('${t.coverImg}');background-size:cover;background-position:center`:`background:${grad(t.accent)}`;
+      return `<div class="pub-music-row" data-action="play" data-id="${t.id}">
+        <div class="pub-music-art" style="${artStyle}">${t.coverImg?'':'◎'}</div>
+        <div class="pub-music-info">
+          <div class="pub-music-title">${esc(t.title)}</div>
+          <div class="pub-music-artist">${esc(u?.name||'Unknown')} &middot; ${esc(g)}</div>
+        </div>
+        <button class="pub-music-play" data-action="play" data-id="${t.id}">▶</button>
+      </div>`;
+    }).join('');
+    foldersHtml+=`<details class="music-folder" ${isOpen?'open':''} style="margin-bottom:8px">
+      <summary class="music-folder-hd" style="cursor:pointer;padding:11px 14px;border-radius:12px;background:rgba(255,255,255,.88);border:1px solid var(--line);display:flex;align-items:center;gap:10px;font-weight:700;font-size:14px;list-style:none;user-select:none">
+        <span style="color:var(--muted);font-size:12px">▶</span> 📁 ${esc(g)} <span style="font-size:12px;color:var(--muted);font-weight:500;margin-left:auto">${tracks.length} track${tracks.length!==1?'s':''}</span>
+      </summary>
+      <div style="padding:8px 0">${rows}</div>
+    </details>`;
+  });
+  const emptyLib=`<div class="empty" style="padding:32px 0">No public tracks yet — be the first to sign up and upload!</div>`;
+
+  $("root").innerHTML=`
+  <div class="pub-site">
+    <div class="pub-blobs"></div>
+    <!-- ── Topbar ── -->
+    <div class="pub-topbar">
+      <div class="pub-topbar-inner">
+        <div class="pub-brand-logo">OK<span>MUSIC</span> <span class="pub-brand-badge">Social Hub</span></div>
+        <div class="pub-nav-links">
+          <span style="color:var(--blue)">Discover</span>
+          <span onclick="renderLanding()" style="cursor:pointer">Feed</span>
+          <span onclick="renderLanding()" style="cursor:pointer">Marketplace</span>
+          <span onclick="renderLanding()" style="cursor:pointer">Messages</span>
+          <span onclick="renderLanding()" style="cursor:pointer">Sign In</span>
+          <button class="btn primary sm" onclick="renderLanding()" style="font-family:'Space Grotesk',sans-serif;text-transform:uppercase;letter-spacing:.5px">Join Free →</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="pub-wrap">
+      <!-- ── Hero ── -->
+      <div class="pub-hero">
+        <div class="pub-hero-left">
+          <div class="pub-hero-badge">
+            <span></span> Music Community Network
+          </div>
+          <div class="pub-slogan-pill">🦁 Sign up — join the network and earn LionCoins</div>
+          <h1 class="pub-h1">Share AI Music,<br><em>Connect &amp; Earn</em></h1>
+          <p class="pub-sub">Upload tracks from any AI music platform, share them with a global audience, build a fanbase, and earn <b>🦁 LionCoins</b> for every play, like, and share. The community is yours.</p>
+          <div class="pub-ctas">
+            <button class="btn primary" onclick="renderLanding()" style="font-size:15px;padding:13px 30px;font-family:'Space Grotesk',sans-serif;text-transform:uppercase;letter-spacing:1px">Join the Network →</button>
+            <button class="btn" onclick="renderLanding()" style="font-family:'Space Grotesk',sans-serif">Sign In</button>
+          </div>
+        </div>
+        <!-- 3D LionCoin -->
+        <div style="display:flex;flex-direction:column;align-items:center;justify-content:center">
+          <div class="lnc-scene">
+            <div class="lnc-particles">
+              <div class="lnc-particle"></div>
+              <div class="lnc-particle"></div>
+              <div class="lnc-particle"></div>
+              <div class="lnc-particle"></div>
+              <div class="lnc-particle"></div>
+              <div class="lnc-particle"></div>
+            </div>
+            <div class="lnc-float-wrap">
+              <div class="lnc-coin">
+                <div class="lnc-face">🦁</div>
+                <div class="lnc-back">LNC</div>
+              </div>
+            </div>
+            <div class="lnc-glow"></div>
+            <div class="lnc-shadow"></div>
+          </div>
+          <div class="lnc-label">
+            <div class="lnc-label-title">LionCoin</div>
+            <div class="lnc-label-sub">Earn for every play, like &amp; share</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── Stats bar ── -->
+      <div class="pub-stats">
+        <div class="pub-stat"><div class="pub-stat-n">120K<span>+</span></div><div class="pub-stat-l">Shared Tracks</div></div>
+        <div class="pub-stat"><div class="pub-stat-n">45K</div><div class="pub-stat-l">Active Members</div></div>
+        <div class="pub-stat"><div class="pub-stat-n">100<span>%</span></div><div class="pub-stat-l">Creator Owned</div></div>
+        <div class="pub-stat"><div class="pub-stat-n">24<span>/7</span></div><div class="pub-stat-l">Live Network</div></div>
+      </div>
+
+      <!-- ── Music Library ── -->
+      <div style="margin-bottom:56px">
+        <div class="pub-library-hd">
+          <h2>🎵 Music Library</h2>
+          <p>Browse &amp; play public tracks — sign in to like, comment &amp; share</p>
+        </div>
+        ${foldersHtml||emptyLib}
+        ${publicTracks.length>0?`<div class="pub-gate">
+          <h3>Want to see more?</h3>
+          <p>Sign up free to access the full feed, follow artists, earn 🦁 LionCoins, and upload your own tracks.</p>
+          <button class="btn primary" onclick="renderLanding()" style="font-size:15px;padding:12px 32px;font-family:'Space Grotesk',sans-serif;text-transform:uppercase;letter-spacing:.8px">Sign Up — It's Free →</button>
+        </div>`:''}
+      </div>
+
+      <!-- ── Feature cards ── -->
+      <div class="pub-features">
+        <h2>Built For Music Networkers</h2>
+        <p class="pub-features-sub">Everything you need to showcase your work, connect with fans, and do business.</p>
+        <div class="pub-features-grid">
+          <div class="pub-feature-card">
+            <div class="pub-feature-icon" style="background:rgba(0,114,255,.08);border:1px solid rgba(0,114,255,.25);color:var(--blue)">⬆️</div>
+            <h3>Multi-Platform Uploads</h3>
+            <p>Upload tracks exported from Suno, Udio, or any AI music platform. Build a public portfolio your fans can discover and play.</p>
+          </div>
+          <div class="pub-feature-card">
+            <div class="pub-feature-icon" style="background:rgba(217,0,108,.07);border:1px solid rgba(217,0,108,.25);color:var(--pink)">🦁</div>
+            <h3>Earn LionCoins</h3>
+            <p>Get rewarded for every play, like, comment, and share. Use 🦁 LionCoins in the marketplace or convert them to real value.</p>
+          </div>
+          <div class="pub-feature-card">
+            <div class="pub-feature-icon" style="background:rgba(106,0,244,.07);border:1px solid rgba(106,0,244,.25);color:var(--purple)">🛍️</div>
+            <h3>Marketplace &amp; Calls</h3>
+            <p>Sell merchandise, beat licenses, and services. Take calls with fans and collaborators directly on the platform.</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── Join CTA ── -->
+      <div class="pub-join">
+        <div class="pub-join-coin">🦁</div>
+        <h2>Ready to Earn LionCoins?</h2>
+        <p>Sign up free in seconds. Share your first track, connect with artists worldwide, and start earning 🦁 LionCoins today.</p>
+        <button class="btn primary" onclick="renderLanding()" style="font-size:16px;padding:14px 44px;font-family:'Space Grotesk',sans-serif;text-transform:uppercase;letter-spacing:1.2px">Join the Network — Free →</button>
+      </div>
+    </div>
+
+    <div class="pub-footer">© 2026 OK Music™ &mdash; trendai509@gmail.com &mdash; <a href="#" onclick="renderLanding()" style="color:var(--blue)">Sign In / Sign Up</a></div>
+  </div>`;
+
+  // Allow play actions to work for guests (audio doesn't require auth)
+  $('miniplayer').classList.remove('show');
 }
 function signInGoogle(){
   const provider=new firebase.auth.GoogleAuthProvider();
@@ -539,65 +715,101 @@ function showWelcomeGuide(name){
 }
 
 // ============ APP SHELL ============
+// ── Account dropdown for new horizontal nav ──
+let _navMenuOpen=false;
+function toggleNavMenu(){
+  _navMenuOpen=!_navMenuOpen;
+  const existing=document.querySelector('.snav-acct-menu');
+  if(!_navMenuOpen||existing){ if(existing) existing.remove(); _navMenuOpen=false; return; }
+  const acct=$('snavAcct'); if(!acct) return;
+  const u=currentUser();
+  const menu=document.createElement('div');
+  menu.className='snav-acct-menu';
+  menu.innerHTML=`
+    <div class="snav-acct-menu-item" data-action="profile" data-uid="${u.id}">😊 Your profile</div>
+    <div class="snav-acct-menu-item" data-action="nav" data-view="mymusic">🎵 Your uploads</div>
+    <div class="snav-acct-menu-item" data-action="nav" data-view="wallet">🦁 Sales &amp; payouts</div>
+    <div class="snav-acct-menu-item" data-action="nav" data-view="fans">🫂 My Fans</div>
+    <div class="snav-acct-menu-item" data-action="nav" data-view="contests">🏆 Contests</div>
+    <div class="snav-acct-menu-item" data-action="nav" data-view="buzzing">🔥 Buzzing</div>
+    <div class="snav-acct-menu-item" data-action="nav" data-view="notifs">🔔 Notifications</div>
+    <div class="snav-acct-menu-divider"></div>
+    <div class="snav-acct-menu-item" data-action="customize">🎨 Edit profile</div>
+    <div class="snav-acct-menu-item" data-action="suggest">💡 Suggest a feature</div>
+    <div class="snav-acct-menu-divider"></div>
+    <div class="snav-acct-menu-item danger" data-action="logout">↩️ Log out</div>`;
+  acct.appendChild(menu);
+  setTimeout(()=>{
+    document.addEventListener('click',function _closeNavMenu(e){
+      if(!acct.contains(e.target)){ menu.remove(); _navMenuOpen=false; document.removeEventListener('click',_closeNavMenu); }
+    });
+  },0);
+}
+
+// ── Site footer helper ──
+function siteFooter(){
+  return`<div class="site-footer">
+    <div>© 2026 OK Music™ — Connecting Artists &amp; Empowering Music Communities.</div>
+    <div class="site-footer-links">
+      <a href="#" data-action="nav" data-view="discover">Discover</a>
+      <a href="#" data-action="nav" data-view="home">Feed</a>
+      <a href="#" data-action="openmarketplace">Marketplace</a>
+      <a href="#" data-action="nav" data-view="msgs">Messages</a>
+    </div>
+  </div>`;
+}
+
 function renderApp(){
   const u=currentUser();
-  const item=(v,ic,l)=>`<div class="side-item ${state.view===v?'active':''}" data-action="nav" data-view="${v}"><span class="ic">${ic}</span>${l}</div>`;
+  const unMsgs=Object.values(CACHE.convos||{}).reduce((s,c)=>s+((c.unread||{})[ME?.id]||0),0);
+  const unNotifs=(CACHE.notifications||[]).filter(x=>!x.read).length;
+  const isChat=state.view==='msgs'||state.view==='chat';
+  const isMktActive=state.view==='marketplace'||state.view==='mystore'||state.view==='cart';
+  const isMore=['wallet','contests','mymusic','fans','myorders','admin','buzzing','notifs','trackdetail'].includes(state.view);
+  const nb=n=>n?`<span class="mobnav-badge">${n>9?'9+':n}</span>`:'';
+  const navLnk=(view,label,extra='')=>{
+    const active=state.view===view||(view==='msgs'&&isChat)||(view==='marketplace'&&isMktActive);
+    return`<button class="snav-link${active?' active':''}" data-action="nav" data-view="${view}">${label}${extra}</button>`;
+  };
+  const msgBadge=unMsgs?`<span style="display:inline-flex;align-items:center;justify-content:center;margin-left:4px;width:18px;height:18px;font-size:10px;border-radius:9px;background:var(--pink);color:#fff;vertical-align:middle">${unMsgs>9?'9+':unMsgs}</span>`:'';
+
   $("root").innerHTML=`
-    <div class="topbar">
-      <div class="brand" data-action="nav" data-view="discover"><span class="l">◎</span><b>OK&nbsp;Music</b></div>
-      <input class="search" id="search" placeholder="Search artists & tracks…" value="${esc(state.query)}" />
-      <div class="lnc-chip" data-action="nav" data-view="wallet" title="LionCoin balance">🦁 ${(CACHE.wallet?.balance||0).toLocaleString()} LNC</div>
-      <div class="bell" data-action="nav" data-view="notifs" title="Notifications">🔔${(()=>{const n=(CACHE.notifications||[]).filter(x=>!x.read).length;return n?`<span class="bell-badge">${n>9?'9+':n}</span>`:'';})()}</div>
-      <div class="me" data-action="profile" data-uid="${u.id}"><div class="avatar" style="${avatarStyle(u,34)}">${u.avatarImg?'':initials(u.name)}</div></div>
-    </div>
-    <div class="shell">
-      <nav class="sidebar">
-        ${item("discover","🧭","Discover")}
-        ${item("buzzing","🔥","Buzzing")}
-        ${item("home","🏠","My Feed")}
-        ${item("notifs","🔔","Notifications")}
-        ${(()=>{const un=Object.values(CACHE.convos||{}).reduce((s,c)=>s+((c.unread||{})[ME?.id]||0),0);return`<div class="side-item ${state.view==='msgs'||state.view==='chat'?'active':''}" data-action="nav" data-view="msgs"><span class="ic">💬</span>Messages${un?`<span class="bell-badge" style="position:static;margin-left:6px">${un>9?'9+':un}</span>`:''}</div>`})()}
-        <div class="side-item" data-action="profile" data-uid="${u.id}"><span class="ic">😊</span>My Page</div>
-        ${item("fans","🫂","My Fans")}
-        ${item("wallet","🦁",`LionCoin${CACHE.wallet?.balance?` · ${(CACHE.wallet.balance).toLocaleString()}`:''}`)}
-        ${item("contests","🏆","Contests")}
-        ${item("mymusic","🎵","My Music")}
-        <div class="side-sep"></div>
-        <div class="side-item" data-action="sharefolder"><span class="ic">📁</span>Add a folder</div>
-        <div class="side-item" data-action="upload"><span class="ic">⬆️</span>Add single track</div>
-        <div class="side-item" data-action="customize"><span class="ic">🎨</span>Edit profile</div>
-        <div class="side-item" data-action="invite"><span class="ic">✉️</span>Invite friends</div>
-        <div class="side-item" data-action="suggest"><span class="ic">💡</span>Suggest a feature</div>
-        <div class="side-item ${state.view==='marketplace'||state.view==='mystore'||state.view==='cart'?'active':''}" data-action="openmarketplace"><span class="ic">🛍️</span>MARKETPLACE</div>
-        ${(()=>{const myOrders=(CACHE.orders||[]).filter(o=>o.buyerId===ME?.id);return myOrders.length?`<div class="side-item ${state.view==='myorders'?'active':''}" data-action="nav" data-view="myorders"><span class="ic">📦</span>My Orders (${myOrders.length})</div>`:'';})()}
-        ${isAdmin()?`<div class="side-item ${state.view==='admin'?'active':''}" data-action="nav" data-view="admin"><span class="ic">📊</span>Admin Stats</div>`:''}
-        <div class="side-sep"></div>
-        <div class="side-item" data-action="logout"><span class="ic">↩️</span>Log out</div>
-      </nav>
-      <main class="main"><div class="page" id="page"></div></main>
-    </div>
-    ${(()=>{
-      const unMsgs=Object.values(CACHE.convos||{}).reduce((s,c)=>s+((c.unread||{})[ME?.id]||0),0);
-      const unNotifs=(CACHE.notifications||[]).filter(x=>!x.read).length;
-      const isChat=state.view==='msgs'||state.view==='chat';
-      const isProfile=state.view==='profile'&&state.profileId===u.id;
-      const nb=(n)=>n?`<span class="mobnav-badge">${n>9?'9+':n}</span>`:'';
-      const isMore=['wallet','contests','mymusic','fans','marketplace','mystore','cart','myorders','admin','buzzing'].includes(state.view);
-      return`<nav class="mobnav" id="mobnav">
-        <div class="mobnav-item ${state.view==='discover'?'active':''}" data-action="nav" data-view="discover"><span class="mn-ic">🧭</span>Discover</div>
-        <div class="mobnav-item ${state.view==='home'?'active':''}" data-action="nav" data-view="home"><span class="mn-ic">🏠</span>Feed</div>
-        <div class="mobnav-item ${isChat?'active':''}" data-action="nav" data-view="msgs">${nb(unMsgs)}<span class="mn-ic">💬</span>Chat</div>
-        <div class="mobnav-item ${state.view==='notifs'?'active':''}" data-action="nav" data-view="notifs">${nb(unNotifs)}<span class="mn-ic">🔔</span>Alerts</div>
-        <div class="mobnav-item ${isProfile?'active':''}" data-action="profile" data-uid="${u.id}"><span class="mn-ic">😊</span>Me</div>
-        <div class="mobnav-item ${isMore?'active':''}" data-action="mobmenu"><span class="mn-ic">⋯</span>More</div>
-      </nav>`;
-    })()}`;
+    <div class="app-bg-grid"></div>
+    <div class="app-bg-glow"></div>
+    <nav class="site-nav">
+      <div class="snav-brand" data-action="nav" data-view="discover">OK<span>MUSIC</span><span class="snav-badge">Social Hub</span></div>
+      <div class="snav-links">
+        ${navLnk('discover','Discover')}
+        ${navLnk('home','Feed')}
+        ${navLnk('marketplace','Marketplace')}
+        ${navLnk('msgs','Messages',msgBadge)}
+      </div>
+      <input class="snav-search" id="search" placeholder="Search artists & tracks…" value="${esc(state.query)}" />
+      <div class="snav-right">
+        <div class="snav-lnc" data-action="nav" data-view="wallet" title="LionCoin balance">🦁 ${(CACHE.wallet?.balance||0).toLocaleString()} LNC</div>
+        <div class="snav-mail-btn" data-action="nav" data-view="msgs" title="Messages">✉️${unMsgs?'<span class="snav-mail-badge"></span>':''}</div>
+        <div class="snav-acct" id="snavAcct">
+          <div style="${avatarStyle(u,32)};width:32px;height:32px;border-radius:50%;display:grid;place-items:center;font-weight:700;color:#fff;font-size:12px;flex-shrink:0">${u.avatarImg?'':initials(u.name)}</div>
+          <span class="snav-acct-handle">@${esc(u.handle||u.name)}</span>
+          <span class="snav-caret">▼</span>
+        </div>
+      </div>
+    </nav>
+    <div class="app-content-wrap" id="page"></div>
+    <nav class="mobnav" id="mobnav">
+      <div class="mobnav-item ${state.view==='discover'?'active':''}" data-action="nav" data-view="discover"><span class="mn-ic">🧭</span>Discover</div>
+      <div class="mobnav-item ${state.view==='home'?'active':''}" data-action="nav" data-view="home"><span class="mn-ic">🏠</span>Feed</div>
+      <div class="mobnav-item ${isChat?'active':''}" data-action="nav" data-view="msgs">${nb(unMsgs)}<span class="mn-ic">💬</span>Chat</div>
+      <div class="mobnav-item ${state.view==='notifs'?'active':''}" data-action="nav" data-view="notifs">${nb(unNotifs)}<span class="mn-ic">🔔</span>Alerts</div>
+      <div class="mobnav-item ${state.view==='profile'&&state.profileId===u.id?'active':''}" data-action="profile" data-uid="${u.id}"><span class="mn-ic">😊</span>Me</div>
+      <div class="mobnav-item ${isMore||isMktActive?'active':''}" data-action="mobmenu"><span class="mn-ic">⋯</span>More</div>
+    </nav>`;
   renderMain();
   setTimeout(()=>{
-    const s=$("search"); if(s) s.oninput=e=>{ state.query=e.target.value; if(state.view!=="discover") state.view="discover"; renderMain(); };
-    // Position miniplayer above actual mobnav height regardless of viewport-fit
+    const s=$("search"); if(s) s.oninput=e=>{ state.query=e.target.value; if(state.view!=='discover') state.view='discover'; renderMain(); };
+    const acct=$("snavAcct"); if(acct) acct.onclick=e=>{ e.stopPropagation(); toggleNavMenu(); };
     const nav=$("mobnav"); const mp=$("miniplayer");
-    if(nav && mp){ const h=nav.getBoundingClientRect().height; if(h>0) mp.style.bottom=h+"px"; }
+    if(nav&&mp){ const h=nav.getBoundingClientRect().height; if(h>0) mp.style.bottom=h+"px"; }
   },0);
 }
 function openMobMenu(){
@@ -662,6 +874,7 @@ function closeMobMenu(){
 }
 
 function renderMain(){
+  if(!ME){ renderPublicDiscover(); return; }   // guest — always show public discover
   if(state.view!=="chat" && msgUnsub){ msgUnsub(); msgUnsub=null; }
   const _visU=state.view==="profile"?userById(state.profileId):null;
   if(_visU){
@@ -688,63 +901,129 @@ function renderMain(){
   if(state.view==="wallet") return renderWallet();
   if(state.view==="contests") return renderContests();
   if(state.view==="admin"&&isAdmin()) return renderAdmin();
+  if(state.view==="trackdetail") return renderTrackDetail(state.trackId);
   renderDiscover();
 }
 
-// ---------- discover (browse music + promo feed) ----------
+// ---------- discover v2 (hero + trending + library + promo feed) ----------
 function renderDiscover(){
+  const u=currentUser();
   const q=state.query.trim().toLowerCase();
   const blockedList=ME?.blockedUsers||[];
   const publicTracks=allTracks().filter(t=>t.visibility==='public'&&!blockedList.includes(t.userId)&&!getPrivacy(userById(t.userId)).hideFromDiscover);
 
-  // Group by genre
+  // Genre folders
   const genreMap={};
-  publicTracks.forEach(t=>{
-    const g=(t.genre&&t.genre.trim())||'Unknown';
-    if(!genreMap[g]) genreMap[g]=[];
-    genreMap[g].push(t);
-  });
+  publicTracks.forEach(t=>{ const g=(t.genre&&t.genre.trim())||'Unknown'; if(!genreMap[g])genreMap[g]=[]; genreMap[g].push(t); });
   const knownOrder=[...GENRES,'Unknown'];
-  const sortedGenres=Object.keys(genreMap).sort((a,b)=>{
-    const ai=knownOrder.indexOf(a),bi=knownOrder.indexOf(b);
-    if(ai===-1&&bi===-1) return a.localeCompare(b);
-    return (ai===-1?999:ai)-(bi===-1?999:bi);
-  });
-
-  // Build folders (filter tracks if search active)
-  let foldersHtml='';
-  sortedGenres.forEach(g=>{
-    let tracks=genreMap[g].slice().sort((a,b)=>b.createdAt-a.createdAt);
-    if(q) tracks=tracks.filter(t=>t.title.toLowerCase().includes(q)||(userById(t.userId)?.name||'').toLowerCase().includes(q));
-    if(q&&!tracks.length) return;
-    const sid=g.replace(/[^a-zA-Z0-9]/g,'_');
-    foldersHtml+=discoverFolder(g,tracks,sid);
-  });
-
-  // Artist results for search
-  let artistSec='';
-  if(q){
-    const artists=allUsers().filter(u=>u&&!blockedList.includes(u.id)&&!getPrivacy(u).hideFromDiscover&&(u.name.toLowerCase().includes(q)||(u.handle||'').toLowerCase().includes(q))).slice(0,8);
-    if(artists.length) artistSec=`<div class="col-h" style="margin-top:0;margin-bottom:10px">🎤 Artists</div><div style="margin-bottom:16px">${artists.map(userCard).join('')}</div>`;
-  }
-
-  // Discovery feed posts
+  const sortedGenres=Object.keys(genreMap).sort((a,b)=>{ const ai=knownOrder.indexOf(a),bi=knownOrder.indexOf(b); if(ai===-1&&bi===-1) return a.localeCompare(b); return(ai===-1?999:ai)-(bi===-1?999:bi); });
+  let foldersHtml=''; let artistSec='';
+  sortedGenres.forEach(g=>{ let tracks=genreMap[g].slice().sort((a,b)=>b.createdAt-a.createdAt); if(q) tracks=tracks.filter(t=>t.title.toLowerCase().includes(q)||(userById(t.userId)?.name||'').toLowerCase().includes(q)); if(q&&!tracks.length) return; const sid=g.replace(/[^a-zA-Z0-9]/g,'_'); foldersHtml+=discoverFolder(g,tracks,sid); });
+  if(q){ const artists=allUsers().filter(us=>us&&!blockedList.includes(us.id)&&!getPrivacy(us).hideFromDiscover&&(us.name.toLowerCase().includes(q)||(us.handle||'').toLowerCase().includes(q))).slice(0,8); if(artists.length) artistSec=`<div class="col-h" style="margin-top:0;margin-bottom:10px">🎤 Artists</div><div style="margin-bottom:16px">${artists.map(userCard).join('')}</div>`; }
   const discPosts=(CACHE.discoveryPosts||[]).filter(p=>!blockedList.includes(p.userId));
 
-  $('page').innerHTML=`<div class="h-title">Discover</div>
-    <div class="discover-layout">
-      <div class="discover-music">
-        <div class="col-h" style="margin-top:0">🎵 Music Library</div>
-        ${artistSec}
-        ${foldersHtml||'<div class="empty" style="padding:20px 0">No tracks found'+(q?` for "${esc(state.query)}"`:' yet')+'.</div>'}
+  // Search mode: abbreviated layout
+  if(q){
+    $('page').innerHTML=`<div class="disc-v2-wrap">
+      <div class="disc-section-hd">🔍 Results for "${esc(state.query)}"</div>
+      <div class="disc-lower">
+        <div>${artistSec}${foldersHtml||`<div class="empty" style="padding:20px 0">No results for "${esc(state.query)}".</div>`}</div>
+        <div>
+          <div class="disc-section-hd">📣 Discovery Feed</div>
+          ${pinnedContestBanner()}${discoverComposer()}
+          <div id="discFeedList">${discPosts.length?discPosts.map(discoverPostCard).join(''):'<div class="empty" style="padding:16px 0;text-align:center">No promotions yet.</div>'}</div>
+        </div>
       </div>
-      <div class="discover-feed">
-        <div class="col-h" style="margin-top:0">📣 Discovery Feed</div>
-        ${pinnedContestBanner()}
-        ${discoverComposer()}
-        <div id="discFeedList">${discPosts.length?discPosts.map(discoverPostCard).join(''):'<div class="empty" style="padding:24px 0;text-align:center">No promotions yet.<br><span style="font-size:13px;color:var(--muted)">Be the first to showcase your music or items.</span></div>'}</div>
-      </div>
+      ${siteFooter()}
     </div>`;
+    return;
+  }
+
+  // Trending: 8 most recent public tracks
+  const trending=publicTracks.slice().sort((a,b)=>b.createdAt-a.createdAt).slice(0,8);
+  const featured=trending[0];
+  const featuredArtist=featured?userById(featured.userId):null;
+  const featuredArt=featured?(featured.coverImg?`background-image:url('${featured.coverImg}');background-size:cover;background-position:center`:`background:${grad(featured.accent)}`):'background:linear-gradient(135deg,#0072ff,#6a00f4)';
+  const totalTracks=publicTracks.length; const totalUsers=allUsers().filter(u=>u).length;
+
+  const welcomeHtml=u?`<div class="disc-welcome">
+    <div style="${avatarStyle(u,42)};width:42px;height:42px;border-radius:50%;display:grid;place-items:center;font-weight:700;color:#fff;font-size:16px;flex-shrink:0">${u.avatarImg?'':initials(u.name)}</div>
+    <div class="disc-welcome-info">
+      <div class="disc-welcome-name">Welcome back, ${esc(u.name.split(' ')[0])} 👋</div>
+      <div class="disc-welcome-sub">@${esc(u.handle||u.name)} · ${nfmt(totalTracks)} tracks in the library</div>
+    </div>
+    <button class="btn sm primary" data-action="upload" style="flex-shrink:0">⬆️ Upload</button>
+  </div>`:'';
+
+  const trendingHtml=trending.length?trending.map(t=>{ const tu=userById(t.userId); const as=t.coverImg?`background-image:url('${t.coverImg}');background-size:cover;background-position:center`:`background:${grad(t.accent)}`;
+    return`<div class="disc-track-card" data-action="play" data-id="${t.id}">
+      <div class="disc-track-art" style="${as}">${t.coverImg?'':'◎'}</div>
+      <div class="disc-track-info">
+        <div class="disc-track-title">${esc(t.title)}</div>
+        <div class="disc-track-artist" data-action="profile" data-uid="${tu?.id||''}">${esc(tu?.name||'Unknown')}</div>
+      </div>
+      <span class="disc-track-genre">${esc(t.genre||'Music')}</span>
+      <button class="disc-track-play" data-action="play" data-id="${t.id}">▶</button>
+    </div>`;}).join(''):'<div class="empty" style="padding:20px 0">No tracks yet — be the first to upload!</div>';
+
+  const statFmt=n=>n>999?`${Math.floor(n/100)/10}K`:n||'—';
+
+  $('page').innerHTML=`<div class="disc-v2-wrap">
+    ${welcomeHtml}
+    <div class="disc-hero">
+      <div>
+        <div class="disc-eyebrow"><span class="disc-eyebrow-dot"></span> Music Community Network</div>
+        <h1 class="disc-h1">Share Your Music,<br><span class="disc-h1-grad">Connect &amp; Do Business</span></h1>
+        <p class="disc-sub">Upload tracks from any AI music platform, connect with fans, build a following, and earn 🦁 LionCoins for every play and interaction.</p>
+        <div class="disc-ctas">
+          <button class="btn-primary-grad" data-action="upload">⬆️ Upload Track</button>
+          <button class="btn-secondary-outline" data-action="nav" data-view="home">View Feed</button>
+        </div>
+      </div>
+      <div class="disc-player-card">
+        <div class="disc-player-art" style="${featuredArt}">
+          <div class="disc-eq-bars"><div class="nbar"></div><div class="nbar"></div><div class="nbar"></div><div class="nbar"></div><div class="nbar"></div></div>
+        </div>
+        <div class="disc-player-meta">
+          <div class="disc-player-title">${featured?esc(featured.title):'OK Music Library'}</div>
+          <div class="disc-player-artist">${featuredArtist?esc(featuredArtist.name):'Discover artists'}</div>
+        </div>
+        ${featured?`<button class="btn primary block" data-action="play" data-id="${featured.id}" style="margin-top:10px">▶ Play Now</button>`:''}
+        <div class="disc-player-progress"><div class="disc-player-fill"></div></div>
+      </div>
+    </div>
+    <div class="disc-stats">
+      <div class="disc-stat"><div class="disc-stat-n">${statFmt(totalTracks)}<em>+</em></div><div class="disc-stat-l">Shared Tracks</div></div>
+      <div class="disc-stat"><div class="disc-stat-n">${statFmt(totalUsers)}</div><div class="disc-stat-l">Active Members</div></div>
+      <div class="disc-stat"><div class="disc-stat-n">100<em>%</em></div><div class="disc-stat-l">Creator Owned</div></div>
+      <div class="disc-stat"><div class="disc-stat-n">24<em>/7</em></div><div class="disc-stat-l">Live Network</div></div>
+    </div>
+    <div class="disc-trending">
+      <div class="disc-trending-hd">🔥 Trending Tracks <span class="disc-section-sub">Most recent · all genres</span></div>
+      ${trendingHtml}
+    </div>
+    <div class="disc-features">
+      <h2 class="disc-features-hd">Built For Music Networkers</h2>
+      <p class="disc-features-sub">Everything you need to showcase your work, connect with fans, and do business.</p>
+      <div class="disc-features-grid">
+        <div class="disc-feature-card"><div class="disc-feature-icon" style="background:rgba(0,114,255,.08);border:1px solid rgba(0,114,255,.25);color:var(--blue)">⬆️</div><h3>Multi-Platform Uploads</h3><p>Upload tracks exported from Suno, Udio, or any AI music platform. Build a public portfolio your fans can discover and play.</p></div>
+        <div class="disc-feature-card"><div class="disc-feature-icon" style="background:rgba(217,0,108,.07);border:1px solid rgba(217,0,108,.25);color:var(--pink)">🦁</div><h3>Earn LionCoins</h3><p>Get rewarded for every play, like, comment, and share. Use 🦁 LionCoins in the marketplace or convert them to real value.</p></div>
+        <div class="disc-feature-card"><div class="disc-feature-icon" style="background:rgba(106,0,244,.07);border:1px solid rgba(106,0,244,.25);color:var(--purple)">🛍️</div><h3>Marketplace &amp; Calls</h3><p>Sell merchandise, beat licenses, and services. Take calls with fans and collaborators directly on the platform.</p></div>
+      </div>
+    </div>
+    <div class="disc-lower">
+      <div>
+        <div class="disc-section-hd">🎵 Music Library</div>
+        ${foldersHtml||'<div class="empty" style="padding:20px 0">No tracks yet — be the first to upload!</div>'}
+      </div>
+      <div>
+        <div class="disc-section-hd">📣 Discovery Feed</div>
+        ${pinnedContestBanner()}${discoverComposer()}
+        <div id="discFeedList">${discPosts.length?discPosts.map(discoverPostCard).join(''):'<div class="empty" style="padding:16px 0;text-align:center">No promotions yet.<br><span style="font-size:13px;color:var(--muted)">Be the first to showcase your music.</span></div>'}</div>
+      </div>
+    </div>
+    ${siteFooter()}
+  </div>`;
 }
 
 function discoverFolder(genre, tracks, sid){
@@ -962,10 +1241,82 @@ function renderHome(){
   const following=CACHE.userFollows[u.id]||[];
   const feedUids=new Set([...fanOf,...following]);
   const list=allStatuses().filter(s=>s.userId===u.id||feedUids.has(s.userId)).sort((a,b)=>b.time-a.time);
-  $("page").innerHTML=`<div class="h-title">My Feed</div>
-    ${composer()}
-    ${list.length?list.map(statusCard).join(""):'<div class="empty">Follow artists to see their updates here — or post your own status above.</div>'}`;
+
+  // Sidebar: open contests + suggested creators
+  const openContests=(CACHE.contests||[]).filter(c=>!c.closed).slice(0,3);
+  const suggested=allUsers().filter(us=>us&&us.id!==u.id&&!fanOf.includes(us.id)&&!following.includes(us.id)&&us.handle).slice(0,5);
+
+  const postCards=list.length?list.map(statusCard).join(''):'<div class="empty" style="padding:32px 0;text-align:center">Follow artists to see their updates here — or post your own status above.</div>';
+
+  const contestsSidebar=openContests.length?`<div class="feed-v2-sidebar-card">
+    <div class="feed-v2-sidebar-hd">🏆 Open Opportunities</div>
+    ${openContests.map(c=>`<div style="padding:8px 0;border-bottom:1px solid rgba(24,32,48,.06);cursor:pointer" data-action="nav" data-view="contests">
+      <div style="font-weight:700;font-size:.85rem">${esc(c.title||'Contest')}</div>
+      ${c.prize?`<div style="font-size:.78rem;color:var(--muted);margin-top:2px">🦁 ${nfmt(c.prize)} LNC</div>`:''}
+    </div>`).join('')}
+    <button class="btn sm" data-action="nav" data-view="contests" style="margin-top:10px;width:100%">View all →</button>
+  </div>`:'';
+
+  const suggestedSidebar=suggested.length?`<div class="feed-v2-sidebar-card">
+    <div class="feed-v2-sidebar-hd">🎤 Creators to Follow</div>
+    ${suggested.map(us=>`<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid rgba(24,32,48,.06)">
+      <div class="avatar" style="${avatarStyle(us,34)};cursor:pointer" data-action="profile" data-uid="${us.id}">${us.avatarImg?'':initials(us.name)}</div>
+      <div style="flex:1;min-width:0">
+        <div style="font-weight:700;font-size:.85rem;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" data-action="profile" data-uid="${us.id}">${esc(us.name)}</div>
+        <div style="font-size:.75rem;color:var(--muted)">@${esc(us.handle||us.name)}</div>
+      </div>
+      <button class="btn sm" data-action="follow" data-uid="${us.id}">Follow</button>
+    </div>`).join('')}
+  </div>`:'';
+
+  $("page").innerHTML=`<div class="feed-v2-wrap">
+    <div class="feed-v2-layout">
+      <div>
+        <div class="feed-v2-composer">
+          <textarea id="statusText" placeholder="Share a status with your fans… e.g. I just posted new tracks — please listen, like &amp; share! 💜"></textarea>
+          <div class="feed-v2-composer-actions"><button class="btn primary sm" data-action="poststatus">Post status</button></div>
+        </div>
+        ${postCards}
+      </div>
+      <div>
+        ${contestsSidebar}
+        ${suggestedSidebar}
+      </div>
+    </div>
+    ${siteFooter()}
+  </div>`;
   setTimeout(bindComposer,0);
+}
+
+// ---------- track detail v2 ----------
+function renderTrackDetail(id){
+  const t=allTracks().find(x=>x.id===id);
+  if(!t){ $('page').innerHTML='<div class="empty" style="padding:40px;text-align:center">Track not found.</div>'; return; }
+  const tu=userById(t.userId);
+  const artStyle=t.coverImg?`background-image:url('${t.coverImg}');background-size:cover;background-position:center`:`background:${grad(t.accent)}`;
+  const related=allTracks().filter(x=>x.id!==id&&x.visibility==='public'&&(x.userId===t.userId||x.genre===t.genre)).slice(0,6);
+  $('page').innerHTML=`<div class="trackv2-wrap">
+    <button class="trackv2-back" data-action="nav" data-view="discover">← Back to Discover</button>
+    <div class="trackv2-hero">
+      <div class="trackv2-art" style="${artStyle}">${t.coverImg?'':'◎'}</div>
+      <div class="trackv2-meta">
+        <h1 class="trackv2-title">${esc(t.title)}</h1>
+        <div class="trackv2-artist" data-action="profile" data-uid="${tu?.id||''}">${esc(tu?.name||'Unknown')}</div>
+        <span class="trackv2-genre">${esc(t.genre||'Music')}</span>
+        <div class="trackv2-actions">
+          <button class="btn-primary-grad" data-action="play" data-id="${t.id}">▶ Play</button>
+          <button class="btn${hasLiked(t.id)?' on':''}" data-action="like" data-id="${t.id}">👍 ${nfmt(likeCount(t.id))}</button>
+          <button class="btn${hasDisliked(t.id)?' ondown':''}" data-action="dislike" data-id="${t.id}">👎 ${nfmt(dislikeCount(t.id))}</button>
+          <span style="font-size:.82rem;color:var(--muted)">▶ ${nfmt(playCount(t.id))} plays</span>
+        </div>
+      </div>
+    </div>
+    ${related.length?`<div class="disc-trending">
+      <div class="disc-trending-hd">🎵 More Like This</div>
+      ${related.map(r=>{ const ru=userById(r.userId); const rs=r.coverImg?`background-image:url('${r.coverImg}');background-size:cover;background-position:center`:`background:${grad(r.accent)}`; return`<div class="disc-track-card" data-action="play" data-id="${r.id}"><div class="disc-track-art" style="${rs}">${r.coverImg?'':'◎'}</div><div class="disc-track-info"><div class="disc-track-title">${esc(r.title)}</div><div class="disc-track-artist">${esc(ru?.name||'Unknown')}</div></div><span class="disc-track-genre">${esc(r.genre||'Music')}</span><button class="disc-track-play" data-action="play" data-id="${r.id}">▶</button></div>`; }).join('')}
+    </div>`:''}
+    ${siteFooter()}
+  </div>`;
 }
 
 // ---------- streamer page: info header + (music | wall) ----------

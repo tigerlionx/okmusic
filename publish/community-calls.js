@@ -145,25 +145,42 @@ function msgUnreadTotal(){
 // ---- conversation list ----
 function renderMessages(){
   if(convUnsub){convUnsub();convUnsub=null;}
-  $("page").innerHTML=`<div class="h-title">💬 Messages</div><div id="convList" class="conv-list"><div class="empty">Loading…</div></div>`;
+  $("page").innerHTML=`<div class="msgs-v2-wrap">
+    <div class="msgs-v2-layout">
+      <div class="msgs-v2-list-panel">
+        <div class="msgs-v2-list-hd">💬 Messages</div>
+        <div class="msgs-v2-list-body" id="convList"><div class="empty" style="padding:20px 16px">Loading…</div></div>
+      </div>
+      <div class="msgs-v2-convo-panel">
+        <div class="msgs-v2-convo-placeholder">
+          <div>
+            <div style="font-size:40px;margin-bottom:12px">💬</div>
+            <div style="font-weight:700;margin-bottom:6px">Select a conversation</div>
+            <div>Choose a thread from the left to start chatting</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>`;
   convUnsub=fbDB.collection("messages").where("participants","array-contains",ME.id)
     .onSnapshot(snap=>{
       CACHE.convos={};
       snap.docs.forEach(d=>{CACHE.convos[d.id]={id:d.id,...d.data()};});
       const el=$("convList");if(!el)return;
       const convs=snap.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>(b.lastTime||0)-(a.lastTime||0));
-      if(!convs.length){el.innerHTML='<div class="empty">No messages yet — open any profile and tap 💬 Message to start a chat.</div>';return;}
+      if(!convs.length){el.innerHTML='<div class="msgs-v2-conv-row" style="cursor:default"><div class="msgs-v2-conv-info"><div class="msgs-v2-conv-name" style="font-weight:400;color:var(--muted)">No messages yet — open any profile and tap 💬 Message to start a chat.</div></div></div>';return;}
       el.innerHTML=convs.map(c=>{
         const otherId=c.participants.find(p=>p!==ME.id);
         const other=userById(otherId)||{name:"Unknown",color:"#ccc"};
         const unread=(c.unread||{})[ME.id]||0;
-        return`<div class="conv-row" data-action="openchat" data-uid="${otherId}">
-          <div class="avatar" style="${avatarStyle(other,46)}">${other.avatarImg?'':initials(other.name)}</div>
-          <div class="minfo">
-            <div class="mt">${esc(other.name)}${unread?`<span class="unread-badge">${unread}</span>`:''}
-              <span class="conv-time">${c.lastTime?timeAgo(c.lastTime):''}</span></div>
-            <div class="ms">${esc((c.lastMsg||'').slice(0,70))}</div>
-          </div></div>`;
+        return`<div class="msgs-v2-conv-row" data-action="openchat" data-uid="${otherId}">
+          <div class="avatar" style="${avatarStyle(other,40)}">${other.avatarImg?'':initials(other.name)}</div>
+          <div class="msgs-v2-conv-info">
+            <div class="msgs-v2-conv-name">${esc(other.name)}${unread?`<span class="msgs-v2-conv-badge">${unread}</span>`:''}</div>
+            <div class="msgs-v2-conv-preview">${esc((c.lastMsg||'').slice(0,60))}</div>
+          </div>
+          <div class="msgs-v2-conv-time">${c.lastTime?timeAgo(c.lastTime):''}</div>
+        </div>`;
       }).join('');
     },e=>console.warn("convs",e));
 }
