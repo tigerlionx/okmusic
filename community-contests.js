@@ -219,6 +219,7 @@ function renderContestCard(c){
 
   return`<div class="contest-card">
     <div class="contest-card-stripe ${stripeClass}"></div>
+    ${c.posterUrl?`<div class="contest-poster" style="background-image:url('${esc(c.posterUrl)}')"></div>`:''}
     <div class="contest-card-body">
       <div class="contest-card-top">
         ${statusBadge}
@@ -243,6 +244,7 @@ function renderContestCard(c){
 function openCreateContest(){
   if(!isAdmin()) return;
   _ctMode='simple';
+  window._ctPosterFile=null;
   const def=new Date(Date.now()+7*864e5); def.setMinutes(0,0,0);
   const pad=n=>String(n).padStart(2,'0');
   const defStr=`${def.getFullYear()}-${pad(def.getMonth()+1)}-${pad(def.getDate())}T${pad(def.getHours())}:00`;
@@ -273,6 +275,13 @@ function openCreateContest(){
         <div class="ct-opt-row"><input class="fb-field ct-opt-in" placeholder="Option 2" /><input class="fb-field ct-opt-prize" type="number" min="1" placeholder="Prize (optional)" title="Override prize for this option" /></div>
       </div>
       <button class="btn sm" data-action="addctopt" style="margin-top:4px">+ Add option</button>
+    </div>
+    <div class="field">
+      <label>Poster image (optional)</label>
+      <input type="file" id="ctPosterFile" accept="image/*" style="display:none" />
+      <div class="ct-poster-pick" id="ctPosterPrev" onclick="$('ctPosterFile').click()">
+        <span id="ctPosterHint">📸 Tap to add a poster image</span>
+      </div>
     </div>
     <div style="display:flex;gap:10px;margin-top:16px">
       <button class="btn block" data-action="close">Cancel</button>
@@ -340,6 +349,13 @@ async function doCreateContest(){
     };
     if(compound){ doc.mode='compound'; doc.participants=participants; doc.winnerParticipantId=null; }
     else { doc.mode='simple'; }
+    if(window._ctPosterFile){
+      const btn=document.querySelector('[data-action="docreatecontest"]');
+      if(btn) btn.textContent='Uploading poster…';
+      try{ doc.posterUrl=await uploadMediaToCloudinary(window._ctPosterFile); }
+      catch(_e){ toast('Poster upload failed — contest will be created without it'); }
+      window._ctPosterFile=null;
+    }
     await fbDB.collection('contests').add(doc);
     closeOverlay(); toast('Contest created! 🏆');
   }catch(e){ toast(e.message||'Failed to create contest'); }
