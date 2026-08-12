@@ -147,11 +147,11 @@ function renderContestCard(c){
   // ── Options / Grid ──
   let optionsHtml='';
   if(compound){
-    if(isVotingOpen&&ME&&!myPick) optionsHtml=_ccgVoting(c);
+    if(isVotingOpen&&!myPick) optionsHtml=_ccgVoting(c);
     else optionsHtml=_ccgDisplay(c,myPick);
   } else {
     // Simple mode
-    if(isVotingOpen&&ME&&!myPick){
+    if(isVotingOpen&&!myPick){
       optionsHtml=`<div class="contest-opts">${(c.options||[]).map(o=>`
         <button class="contest-opt" data-action="pickcontestoption" data-contestid="${c.id}" data-optionid="${o.id}">
           <span class="contest-opt-circle"></span>
@@ -205,11 +205,17 @@ function renderContestCard(c){
       } else {
         adminHtml+=`<div style="display:flex;flex-wrap:wrap;gap:6px">${(c.options||[]).map(o=>`<button class="btn sm" data-action="resolvecontest" data-contestid="${c.id}" data-optionid="${o.id}" style="background:#F0FDF4;border:1.5px solid #86EFAC;color:#15803D">✓ ${esc(o.label)}${o.prize>0?` (🦁${o.prize.toLocaleString()})`:''}</button>`).join('')}</div>`;
       }
-      adminHtml+=`<button class="btn sm" data-action="setdeadline" data-contestid="${c.id}" style="margin-top:8px;background:#EFF6FF;border:1.5px solid #93C5FD;color:#1D4ED8">⏰ ${c.deadline?'Change deadline':'Set deadline'}</button></div>`;
+      adminHtml+=`<div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap">
+        <button class="btn sm" data-action="setdeadline" data-contestid="${c.id}" style="background:#EFF6FF;border:1.5px solid #93C5FD;color:#1D4ED8">⏰ ${c.deadline?'Change deadline':'Set deadline'}</button>
+        <button class="btn sm" data-action="editcontest" data-contestid="${c.id}" style="background:#F5F3FF;border:1.5px solid #C4B5FD;color:#6D28D9">✏️ Edit contest</button>
+      </div></div>`;
     } else {
       adminHtml=`<div class="contest-admin">
         <div class="contest-admin-label">⚙️ Admin</div>
-        <button class="btn sm" data-action="correctcontest" data-contestid="${c.id}" style="background:#FEF9C3;border:1.5px solid #FCD34D;color:#92400E">🔧 Correct result</button>
+        <div style="display:flex;gap:6px;flex-wrap:wrap">
+          <button class="btn sm" data-action="correctcontest" data-contestid="${c.id}" style="background:#FEF9C3;border:1.5px solid #FCD34D;color:#92400E">🔧 Correct result</button>
+          <button class="btn sm" data-action="editcontest" data-contestid="${c.id}" style="background:#F5F3FF;border:1.5px solid #C4B5FD;color:#6D28D9">✏️ Edit contest</button>
+        </div>
         ${(c.auditLog||[]).length?`<details style="margin-top:10px;font-size:12px"><summary style="cursor:pointer;color:#94A3B8">Audit log (${c.auditLog.length})</summary>
           <div style="margin-top:6px">${(c.auditLog||[]).map(l=>`<div style="padding:6px 0;border-top:1px solid #F1F5F9;font-size:12px">${l.action==='corrected'?'🔧':'🏁'} <b>${timeAgo(l.timestamp)}</b> — ${l.action==='corrected'?`"${esc(l.prevWinnerLabel||'?')}" → "${esc(l.newWinnerLabel)}" — ${esc(l.reason)}`:esc(l.newWinnerLabel)}</div>`).join('')}</div>
         </details>`:''}
@@ -287,6 +293,86 @@ function openCreateContest(){
       <button class="btn block" data-action="close">Cancel</button>
       <button class="btn primary block" data-action="docreatecontest">Create Contest</button>
     </div>`);
+}
+
+// ── Edit contest ──
+function openEditContest(contestId){
+  if(!isAdmin()) return;
+  const c=(CACHE.contests||[]).find(x=>x.id===contestId); if(!c) return;
+  window._ctEditPosterFile=null;
+  const compound=_isCompound(c);
+  const pad=n=>String(n).padStart(2,'0');
+  const toInputVal=ts=>{const d=new Date(ts);return`${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;};
+  const deadlineVal=c.deadline?toInputVal(c.deadline):'';
+  const optsHtml=(c.options||[]).map((o,i)=>`<div class="ct-opt-row">
+    <input class="fb-field ct-opt-in" placeholder="Option ${i+1}" value="${esc(o.label)}" />
+    <input class="fb-field ct-opt-prize" type="number" min="1" placeholder="Prize (optional)" value="${o.prize>0?o.prize:''}" />
+  </div>`).join('');
+  const partsHtml=compound?(c.participants||[]).map((p,i)=>`<input class="fb-field ct-part-in" placeholder="Participant ${i+1}" value="${esc(p.label)}" style="margin-bottom:6px" />`).join(''):'';
+  openOverlay(`<h2>✏️ Edit Contest</h2>
+    <div class="field"><label>Question / Title</label><input class="fb-field" id="ctTitle" value="${esc(c.title)}" /></div>
+    <div class="field">
+      <label>Poster image</label>
+      <input type="file" id="ctPosterFile" accept="image/*" style="display:none" />
+      <div class="ct-poster-pick" id="ctPosterPrev" onclick="$('ctPosterFile').click()"
+        style="${c.posterUrl?`background-image:url('${esc(c.posterUrl)}');background-size:cover;background-position:center`:''}" >
+        <span id="ctPosterHint" style="${c.posterUrl?'display:none':''}">📸 Tap to change poster</span>
+      </div>
+      ${c.posterUrl?`<button class="btn sm" data-action="removectposter" data-contestid="${contestId}" style="margin-top:6px;color:#e55;border-color:#e55">✕ Remove poster</button>`:''}
+    </div>
+    <div class="field"><label>Default prize per winner (LNC)</label><input class="fb-field" id="ctPrize" type="number" min="1" value="${c.prize}" /></div>
+    <div class="field"><label>Voting deadline</label><input class="fb-field" id="ctDeadline" type="datetime-local" value="${deadlineVal}" /><div style="font-size:12px;color:var(--muted);margin-top:4px">Clear to remove deadline</div></div>
+    ${compound?`<div class="field"><label>Participants</label><div id="ctParts">${partsHtml}</div></div>`:''}
+    <div class="field">
+      <label id="ctOptsLabel">${compound?'Methods / Outcomes':'Answer options'}</label>
+      <div id="ctOpts">${optsHtml}</div>
+      <button class="btn sm" data-action="addctopt" style="margin-top:4px">+ Add option</button>
+    </div>
+    <div style="display:flex;gap:10px;margin-top:16px">
+      <button class="btn block" data-action="close">Cancel</button>
+      <button class="btn primary block" data-action="doeditcontest" data-contestid="${contestId}">Save Changes</button>
+    </div>`);
+}
+
+async function doEditContest(contestId){
+  if(!isAdmin()) return;
+  const c=(CACHE.contests||[]).find(x=>x.id===contestId); if(!c) return;
+  const title=($('ctTitle')?.value||'').trim();
+  const prize=parseInt($('ctPrize')?.value||'0');
+  const deadlineVal=($('ctDeadline')?.value||'').trim();
+  const deadline=deadlineVal?new Date(deadlineVal).getTime():null;
+  if(!title) return toast('Enter a title');
+  if(!prize||prize<1) return toast('Enter a valid prize amount');
+
+  const optRows=[...document.querySelectorAll('.ct-opt-row')];
+  const options=optRows.map((row,i)=>{
+    const label=(row.querySelector('.ct-opt-in')?.value||'').trim();
+    const optPrize=parseInt(row.querySelector('.ct-opt-prize')?.value||'0')||0;
+    const existing=(c.options||[])[i];
+    return label?{id:existing?.id||'o'+i,label,prize:optPrize>0?optPrize:0}:null;
+  }).filter(Boolean);
+  if(options.length<2) return toast('Need at least 2 options');
+
+  const compound=_isCompound(c);
+  let participants=c.participants||[];
+  if(compound){
+    participants=[...document.querySelectorAll('.ct-part-in')].map((inp,i)=>({id:(c.participants||[])[i]?.id||'p'+i,label:(inp.value||'').trim()})).filter(x=>x.label);
+    if(participants.length<2) return toast('Need at least 2 participants');
+  }
+
+  try{
+    const update={title,prize,deadline:deadline||null,options};
+    if(compound) update.participants=participants;
+    if(window._ctEditPosterFile){
+      const btn=document.querySelector('[data-action="doeditcontest"]');
+      if(btn) btn.textContent='Uploading poster…';
+      try{ update.posterUrl=await uploadMediaToCloudinary(window._ctEditPosterFile); }
+      catch(_e){ toast('Poster upload failed — other changes will still save'); }
+      window._ctEditPosterFile=null;
+    }
+    await fbDB.collection('contests').doc(contestId).update(update);
+    closeOverlay(); toast('Contest updated ✓');
+  }catch(e){ toast(e.message||'Failed to save changes'); }
 }
 
 function toggleCtMode(mode){
