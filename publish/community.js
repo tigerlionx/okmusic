@@ -734,6 +734,12 @@ function toggleNavMenu(){
     <div class="snav-acct-menu-item" data-action="nav" data-view="buzzing">🔥 Buzzing</div>
     <div class="snav-acct-menu-item" data-action="nav" data-view="notifs">🔔 Notifications</div>
     <div class="snav-acct-menu-divider"></div>
+    <div class="snav-acct-menu-item" data-action="upload">⬆️ Upload track</div>
+    <div class="snav-acct-menu-item" data-action="sharefolder">📁 Add folder</div>
+    <div class="snav-acct-menu-item" data-action="openmarketplace">🛍️ Marketplace</div>
+    <div class="snav-acct-menu-item" data-action="invite">✉️ Invite friends</div>
+    ${(()=>{const myOrders=(CACHE.orders||[]).filter(o=>o.buyerId===u.id);return myOrders.length?`<div class="snav-acct-menu-item" data-action="nav" data-view="myorders">📦 My Orders (${myOrders.length})</div>`:''})()}
+    <div class="snav-acct-menu-divider"></div>
     <div class="snav-acct-menu-item" data-action="customize">🎨 Edit profile</div>
     <div class="snav-acct-menu-item" data-action="suggest">💡 Suggest a feature</div>
     ${isAdmin()?`<div class="snav-acct-menu-divider"></div>
@@ -1118,7 +1124,7 @@ function discoverComposer(){
 
 function discoverPostCard(p){
   const u=userById(p.userId); if(!u) return '';
-  const {html:postHtml}=linkifyText(p.text||'');
+  const {html:postHtml,firstUrl:postUrl}=linkifyText(p.text||'');
   const likeKey='dp_'+p.id;
   const liked=(CACHE.reactions[likeKey]?.likes||[]).includes(ME?.id);
   const lc=(CACHE.reactions[likeKey]?.likes||[]).length;
@@ -1161,7 +1167,8 @@ function discoverPostCard(p){
     </div>
     ${isArticle&&p.title?`<div class="disc-article-title">${esc(p.title)}</div>`:''}
     ${p.text?`<div class="disc-post-text${isLong?' long':''}${isLong&&_expandedPosts.has(p.id)?' expanded':''}" id="dpt-${p.id}">${postHtml}</div>
-    ${isLong?`<button class="disc-read-more-btn" data-action="togglereadmore" data-pid="${p.id}">${_expandedPosts.has(p.id)?'Show less ↑':'Read more →'}</button>`:''}`:''}
+    ${isLong?`<button class="disc-read-more-btn" data-action="togglereadmore" data-pid="${p.id}">${_expandedPosts.has(p.id)?'Show less ↑':'Read more →'}</button>`:''}
+    ${lpTag(postUrl)}`:''}
     ${trackHtml}${productHtml}
     <div class="disc-post-actions">
       <button class="${liked?'on':''}" data-action="likediscpost" data-id="${p.id}">👍 ${nfmt(lc)}</button>
@@ -1182,7 +1189,7 @@ async function postToDiscover(){
     await fbDB.collection('discoveryPosts').add(doc);
     _discAttach={trackId:null,productId:null};
     toast(art?'Article published! 📝':'Posted to Discovery Feed 📣');
-    renderDiscover();
+    renderDiscover(); setTimeout(fetchLinkPreviews,0);
   }catch(e){ toast(e.message||'Failed to post'); }
 }
 
