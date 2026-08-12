@@ -250,6 +250,13 @@ function openCreateContest(){
   const defStr=`${def.getFullYear()}-${pad(def.getMonth()+1)}-${pad(def.getDate())}T${pad(def.getHours())}:00`;
   openOverlay(`<h2>🏆 New Contest</h2>
     <div class="field"><label>Question / Title</label><input class="fb-field" id="ctTitle" placeholder="e.g. Makhachev vs Garry — who wins and how?" /></div>
+    <div class="field">
+      <label>Poster image (optional)</label>
+      <input type="file" id="ctPosterFile" accept="image/*" style="display:none" />
+      <div class="ct-poster-pick" id="ctPosterPrev" onclick="$('ctPosterFile').click()">
+        <span id="ctPosterHint">📸 Tap to add a poster image</span>
+      </div>
+    </div>
     <div class="field"><label>Default prize per winner (LNC)</label><input class="fb-field" id="ctPrize" type="number" min="1" step="1" placeholder="e.g. 500" /><div style="font-size:12px;color:var(--muted);margin-top:4px">Used when an option has no specific prize</div></div>
     <div class="field"><label>Voting deadline</label><input class="fb-field" id="ctDeadline" type="datetime-local" value="${defStr}" /><div style="font-size:12px;color:var(--muted);margin-top:4px">Clear to have no deadline</div></div>
     <div class="field">
@@ -275,13 +282,6 @@ function openCreateContest(){
         <div class="ct-opt-row"><input class="fb-field ct-opt-in" placeholder="Option 2" /><input class="fb-field ct-opt-prize" type="number" min="1" placeholder="Prize (optional)" title="Override prize for this option" /></div>
       </div>
       <button class="btn sm" data-action="addctopt" style="margin-top:4px">+ Add option</button>
-    </div>
-    <div class="field">
-      <label>Poster image (optional)</label>
-      <input type="file" id="ctPosterFile" accept="image/*" style="display:none" />
-      <div class="ct-poster-pick" id="ctPosterPrev" onclick="$('ctPosterFile').click()">
-        <span id="ctPosterHint">📸 Tap to add a poster image</span>
-      </div>
     </div>
     <div style="display:flex;gap:10px;margin-top:16px">
       <button class="btn block" data-action="close">Cancel</button>
