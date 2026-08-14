@@ -27,7 +27,7 @@
 
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@700;800;900&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="community.css?v=105" />
+  <link rel="stylesheet" href="community.css?v=106" />
   <link rel="manifest" href="manifest.json" />
   <meta name="theme-color" content="#0072ff" />
   <meta name="mobile-web-app-capable" content="yes" />
@@ -59,7 +59,9 @@
   <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-auth-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore-compat.js"></script>
-  <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-messaging-compat.js"></script>
+  <!-- firebase-messaging-compat.js omitted: GitHub Pages cannot serve the SW at the
+       origin root so the SDK always throws a 404 on init. Push notifications are
+       enabled only on the Firebase Hosting URL (publish/community.html). -->
   <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-functions-compat.js"></script>
   <script src="firebase-init.js?v=12"></script>
 

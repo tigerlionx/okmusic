@@ -427,8 +427,9 @@ function renderPublicDiscover(){
             </div>
             <div class="lnc-float-wrap">
               <div class="lnc-coin">
-                <div class="lnc-face">🦁</div>
-                <div class="lnc-back">LNC</div>
+                <div class="lnc-face"><span class="lnc-logo">🦁</span></div>
+                <div class="lnc-edge-ring">${Array.from({length:36},(_,i)=>`<div class="lnc-edge" style="--i:${i}"></div>`).join('')}</div>
+                <div class="lnc-back"><span class="lnc-logo">🦁</span></div>
               </div>
             </div>
             <div class="lnc-glow"></div>
@@ -956,7 +957,7 @@ function renderDiscover(){
 
   // Trending: 8 most recent public tracks
   const trending=publicTracks.slice().sort((a,b)=>b.createdAt-a.createdAt).slice(0,8);
-  const featured=trending[0];
+  const featured=allTracks().find(t=>t.id==='t7')||trending[0];
   const featuredArtist=featured?userById(featured.userId):null;
   const featuredArt=featured?(featured.coverImg?`background-image:url('${featured.coverImg}');background-size:cover;background-position:center`:`background:${grad(featured.accent)}`):'background:linear-gradient(135deg,#0072ff,#6a00f4)';
   const totalTracks=publicTracks.length; const totalUsers=allUsers().filter(u=>u).length;
@@ -1089,6 +1090,7 @@ function pinnedContestBanner(){
   const deadlineRow=c.deadline&&!deadlinePassed?`<div class="disc-pin-deadline">⏰ Vote by <b>${fmtDl(c.deadline)}</b></div>`
     :deadlinePassed?`<div class="disc-pin-deadline" style="color:var(--muted)">🕐 Voting has closed</div>`:'';
   return `<div class="disc-pinned-contest">
+    ${c.posterUrl?`<div class="disc-pin-poster" style="background-image:url('${esc(c.posterUrl)}')"></div>`:''}
     <div class="disc-pin-hd">
       <span class="disc-pin-label">📌 Active Challenge</span>
       <span class="disc-pin-prize">🦁 ${c.prize.toLocaleString()} LNC</span>
