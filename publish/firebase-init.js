@@ -21,5 +21,8 @@ firebase.initializeApp(firebaseConfig);
 const fbAuth = firebase.auth();
 const fbDB = firebase.firestore();
 // Offline cache + queued writes — keeps the app usable on flaky connections.
+// NOTE: enablePersistence() is deprecated in Firebase SDK v10 compat but still
+// functional. Proper fix requires migrating to the modular SDK's initializeFirestore()
+// with localCache: persistentLocalCache({tabManager: multiTabManager()}).
 fbDB.enablePersistence({ synchronizeTabs: true }).catch(()=>{});
 // const fbStorage = firebase.storage();   // not used — audio uploads go via Cloudinary
