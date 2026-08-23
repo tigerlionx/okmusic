@@ -1,15 +1,11 @@
 'use strict';
 // ============================================================
-//  OK Music — DJ Mixer  (dj-mixer.js v7)
+//  OK Music — DJ Mixer  (dj-mixer.js v8)
 //  Embeds as floating in-page iframe panel OR standalone popup.
 //  Web Audio API for EQ/routing; HTML audio elements for playback.
 //  BroadcastChannel "ok-music-dj" for cross-window/frame track loading.
-//  v2: local file loading, website library, mix recording/export.
-//  v3: iframe-aware close, mic-over-mix recording.
-//  v4: vinyl scratch sound synthesis, save-dialog for mic+mix recording.
-//  v5: MP3 export via lamejs (voice mix → .mp3), progress bar, _recHadMic flag.
-//  v6: reverted compact layout — removed mobile tab switching.
-//  v7: compact layout, landscape lock, samples system, library mobile fix.
+//  v8: hardware controller redesign — chassis layout, LCD display,
+//      spectral waveform, OK-MUSIC jog hub, vertical pitch faders.
 // ============================================================
 
 const BC = new BroadcastChannel('ok-music-dj');
@@ -882,8 +878,7 @@ function updateDeckDisplay(d) {
 function updateTimeDisplay(d) {
   const el = $(`time${d.id}`);
   if (!el) return;
-  const cur = d.el.currentTime, dur = d.el.duration || 0;
-  el.textContent = `${fmtTime(cur)} / -${fmtTime(dur - cur)}`;
+  el.textContent = fmtTime(d.el.currentTime);
 }
 
 function updateTempoPct(d) {
@@ -918,71 +913,95 @@ function updateHotCueButtons(d) {
 }
 
 // ── Canvas Sizing ─────────────────────────────────────────
-function resizeWaveformCanvases() {
+function resizeCanvases() {
   ['A', 'B'].forEach(id => {
-    const c = $(`wave${id}`);
-    if (c) { c.width = c.offsetWidth || 380; }
+    const wc = $(`wave${id}`);
+    if (wc) wc.width = wc.offsetWidth || 380;
+    const jc = $(`jog${id}`);
+    if (jc) {
+      const s = jc.offsetWidth || 220;
+      jc.width = s; jc.height = s;
+    }
   });
 }
+// legacy alias
+const resizeWaveformCanvases = resizeCanvases;
 
-// ── Waveform Drawing ──────────────────────────────────────
+// ── Waveform Drawing — spectral frequency bars ────────────
 function drawWaveform(d) {
   const canvas = $(`wave${d.id}`);
   if (!canvas) return;
   const ctx = canvas.getContext('2d');
   const W = canvas.width, H = canvas.height;
-  const color = d.id === 'A' ? '#0088ff' : '#ff6600';
+  const isA = d.id === 'A';
 
   ctx.clearRect(0, 0, W, H);
-  ctx.fillStyle = '#0d0d18';
-  ctx.fillRect(0, 0, W, H);
+  const bg = ctx.createLinearGradient(0, 0, 0, H);
+  bg.addColorStop(0, '#010b12'); bg.addColorStop(1, '#00060c');
+  ctx.fillStyle = bg; ctx.fillRect(0, 0, W, H);
 
   if (d.analyser) {
-    const buf = new Uint8Array(d.analyser.frequencyBinCount);
-    d.analyser.getByteTimeDomainData(buf);
-    ctx.strokeStyle = color;
-    ctx.lineWidth = 1.5;
-    ctx.beginPath();
-    const sw = W / buf.length;
-    for (let i = 0; i < buf.length; i++) {
-      const y = (buf[i] / 128) * (H / 2);
-      i === 0 ? ctx.moveTo(0, y) : ctx.lineTo(i * sw, y);
+    const freq = new Uint8Array(d.analyser.frequencyBinCount);
+    d.analyser.getByteFrequencyData(freq);
+    const bars = Math.min(freq.length, 128);
+    const bw = W / bars;
+
+    for (let i = 0; i < bars; i++) {
+      const v = freq[i] / 255;
+      if (v < 0.01) continue;
+      const barH = Math.max(1, v * H);
+      const frac = i / bars;
+      // Color: green-teal (low freq) → blue (high freq)
+      const r = isA ? Math.round(frac * 15) : Math.round((1 - frac) * 60);
+      const g = Math.round(100 + v * 130);
+      const b = Math.round((isA ? 100 + frac * 155 : 80 + v * 100));
+      const grad = ctx.createLinearGradient(0, H - barH, 0, H);
+      grad.addColorStop(0, `rgba(${r},${g},${b},0.92)`);
+      grad.addColorStop(1, `rgba(${r},${Math.round(g*0.4)},${b},0.4)`);
+      ctx.fillStyle = grad;
+      ctx.fillRect(i * bw, H - barH, Math.max(1, bw - 0.5), barH);
     }
-    ctx.stroke();
+
+    // Beatgrid markers
+    if (d.bpm && d.el.duration) {
+      const beatLen = 60 / d.bpm;
+      const winDur = 6;
+      const startT = d.el.currentTime - winDur * 0.4;
+      const beat0 = Math.floor(startT / beatLen);
+      ctx.lineWidth = 1;
+      for (let b = beat0; b < beat0 + Math.ceil(winDur / beatLen) + 1; b++) {
+        const x = ((b * beatLen - startT) / winDur) * W;
+        if (x < 0 || x > W) continue;
+        ctx.strokeStyle = b % 4 === 0 ? 'rgba(255,255,255,0.45)' : 'rgba(255,255,255,0.18)';
+        ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke();
+      }
+    }
   } else {
-    // No audio context yet — flat line
-    ctx.strokeStyle = color + '55';
+    ctx.strokeStyle = isA ? 'rgba(0,100,200,0.35)' : 'rgba(200,80,0,0.35)';
     ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.moveTo(0, H / 2); ctx.lineTo(W, H / 2);
-    ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(0, H / 2); ctx.lineTo(W, H / 2); ctx.stroke();
   }
 
   if (d.el.duration) {
     const prog = d.el.currentTime / d.el.duration;
-    // Loop region
     if (d.loopStart !== null && d.loopEnd !== null) {
       const ls = (d.loopStart / d.el.duration) * W;
-      const le = (d.loopEnd / d.el.duration) * W;
-      ctx.fillStyle = 'rgba(0,255,100,0.12)';
+      const le = (d.loopEnd  / d.el.duration) * W;
+      ctx.fillStyle = 'rgba(0,255,100,0.10)';
       ctx.fillRect(ls, 0, le - ls, H);
-      ctx.strokeStyle = 'rgba(0,255,100,0.5)';
-      ctx.lineWidth = 1;
+      ctx.strokeStyle = 'rgba(0,230,77,0.5)'; ctx.lineWidth = 1;
       ctx.beginPath(); ctx.moveTo(ls, 0); ctx.lineTo(ls, H); ctx.stroke();
       ctx.beginPath(); ctx.moveTo(le, 0); ctx.lineTo(le, H); ctx.stroke();
     }
-    // Hot cue markers
     for (let i = 0; i < 8; i++) {
       if (d.hotCues[i] === null) continue;
       const hx = (d.hotCues[i] / d.el.duration) * W;
-      ctx.strokeStyle = CUE_COLORS[i];
-      ctx.lineWidth = 2;
+      ctx.strokeStyle = CUE_COLORS[i]; ctx.lineWidth = 2;
       ctx.beginPath(); ctx.moveTo(hx, 0); ctx.lineTo(hx, H); ctx.stroke();
     }
     // Playhead
     const px = prog * W;
-    ctx.strokeStyle = 'rgba(255,255,255,0.7)';
-    ctx.lineWidth = 2;
+    ctx.strokeStyle = 'rgba(255,255,255,0.85)'; ctx.lineWidth = 2;
     ctx.beginPath(); ctx.moveTo(px, 0); ctx.lineTo(px, H); ctx.stroke();
   }
 }
@@ -1095,27 +1114,30 @@ function drawJog(d) {
   ctx.restore();
 
   // ── Static center hub ───────────────────────────────────
-  const hubR = 32;
-  const hubGrad = ctx.createRadialGradient(cx - 3, cy - 3, 2, cx, cy, hubR);
-  hubGrad.addColorStop(0, '#282838');
-  hubGrad.addColorStop(1, '#0e0e1e');
+  const hubR = 40;
+  const hubGrad = ctx.createRadialGradient(cx - 4, cy - 4, 2, cx, cy, hubR);
+  hubGrad.addColorStop(0, '#20202e');
+  hubGrad.addColorStop(1, '#0c0c1a');
   ctx.beginPath(); ctx.arc(cx, cy, hubR, 0, Math.PI * 2);
   ctx.fillStyle = hubGrad; ctx.fill();
-  ctx.strokeStyle = '#252535'; ctx.lineWidth = 2; ctx.stroke();
+  ctx.strokeStyle = '#1e1e30'; ctx.lineWidth = 2; ctx.stroke();
 
   // Hub inner ring
   ctx.beginPath(); ctx.arc(cx, cy, hubR - 6, 0, Math.PI * 2);
-  ctx.strokeStyle = accent + '55'; ctx.lineWidth = 1.5; ctx.stroke();
+  ctx.strokeStyle = accent + '44'; ctx.lineWidth = 1.5; ctx.stroke();
 
-  // Deck letter
-  ctx.fillStyle = isPlaying ? accent : (isScratch ? '#ffffff' : '#555580');
-  ctx.font = `900 16px monospace`;
+  // "OK-MUSIC" brand text + deck letter
   ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
   if (isPlaying || isScratch) {
     ctx.shadowColor = isPlaying ? accentGlow : '#ffffffaa';
-    ctx.shadowBlur = 8;
+    ctx.shadowBlur = 6;
   }
-  ctx.fillText(d.id, cx, cy);
+  ctx.fillStyle = isPlaying ? '#cc8800' : (isScratch ? '#ffaa00' : '#3a3a50');
+  ctx.font = `700 8px 'Consolas',monospace`;
+  ctx.fillText('OK-MUSIC', cx, cy - 7);
+  ctx.fillStyle = isPlaying ? accent : (isScratch ? '#ffffff' : '#44445e');
+  ctx.font = `900 13px 'Consolas',monospace`;
+  ctx.fillText(d.id, cx, cy + 8);
   ctx.shadowBlur = 0;
 
   // ── Cue point marker on rim ─────────────────────────────
@@ -1450,8 +1472,8 @@ function showBanner(msg, type = 'info') {
 
 // ── Init ──────────────────────────────────────────────────
 window.addEventListener('DOMContentLoaded', () => {
-  resizeWaveformCanvases();
-  window.addEventListener('resize', resizeWaveformCanvases);
+  resizeCanvases();
+  window.addEventListener('resize', resizeCanvases);
 
   buildDeck(DA);
   buildDeck(DB);

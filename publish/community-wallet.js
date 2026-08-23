@@ -35,7 +35,7 @@ const WALLET={
   }
 };
 
-async function logTrackView(trackId,authorUid){
+async function logTrackView(trackId,authorUid,aiPlatform){
   if(!ME||!authorUid||ME.id===authorUid) return;
   const today=new Date().toISOString().slice(0,10);
   const logRef=fbDB.collection('viewLogs').doc(trackId+'_'+ME.id+'_'+today);
@@ -44,7 +44,9 @@ async function logTrackView(trackId,authorUid){
       if((await t.get(logRef)).exists) throw new Error('already viewed');
       t.set(logRef,{trackId,viewerUid:ME.id,authorUid,date:today,createdAt:Date.now()});
     });
-    WALLET.credit(authorUid,1,'track_view','Track view',trackId);
+    // Block earnings only for explicitly personal-declared tracks.
+    // Tracks without aiPlatform (uploaded before this feature) are grandfathered and continue to earn.
+    if(aiPlatform!=='personal') WALLET.credit(authorUid,1,'track_view','Track view',trackId);
   }catch{}
 }
 

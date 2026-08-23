@@ -96,6 +96,8 @@ document.addEventListener("click",e=>{
     unblockuser:()=>unblockUser(el.dataset.uid),
     reportuser:()=>openReportModal(el.dataset.uid),
     sendreport:()=>sendReport(el.dataset.uid),
+    reporttrack:()=>openReportTrackModal(el.dataset.id),
+    submittrackreport:()=>submitTrackReport(el.dataset.id),
     changepw:()=>doChangePassword(),
     confirmpwchange:()=>confirmPwChange(),
     changeemail:()=>doChangeEmail(),
@@ -173,13 +175,16 @@ document.addEventListener("click",e=>{
       const id=el.dataset.id; const p=(CACHE.discoveryPosts||[]).find(x=>x.id===id);
       if(!p||!ME) return; if(ME.id!==p.userId&&!isAdmin()) return;
       fbDB.collection('discoveryPosts').doc(id).delete().catch(e=>toast(e.message));
-    }
+    },
+    loaddja:()=>loadTrackOnDeck(el.dataset.id,"A"),
+    loaddjb:()=>loadTrackOnDeck(el.dataset.id,"B"),
+    opendj:()=>openDJMixer()
   };
   if(M[a]) M[a]();
 });
 document.addEventListener("change",e=>{
   if(e.target.id==="myTracksOnlyChk"){ myTracksOnlyMode=e.target.checked; toast(myTracksOnlyMode?"🎵 Playing your tracks only":"🌐 Playing all website tracks"); }
-  if(e.target.id==="avFile"){ const f=e.target.files[0]; if(!f) return; window._avatarFile=f; window._avatar=null; const p=$("avPrev"); if(p){ p.style.backgroundImage=`url('${URL.createObjectURL(f)}')`; p.textContent=""; } }
+  if(e.target.id==="avFile"){ const f=e.target.files[0]; if(!f) return; e.target.value=""; openPhotoCropper(f,(cropped,previewUrl)=>{ window._avatarFile=cropped; window._avatar=null; const p=$("avPrev"); if(p){ p.style.backgroundImage=`url('${previewUrl}')`; p.textContent=""; } }); }
   if(e.target.id==="covFile"){ const f=e.target.files[0]; if(!f) return; window._coverFile=f; window._trackCover=null; const p=$("covPrev"); if(p){ p.style.backgroundImage=`url('${URL.createObjectURL(f)}')`; p.style.backgroundSize="cover"; p.style.backgroundPosition="center"; p.style.background=""; p.textContent=""; } }
   if(e.target.id==="audioFile"){ const f=e.target.files[0]; if(!f) return; window._audioFile=f; const fn=$("audioFilename"); if(fn) fn.textContent="✓ "+f.name+" ("+Math.round(f.size/1024)+" KB)"; }
   if(e.target.id==="prodPhotoFile"){ const f=e.target.files[0]; if(!f) return; window._mpPhotoFile=f; window._mpPhoto=null; const p=$("prodPhotoPrev"); if(p){ p.style.backgroundImage=`url('${URL.createObjectURL(f)}')`; p.style.backgroundSize="cover"; p.style.backgroundPosition="center"; p.textContent=""; } }
