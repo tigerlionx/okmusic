@@ -369,7 +369,6 @@ html, body {
 .pitch-minus { color: #2a2a20; }
 
 .pitch-slider-v {
-  -webkit-appearance: slider-vertical;
   writing-mode: vertical-lr;
   direction: rtl;
   width: 22px;

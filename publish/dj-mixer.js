@@ -1,6 +1,6 @@
 'use strict';
 // ============================================================
-//  OK Music — DJ Mixer  (dj-mixer.js v8)
+//  OK Music — DJ Mixer  (dj-mixer.js v9)
 //  Embeds as floating in-page iframe panel OR standalone popup.
 //  Web Audio API for EQ/routing; HTML audio elements for playback.
 //  BroadcastChannel "ok-music-dj" for cross-window/frame track loading.
@@ -914,13 +914,17 @@ function updateHotCueButtons(d) {
 
 // ── Canvas Sizing ─────────────────────────────────────────
 function resizeCanvases() {
+  const dpr = window.devicePixelRatio || 1;
   ['A', 'B'].forEach(id => {
     const wc = $(`wave${id}`);
-    if (wc) wc.width = wc.offsetWidth || 380;
+    if (wc) {
+      wc.width  = (wc.offsetWidth  || 380) * dpr;
+      wc.height = (wc.offsetHeight ||  46) * dpr;
+    }
     const jc = $(`jog${id}`);
     if (jc) {
       const s = jc.offsetWidth || 220;
-      jc.width = s; jc.height = s;
+      jc.width = s * dpr; jc.height = s * dpr;
     }
   });
 }
@@ -932,7 +936,9 @@ function drawWaveform(d) {
   const canvas = $(`wave${d.id}`);
   if (!canvas) return;
   const ctx = canvas.getContext('2d');
-  const W = canvas.width, H = canvas.height;
+  const dpr = window.devicePixelRatio || 1;
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  const W = canvas.width / dpr, H = canvas.height / dpr;
   const isA = d.id === 'A';
 
   ctx.clearRect(0, 0, W, H);
@@ -1015,7 +1021,9 @@ function drawJog(d) {
   const canvas = $(`jog${d.id}`);
   if (!canvas) return;
   const ctx = canvas.getContext('2d');
-  const S = canvas.width, cx = S / 2, cy = S / 2;
+  const dpr = window.devicePixelRatio || 1;
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  const S = canvas.width / dpr, cx = S / 2, cy = S / 2;
   const RIM = S / 2 - 4;    // outer rim radius
   const PLATTER = RIM - 12; // spinning platter inner radius
   const accent = d.id === 'A' ? '#005aff' : '#ff5a00';
@@ -1481,10 +1489,6 @@ window.addEventListener('DOMContentLoaded', () => {
   // Crossfader
   const cf = $('crossfader');
   cf?.addEventListener('input', () => setCrossfader(parseFloat(cf.value)));
-
-  // Master gain slider
-  const mg = $('masterGainSlider');
-  mg?.addEventListener('input', () => { if (masterGainNode) masterGainNode.gain.value = parseFloat(mg.value); });
 
   // Master gain knob
   makeKnob('masterGainKnob', 0, 1.5, 1, v => { if (masterGainNode) masterGainNode.gain.value = v; });
