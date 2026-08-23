@@ -427,9 +427,13 @@ function renderPublicDiscover(){
             </div>
             <div class="lnc-float-wrap">
               <div class="lnc-coin">
-                <div class="lnc-face"><span class="lnc-logo">🦁</span></div>
-                <div class="lnc-edge-ring">${Array.from({length:36},(_,i)=>`<div class="lnc-edge" style="--i:${i}"></div>`).join('')}</div>
-                <div class="lnc-back"><span class="lnc-logo">🦁</span></div>
+                <svg class="lnc-arc-svg" viewBox="0 0 180 180" xmlns="http://www.w3.org/2000/svg">
+                  <path id="lncTop" d="M 12,90 A 78,78 0 0,1 168,90" fill="none"/>
+                  <text font-family="'Arial Black',Arial,sans-serif" font-size="10" font-weight="900" fill="#7C4400" letter-spacing="4" opacity="0.85">
+                    <textPath href="#lncTop" startOffset="7%">LIONCOIN · OK MUSIC ·</textPath>
+                  </text>
+                </svg>
+                <span class="lnc-logo">🦁</span>
               </div>
             </div>
             <div class="lnc-glow"></div>
@@ -733,6 +737,7 @@ function toggleNavMenu(){
     <div class="snav-acct-menu-item" data-action="nav" data-view="fans">🫂 My Fans</div>
     <div class="snav-acct-menu-item" data-action="nav" data-view="contests">🏆 Contests</div>
     <div class="snav-acct-menu-item" data-action="nav" data-view="buzzing">🔥 Buzzing</div>
+    <div class="snav-acct-menu-item" data-action="nav" data-view="trending">📈 Now Trending</div>
     <div class="snav-acct-menu-item" data-action="nav" data-view="notifs">🔔 Notifications</div>
     <div class="snav-acct-menu-divider"></div>
     <div class="snav-acct-menu-item" data-action="upload">⬆️ Upload track</div>
@@ -740,6 +745,8 @@ function toggleNavMenu(){
     <div class="snav-acct-menu-item" data-action="openmarketplace">🛍️ Marketplace</div>
     <div class="snav-acct-menu-item" data-action="invite">✉️ Invite friends</div>
     ${(()=>{const myOrders=(CACHE.orders||[]).filter(o=>o.buyerId===u.id);return myOrders.length?`<div class="snav-acct-menu-item" data-action="nav" data-view="myorders">📦 My Orders (${myOrders.length})</div>`:''})()}
+    <div class="snav-acct-menu-divider"></div>
+    <div class="snav-acct-menu-item" data-action="opendj">🎚 DJ Mixer</div>
     <div class="snav-acct-menu-divider"></div>
     <div class="snav-acct-menu-item" data-action="customize">🎨 Edit profile</div>
     <div class="snav-acct-menu-item" data-action="suggest">💡 Suggest a feature</div>
@@ -775,7 +782,7 @@ function renderApp(){
   const unNotifs=(CACHE.notifications||[]).filter(x=>!x.read).length;
   const isChat=state.view==='msgs'||state.view==='chat';
   const isMktActive=state.view==='marketplace'||state.view==='mystore'||state.view==='cart';
-  const isMore=['wallet','contests','mymusic','fans','myorders','admin','buzzing','notifs','trackdetail'].includes(state.view);
+  const isMore=['wallet','contests','mymusic','fans','myorders','admin','buzzing','notifs','trackdetail','trending'].includes(state.view);
   const nb=n=>n?`<span class="mobnav-badge">${n>9?'9+':n}</span>`:'';
   const navLnk=(view,label,extra='')=>{
     const active=state.view===view||(view==='msgs'&&isChat)||(view==='marketplace'&&isMktActive);
@@ -845,12 +852,14 @@ function openMobMenu(){
     {ic:'🎵',label:'My Music',fn:()=>go('mymusic')},
     {ic:'🫂',label:'My Fans',fn:()=>go('fans')},
     {ic:'🔥',label:'Buzzing',fn:()=>go('buzzing')},
+    {ic:'📈',label:'Now Trending',fn:()=>go('trending')},
     {ic:'🛍️',label:'Marketplace',fn:()=>{ closeMobMenu(); openMarketplace(); }},
     ...(myOrders.length?[{ic:'📦',label:`My Orders (${myOrders.length})`,fn:()=>go('myorders')}]:[]),
     ...(isAdmin()?[{ic:'📊',label:'Admin Stats',fn:()=>go('admin')}]:[]),
     {ic:'⬆️',label:'Add track',fn:()=>{ closeMobMenu(); openUpload(); }},
     {ic:'📁',label:'Add folder',fn:()=>{ closeMobMenu(); shareMusicFolder(); }},
     {ic:'🎨',label:'Edit profile',fn:()=>{ closeMobMenu(); openCustomize(); }},
+    {ic:'🎚',label:'DJ Mixer',fn:()=>{ closeMobMenu(); openDJMixer(); }},
     {ic:'💡',label:'Suggest a feature',fn:()=>{ closeMobMenu(); openSuggest(); }},
     {ic:'↩️',label:'Log out',fn:()=>{ closeMobMenu(); logout(); }},
   ];
@@ -906,6 +915,7 @@ function renderMain(){
   if(state.view==="mymusic") return renderMyMusic();
   if(state.view==="fans") return renderFans();
   if(state.view==="buzzing") return renderBuzzing();
+  if(state.view==="trending") return renderTrending();
   if(state.view==="notifs") return renderNotifs();
   if(state.view==="msgs") return renderMessages();
   if(state.view==="chat") return openChat(state.chatUid);
@@ -957,7 +967,9 @@ function renderDiscover(){
 
   // Trending: 8 most recent public tracks
   const trending=publicTracks.slice().sort((a,b)=>b.createdAt-a.createdAt).slice(0,8);
-  const featured=allTracks().find(t=>t.id==='t7')||trending[0];
+  // Pinned site generic — "01 Hazabe_groove_" (Firestore id, with hardcoded fallback so it shows before Firestore loads)
+  const _HAZABE={id:'f9ekUpA4Esc5uesVfe73',title:'01 Hazabe_groove_',genre:'Other',accent:'#5c8bff',userId:'ZfjePTqbTJd2fSVTiKJt3lKFi6o1',src:'https://res.cloudinary.com/llka5use/video/upload/v1783417855/acwib2vxvbvr9dkhvqgj.mp3',visibility:'public',coverImg:''};
+  const featured=allTracks().find(t=>t.id==='f9ekUpA4Esc5uesVfe73')||_HAZABE;
   const featuredArtist=featured?userById(featured.userId):null;
   const featuredArt=featured?(featured.coverImg?`background-image:url('${featured.coverImg}');background-size:cover;background-position:center`:`background:${grad(featured.accent)}`):'background:linear-gradient(135deg,#0072ff,#6a00f4)';
   const totalTracks=publicTracks.length; const totalUsers=allUsers().filter(u=>u).length;
@@ -1243,13 +1255,16 @@ function updateDiscAttachPreview(){
 function card(t){
   const u=userById(t.userId);
   const artStyle=t.coverImg?`background-image:url('${t.coverImg}');background-size:cover;background-position:center`:`background:${grad(t.accent)}`;
+  const aiBadge=t.aiPlatform&&t.aiPlatform!=='personal'?`<span style="font-size:9px;background:rgba(0,114,255,.13);color:var(--blue);border:1px solid rgba(0,114,255,.25);border-radius:3px;padding:1px 5px;white-space:nowrap" title="AI generated with ${esc(t.aiPlatform)}">🤖 ${esc(t.aiPlatform)}</span>`:'';
+  const reportBtn=ME&&ME.id!==t.userId?`<button data-action="reporttrack" data-id="${t.id}" title="Report as not AI music" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:11px;padding:0 2px;line-height:1" tabindex="-1">🚩</button>`:'';
   return `<div class="card">
     <div class="card-art" style="${artStyle}" data-action="play" data-id="${t.id}">${t.coverImg?'':'◎'}<button class="card-play" data-action="play" data-id="${t.id}">▶</button></div>
     <div class="card-body"><div class="card-title" data-action="play" data-id="${t.id}">${esc(t.title)}</div>
       <div class="card-artist" data-action="profile" data-uid="${u.id}">${esc(u.name)}</div>
+      ${aiBadge?`<div style="margin:3px 0 2px">${aiBadge}</div>`:''}
       <div class="card-meta"><button class="${hasLiked(t.id)?'on':''}" data-action="like" data-id="${t.id}">👍 ${nfmt(likeCount(t.id))}</button>
         <button class="${hasDisliked(t.id)?'on':''}" data-action="dislike" data-id="${t.id}">👎 ${nfmt(dislikeCount(t.id))}</button>
-        <span class="spacer"></span><span>▶ ${nfmt(playCount(t.id))}</span></div></div></div>`;
+        <span class="spacer"></span><span>▶ ${nfmt(playCount(t.id))}</span>${reportBtn}</div></div></div>`;
 }
 
 // ---------- home feed (status timeline) ----------
@@ -1326,6 +1341,7 @@ function renderTrackDetail(id){
           <button class="btn${hasLiked(t.id)?' on':''}" data-action="like" data-id="${t.id}">👍 ${nfmt(likeCount(t.id))}</button>
           <button class="btn${hasDisliked(t.id)?' ondown':''}" data-action="dislike" data-id="${t.id}">👎 ${nfmt(dislikeCount(t.id))}</button>
           <span style="font-size:.82rem;color:var(--muted)">▶ ${nfmt(playCount(t.id))} plays</span>
+          ${t.src&&!t.src.startsWith('local:')?`<button class="btn" data-action="loaddja" data-id="${t.id}" title="Load to DJ Deck A">🎚 Deck A</button><button class="btn" data-action="loaddjb" data-id="${t.id}" title="Load to DJ Deck B">🎚 Deck B</button>`:`<span style="font-size:.78rem;color:var(--muted)" title="Add a public audio link to use in DJ Mixer">🎚 No audio link</span>`}
         </div>
       </div>
     </div>
@@ -1579,9 +1595,29 @@ function doDeleteComment(cid){ fbDB.collection("comments").doc(cid).delete().the
 // ---------- track like/dislike (music = reactions only) ----------
 function toggleLike(id){ if(!ME) return openEmailAuth(); const F=firebase.firestore.FieldValue; const has=(CACHE.reactions["t_"+id]?.likes||[]).includes(ME.id);
   fbDB.collection("reactions").doc("t_"+id).set({ likes: has?F.arrayRemove(ME.id):F.arrayUnion(ME.id), dislikes:F.arrayRemove(ME.id) },{merge:true}).catch(e=>toast(e.code||e.message));
-  if(!has){ const t=allTracks().find(x=>x.id===id); if(t){ notify(t.userId,"like",`${ME.name} liked your track "${t.title}" 👍`); if(t.userId!==ME.id) WALLET.credit(t.userId,0.5,'reaction_received','Reaction on your track'); } } }
+  if(!has){ const t=allTracks().find(x=>x.id===id); if(t){ notify(t.userId,"like",`${ME.name} liked your track "${t.title}" 👍`); if(t.userId!==ME.id&&t.aiPlatform!=='personal') WALLET.credit(t.userId,0.5,'reaction_received','Reaction on your track'); } } }
 function toggleDislike(id){ if(!ME) return openEmailAuth(); const F=firebase.firestore.FieldValue; const has=(CACHE.reactions["t_"+id]?.dislikes||[]).includes(ME.id);
   fbDB.collection("reactions").doc("t_"+id).set({ dislikes: has?F.arrayRemove(ME.id):F.arrayUnion(ME.id), likes:F.arrayRemove(ME.id) },{merge:true}).catch(e=>toast(e.code||e.message)); }
+
+function openReportTrackModal(id){
+  if(!ME) return openEmailAuth();
+  const t=allTracks().find(x=>x.id===id); if(!t) return;
+  openOverlay(`<h2>🚩 Report Track</h2>
+    <p class="sub">If you believe <b>"${esc(t.title)}"</b> is not AI-generated and uses copyrighted material, please provide the original artist and title so we can review it.</p>
+    <div class="field"><label>Original Artist Name</label><input id="repArtist" placeholder="e.g. Drake" /></div>
+    <div class="field"><label>Original Track Title</label><input id="repTitle" placeholder="e.g. God's Plan" /></div>
+    <p style="font-size:12px;color:var(--muted);margin-top:4px">False reports may affect your account standing.</p>
+    <button class="btn primary block" data-action="submittrackreport" data-id="${id}">Submit Report</button>`);
+}
+function submitTrackReport(id){
+  if(!ME) return openEmailAuth();
+  const artist=($("repArtist")?.value||"").trim();
+  const title=($("repTitle")?.value||"").trim();
+  if(!artist||!title) return toast("Please provide both the original artist name and track title.");
+  fbDB.collection("aiReports").add({ trackId:id, reportedBy:ME.id, originalArtist:artist, originalTitle:title, createdAt:Date.now() })
+    .then(()=>{ closeOverlay(); toast("Report submitted — thank you for keeping OK Music authentic 🙏"); })
+    .catch(e=>toast(e.code||e.message));
+}
 
 // ---------- playlists from folders ----------
 function playlistBlock(p,owner){
@@ -1708,8 +1744,10 @@ async function playFolderTrack(plId,file){
 }
 
 // ---------- single track upload ----------
+const AI_PLATFORMS=['Suno','Udio','ElevenLabs Music','Stable Audio','Mubert','Boomy','Beatoven.ai','Loudly','AIVA','Soundraw','Songtell','Custom AI model / Other'];
 function openUpload(){
   if(!currentUser()) return openEmailAuth();
+  const platformOpts=AI_PLATFORMS.map(p=>`<option value="${p}">${p}</option>`).join('');
   openOverlay(`<h2>Add a single track</h2><p class="sub">Publish now or keep private until ready.</p>
     <div class="field"><label>Track title</label><input id="upTitle" placeholder="e.g. Midnight Bloom" /></div>
     <div class="field"><label>Cover photo (optional)</label>
@@ -1721,6 +1759,18 @@ function openUpload(){
       <div class="note" id="audioFilename" style="margin-top:4px"></div></div>
     <div class="field"><label>Or audio link</label><input id="upSrc" placeholder="https://…/song.mp3" /></div>
     <div class="field"><label>Genre</label><select id="upGenre" class="fb-field">${GENRES.map(g=>`<option value="${g}">${g}</option>`).join("")}</select></div>
+    <div class="field">
+      <label>AI Platform used <span style="font-size:11px;color:var(--muted);font-weight:400">— required to earn 🦁 LionCoins</span></label>
+      <select id="upAiPlatform" class="fb-field" onchange="document.getElementById('aiDeclWrap').style.display=this.value&&this.value!=='personal'?'block':'none'">
+        <option value="">— Select —</option>
+        ${platformOpts}
+        <option value="personal">My own original music (not AI)</option>
+      </select>
+      <div class="note" style="margin-top:5px">Tracks without an AI platform declaration are hosted but earn no LionCoins.</div>
+    </div>
+    <div id="aiDeclWrap" style="display:none;margin-bottom:12px">
+      <label class="check"><input type="checkbox" id="upAiDecl"> I confirm this is AI-generated music and does not include copyrighted recordings I don't own.</label>
+    </div>
     <div class="field"><label>Visibility</label><div class="radio-row" id="visRow"><div class="radio-card sel" data-action="vis" data-v="public"><b>Public</b>Everyone can play it</div><div class="radio-card" data-action="vis" data-v="private"><b>Private</b>Only you, until you publish</div></div></div>
     <label class="check"><input type="checkbox" id="upShare" checked> Allow fans to share this track</label>
     <button class="btn primary block" data-action="dopublish">Add to my music</button>`);
@@ -1764,11 +1814,18 @@ async function doPublish(){
     }
   }
   const isPublic=(window._upVis||"public")==="public";
-  fbDB.collection("tracks").add({ userId:ME.id, title, src, genre:($("upGenre")&&$("upGenre").value)||"Other", accent:window._upColor||COLORS[0], coverImg, visibility:window._upVis||"public", share:!!($("upShare")&&$("upShare").checked), createdAt:Date.now() })
+  const aiPlatform=($("upAiPlatform")&&$("upAiPlatform").value)||"";
+  if(aiPlatform&&aiPlatform!=="personal"){
+    const declChecked=$("upAiDecl")&&$("upAiDecl").checked;
+    if(!declChecked) return toast("Please confirm your AI music declaration to enable LionCoin earnings.");
+  }
+  const trackData={ userId:ME.id, title, src, genre:($("upGenre")&&$("upGenre").value)||"Other", accent:window._upColor||COLORS[0], coverImg, visibility:window._upVis||"public", share:!!($("upShare")&&$("upShare").checked), createdAt:Date.now() };
+  if(aiPlatform) trackData.aiPlatform=aiPlatform;
+  fbDB.collection("tracks").add(trackData)
     .then(()=>{
       closeOverlay(); window._trackCover=null; window._audioFile=null;
       toast(isPublic?"Published! 🎵":"Saved private 🔒"); go("mymusic");
-      WALLET.credit(ME.id,10,'track_upload','Track uploaded: '+title);
+      if(aiPlatform!=="personal") WALLET.credit(ME.id,10,'track_upload','Track uploaded: '+title);
       // Notify all fans + followers about the new public track
       if(isPublic){
         const fans=followersOf(ME.id).filter(uid=>!String(uid).startsWith("u_"));
@@ -2091,13 +2148,133 @@ function toggleFollow(uid){
 }
 function logout(){ fbAuth.signOut().then(()=>location.reload()); }
 
+// ---------- photo cropper ----------
+function openPhotoCropper(file, onConfirm){
+  const url=URL.createObjectURL(file);
+  const img=new Image();
+  img.onload=function(){
+    const S=Math.min(260, window.innerWidth-80);
+    const minScale=Math.max(S/img.naturalWidth, S/img.naturalHeight);
+    let scale=minScale, ox=img.naturalWidth/2, oy=img.naturalHeight/2;
+    let dragging=false, lastX=0, lastY=0, lastTouchDist=null;
+
+    // Replace overlay content with the cropper (preserving form data via JS state)
+    const ob=$("overlayBody");
+    const savedHtml=ob.innerHTML;
+    ob.innerHTML=`<div class="modal" style="position:relative;text-align:center">
+      <h2 style="margin-bottom:14px">Crop profile photo</h2>
+      <canvas id="cropCvs" width="${S}" height="${S}" class="av-crop-canvas" style="display:block;margin:0 auto"></canvas>
+      <div class="av-crop-hint" style="margin-top:10px">Drag to reposition · Scroll or slider to zoom</div>
+      <div class="av-crop-zoom-row" style="margin-top:10px"><span style="font-size:18px">🔍</span>
+        <input type="range" id="cropZoom" min="${minScale.toFixed(4)}" max="${(minScale*4).toFixed(4)}" step="0.0001" value="${minScale.toFixed(4)}" style="flex:1" />
+        <span style="font-size:18px">🔎</span></div>
+      <div class="av-crop-btns" style="margin-top:14px">
+        <button class="btn" id="cropCancel">Cancel</button>
+        <button class="btn primary" id="cropConfirm">Use this photo</button>
+      </div></div>`;
+
+    const canvas=document.getElementById("cropCvs");
+    const ctx=canvas.getContext("2d");
+
+    function clamp(){
+      const half=(S/2)/scale;
+      ox=Math.max(half, Math.min(img.naturalWidth-half, ox));
+      oy=Math.max(half, Math.min(img.naturalHeight-half, oy));
+    }
+    function draw(){
+      ctx.clearRect(0,0,S,S);
+      ctx.save();
+      ctx.beginPath(); ctx.arc(S/2,S/2,S/2,0,Math.PI*2); ctx.clip();
+      ctx.drawImage(img, S/2-ox*scale, S/2-oy*scale, img.naturalWidth*scale, img.naturalHeight*scale);
+      ctx.restore();
+      ctx.beginPath(); ctx.arc(S/2,S/2,S/2-1,0,Math.PI*2);
+      ctx.strokeStyle="rgba(255,255,255,.7)"; ctx.lineWidth=2; ctx.stroke();
+    }
+    clamp(); draw();
+
+    document.getElementById("cropZoom").oninput=function(){
+      scale=parseFloat(this.value); clamp(); draw();
+    };
+
+    function onMM(e){ if(!dragging) return; ox-=(e.clientX-lastX)/scale; oy-=(e.clientY-lastY)/scale; lastX=e.clientX; lastY=e.clientY; clamp(); draw(); }
+    function onMU(){ dragging=false; }
+    canvas.addEventListener("mousedown",e=>{ dragging=true; lastX=e.clientX; lastY=e.clientY; e.preventDefault(); });
+    document.addEventListener("mousemove",onMM);
+    document.addEventListener("mouseup",onMU);
+
+    canvas.addEventListener("wheel",e=>{ e.preventDefault(); const f=e.deltaY>0?0.92:1.08; scale=Math.max(minScale,Math.min(minScale*4,scale*f)); document.getElementById("cropZoom").value=scale; clamp(); draw(); },{passive:false});
+
+    canvas.addEventListener("touchstart",e=>{ e.preventDefault(); if(e.touches.length===1){dragging=true;lastX=e.touches[0].clientX;lastY=e.touches[0].clientY;lastTouchDist=null;} if(e.touches.length===2){dragging=false;const dx=e.touches[0].clientX-e.touches[1].clientX;const dy=e.touches[0].clientY-e.touches[1].clientY;lastTouchDist=Math.sqrt(dx*dx+dy*dy);} },{passive:false});
+    canvas.addEventListener("touchmove",e=>{ e.preventDefault(); if(e.touches.length===1&&dragging){ox-=(e.touches[0].clientX-lastX)/scale;oy-=(e.touches[0].clientY-lastY)/scale;lastX=e.touches[0].clientX;lastY=e.touches[0].clientY;clamp();draw();} if(e.touches.length===2&&lastTouchDist!=null){const dx=e.touches[0].clientX-e.touches[1].clientX;const dy=e.touches[0].clientY-e.touches[1].clientY;const d=Math.sqrt(dx*dx+dy*dy);scale=Math.max(minScale,Math.min(minScale*4,scale*(d/lastTouchDist)));lastTouchDist=d;document.getElementById("cropZoom").value=scale;clamp();draw();} },{passive:false});
+    canvas.addEventListener("touchend",()=>{ dragging=false; lastTouchDist=null; });
+
+    function cleanup(){
+      document.removeEventListener("mousemove",onMM);
+      document.removeEventListener("mouseup",onMU);
+      ob.innerHTML=savedHtml;
+    }
+    document.getElementById("cropCancel").onclick=function(){ cleanup(); URL.revokeObjectURL(url); };
+    document.getElementById("cropConfirm").onclick=function(){
+      const ec=document.createElement("canvas"); ec.width=S; ec.height=S;
+      const ectx=ec.getContext("2d");
+      ectx.drawImage(img, S/2-ox*scale, S/2-oy*scale, img.naturalWidth*scale, img.naturalHeight*scale);
+      ec.toBlob(blob=>{ if(!blob) return; const f2=new File([blob],"avatar.png",{type:"image/png"}); const pv=URL.createObjectURL(blob); cleanup(); URL.revokeObjectURL(url); onConfirm(f2,pv); },"image/png",0.93);
+    };
+  };
+  img.src=url;
+}
+
 // ---------- avatar lightbox ----------
 function viewAvatar(uid){
   const u=userById(uid); if(!u) return;
-  const body=u.avatarImg
-    ? `<img src="${u.avatarImg}" class="avatar-full" />`
-    : `<div class="avatar-full-initials" style="background:${u.color||'#FB7A28'}">${initials(u.name)}</div>`;
-  openOverlay(`<div class="avatar-lightbox">${body}<div class="avlb-name">${esc(u.name)}</div><div class="avlb-handle">@${esc(u.handle||'')}</div></div>`);
+  if(!u.avatarImg){
+    openOverlay(`<div class="avatar-lightbox"><div class="avatar-full-initials" style="background:${u.color||'#FB7A28'}">${initials(u.name)}</div><div class="avlb-name">${esc(u.name)}</div><div class="avlb-handle">@${esc(u.handle||'')}</div></div>`);
+    return;
+  }
+  openOverlay(`<div class="avatar-lightbox">
+    <div class="avlb-img-wrap" id="avlbWrap"><img src="${u.avatarImg}" class="avatar-full" id="avlbImg" draggable="false" /></div>
+    <div class="avlb-name">${esc(u.name)}</div>
+    <div class="avlb-handle">@${esc(u.handle||'')}</div>
+    <div class="avlb-zoom-row">
+      <button class="avlb-zoom-btn" id="avlbZoomOut" title="Zoom out">−</button>
+      <span class="avlb-zoom-val" id="avlbZoomVal">100%</span>
+      <button class="avlb-zoom-btn" id="avlbZoomIn" title="Zoom in">+</button>
+    </div></div>`);
+
+  let zoom=1, panX=0, panY=0;
+  const imgEl=document.getElementById("avlbImg");
+  const wrap=document.getElementById("avlbWrap");
+  const valEl=document.getElementById("avlbZoomVal");
+  const WRAP=280;
+
+  function applyZoom(){
+    const maxPan=WRAP*(zoom-1)/2;
+    panX=Math.max(-maxPan,Math.min(maxPan,panX));
+    panY=Math.max(-maxPan,Math.min(maxPan,panY));
+    imgEl.style.transform=`scale(${zoom}) translate(${panX/zoom}px,${panY/zoom}px)`;
+    valEl.textContent=Math.round(zoom*100)+"%";
+    wrap.classList.toggle("avlb-zoomed", zoom>1);
+    if(zoom<=1){ panX=0; panY=0; }
+  }
+  function changeZoom(d){ zoom=Math.max(1,Math.min(5,zoom+d)); applyZoom(); }
+
+  document.getElementById("avlbZoomIn").onclick=()=>changeZoom(0.25);
+  document.getElementById("avlbZoomOut").onclick=()=>changeZoom(-0.25);
+
+  wrap.addEventListener("wheel",e=>{ e.preventDefault(); changeZoom(e.deltaY>0?-0.15:0.15); },{passive:false});
+
+  wrap.addEventListener("mousedown",e=>{
+    if(zoom<=1) return; e.preventDefault();
+    let startX=e.clientX, startY=e.clientY, ox=panX, oy=panY;
+    function mm(e2){ panX=ox+(e2.clientX-startX); panY=oy+(e2.clientY-startY); applyZoom(); }
+    function mu(){ document.removeEventListener("mousemove",mm); document.removeEventListener("mouseup",mu); }
+    document.addEventListener("mousemove",mm); document.addEventListener("mouseup",mu);
+  });
+
+  let lbDist=null;
+  wrap.addEventListener("touchstart",e=>{ if(e.touches.length===2){const dx=e.touches[0].clientX-e.touches[1].clientX;const dy=e.touches[0].clientY-e.touches[1].clientY;lbDist=Math.sqrt(dx*dx+dy*dy);} },{passive:true});
+  wrap.addEventListener("touchmove",e=>{ if(e.touches.length===2&&lbDist!=null){e.preventDefault();const dx=e.touches[0].clientX-e.touches[1].clientX;const dy=e.touches[0].clientY-e.touches[1].clientY;const d=Math.sqrt(dx*dx+dy*dy);changeZoom((d-lbDist)*0.005);lbDist=d;} },{passive:false});
+  wrap.addEventListener("touchend",()=>{ lbDist=null; });
 }
 
 // ---------- overlay ----------
@@ -2108,7 +2285,10 @@ function closeOverlay(){ $("overlay").hidden=true; $("overlayBody").innerHTML=""
 let hasSrc=false;
 function showPlayer(title,artist,accent,src){ $("miniplayer").classList.add("show"); $("mpArt").style.background=grad(accent); $("mpArt").textContent="◎"; $("mpTitle").textContent=title; $("mpArtist").textContent=artist;
   if(src){ hasSrc=true; audio.src=src; audio.play().then(()=>setPlaying(true)).catch(()=>setPlaying(false)); } else { hasSrc=false; setPlaying(true); } }
-async function playTrack(id){ const t=allTracks().find(x=>x.id===id); if(!t) return; const u=userById(t.userId); const d=db(); d.plays[id]=(d.plays[id]||0)+1; commit(d); logTrackView(id,t.userId);
+async function playTrack(id){ const t=allTracks().find(x=>x.id===id); if(!t) return; const u=userById(t.userId); const d=db(); d.plays[id]=(d.plays[id]||0)+1; commit(d); logTrackView(id,t.userId,t.aiPlatform);
+  // Persist play count to Firestore (anti-abuse: 5 min cooldown per track per session)
+  const _abKey="okm_played_"+id; const _lastPlay=parseInt(sessionStorage.getItem(_abKey)||"0");
+  if(Date.now()-_lastPlay>300000){ sessionStorage.setItem(_abKey,String(Date.now())); fbDB.collection("stats").doc(id).set({plays:firebase.firestore.FieldValue.increment(1)},{merge:true}).catch(()=>{}); }
   nowPlayingId=id;
   // Lock queue to the viewed profile or My Music — prevents bleed across users
   if(state.view==="profile"&&state.profileId) nowPlayingContext={uid:state.profileId};
@@ -2143,6 +2323,8 @@ audio.addEventListener("ended",()=>{
 });
 audio.addEventListener("timeupdate",()=>{ if(!audio.duration)return; $("mpFill").style.width=(audio.currentTime/audio.duration*100)+"%"; const s=Math.floor(audio.currentTime); $("mpTime").textContent=`${Math.floor(s/60)}:${String(s%60).padStart(2,"0")}`; });
 $("mpProg").addEventListener("click",e=>{ if(!audio.duration)return; const r=e.currentTarget.getBoundingClientRect(); audio.currentTime=(e.clientX-r.left)/r.width*audio.duration; });
+
+// ============ DJ MIXER — moved to community-dj.js ============
 
 // ============ ADMIN STATS ============
 function renderAdmin(){
@@ -2558,6 +2740,42 @@ function renderBuzzing(){
         <div class="minfo"><div class="mt" data-action="play" data-id="${t.id}">${esc(t.title)}</div>
           <div class="ms" data-action="profile" data-uid="${u.id}">${esc(u.name)} · ▶ ${nfmt(playCount(t.id))} · 👍 ${nfmt(likeCount(t.id))}</div></div>
         <button class="btn sm primary" data-action="play" data-id="${t.id}">▶</button></div>`; }).join("")}`;
+}
+
+// ---------- now trending (Firestore play counts, top 50) ----------
+async function renderTrending(){
+  $("page").innerHTML=`<div class="h-title">🔥 Now Trending</div><p class="note" style="margin-bottom:14px">Top 50 most-played tracks across the whole community, updated in real time.</p><div class="trending-list" id="trendingList"><div class="empty">Loading…</div></div>`;
+  try{
+    const snap=await fbDB.collection("stats").orderBy("plays","desc").limit(50).get();
+    const rows=[];
+    snap.docs.forEach(doc=>{
+      const t=allTracks().find(x=>x.id===doc.id);
+      if(!t||t.visibility!=="public")return;
+      rows.push({t,plays:doc.data().plays||0});
+    });
+    const el=document.getElementById("trendingList");
+    if(!el)return;
+    if(!rows.length){el.innerHTML='<div class="empty">No trending data yet — plays are tracked as people listen.</div>';return;}
+    el.innerHTML=rows.map((x,i)=>{
+      const t=x.t, u=userById(t.userId)||{name:'?',id:t.userId};
+      const medal=i===0?'🥇':i===1?'🥈':i===2?'🥉':null;
+      const rank=medal||`#${i+1}`;
+      const art=t.coverImg?`background-image:url('${t.coverImg}');background-size:cover;background-position:center;color:transparent`:`background:${grad(t.accent)}`;
+      return`<div class="trending-row" data-action="play" data-id="${t.id}">
+        <div class="trending-rank">${rank}</div>
+        <div class="trending-art" style="${art}">${t.coverImg?'':'◎'}</div>
+        <div class="trending-info">
+          <div class="trending-title">${esc(t.title)}</div>
+          <div class="trending-meta" data-action="profile" data-uid="${u.id}">${esc(u.name||'?')}</div>
+        </div>
+        <div class="trending-plays">▶ ${nfmt(x.plays)}</div>
+        <button class="btn sm primary" data-action="play" data-id="${t.id}" style="flex-shrink:0">▶</button>
+      </div>`;
+    }).join("");
+  }catch(e){
+    const el=document.getElementById("trendingList");
+    if(el)el.innerHTML='<div class="empty">Could not load trending data — try again shortly.</div>';
+  }
 }
 
 // ---------- suggestion box (collect ideas to improve the network) ----------
