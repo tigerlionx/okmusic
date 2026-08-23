@@ -1,6 +1,6 @@
 'use strict';
 // ============================================================
-//  OK Music — DJ Mixer  (dj-mixer.js v9)
+//  OK Music — DJ Mixer  (dj-mixer.js v10)
 //  Embeds as floating in-page iframe panel OR standalone popup.
 //  Web Audio API for EQ/routing; HTML audio elements for playback.
 //  BroadcastChannel "ok-music-dj" for cross-window/frame track loading.
@@ -927,6 +927,9 @@ function resizeCanvases() {
       jc.width = s * dpr; jc.height = s * dpr;
     }
   });
+  // Redraw immediately — assigning width/height clears the canvas buffer.
+  // Without this, canvases stay blank until the animation loop starts.
+  [DA, DB].forEach(d => { drawJog(d); drawWaveform(d); });
 }
 // legacy alias
 const resizeWaveformCanvases = resizeCanvases;
@@ -1140,10 +1143,10 @@ function drawJog(d) {
     ctx.shadowColor = isPlaying ? accentGlow : '#ffffffaa';
     ctx.shadowBlur = 6;
   }
-  ctx.fillStyle = isPlaying ? '#cc8800' : (isScratch ? '#ffaa00' : '#3a3a50');
+  ctx.fillStyle = isPlaying ? '#cc8800' : (isScratch ? '#ffaa00' : '#9090b8');
   ctx.font = `700 8px 'Consolas',monospace`;
   ctx.fillText('OK-MUSIC', cx, cy - 7);
-  ctx.fillStyle = isPlaying ? accent : (isScratch ? '#ffffff' : '#44445e');
+  ctx.fillStyle = isPlaying ? accent : (isScratch ? '#ffffff' : '#c8c8e8');
   ctx.font = `900 13px 'Consolas',monospace`;
   ctx.fillText(d.id, cx, cy + 8);
   ctx.shadowBlur = 0;

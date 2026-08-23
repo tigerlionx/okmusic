@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <title>OK Music — DJ Mixer</title>
-  <link rel="stylesheet" href="dj-mixer.css?v=11">
+  <link rel="stylesheet" href="dj-mixer.css?v=12">
 </head>
 <body>
 
@@ -179,13 +179,6 @@
         </div>
       </div>
 
-      <!-- Crossfader -->
-      <div class="xf-zone">
-        <span class="xf-ab-label">A</span>
-        <input type="range" id="crossfader" class="crossfader" min="0" max="1" step="0.005" value="0.5">
-        <span class="xf-ab-label">B</span>
-      </div>
-
     </div><!-- /mixer-center -->
 
     <!-- ═══════════════ DECK B ═══════════════ -->
@@ -289,6 +282,15 @@
 
   </div><!-- .mx-body -->
 
+  <!-- ══ Full-width Crossfader ══════════════════════════════ -->
+  <div class="xf-bar">
+    <span class="xf-ab-label xf-a">A</span>
+    <div class="xf-track-wrap">
+      <input type="range" id="crossfader" class="crossfader" min="0" max="1" step="0.005" value="0.5">
+    </div>
+    <span class="xf-ab-label xf-b">B</span>
+  </div>
+
   <!-- ══ Samples Panel ══════════════════════════════════════ -->
   <div id="samples-panel" class="samples-panel" hidden>
     <div class="smp-hdr">
@@ -302,6 +304,6 @@
 </div><!-- #mixer-app -->
 
 <script src="https://cdn.jsdelivr.net/npm/lamejs@1.2.1/lame.min.js"></script>
-<script src="dj-mixer.js?v=9"></script>
+<script src="dj-mixer.js?v=10"></script>
 </body>
 </html>
